@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import dbConnect from "@/lib/mongodb";
 import WishlistItem from "@/models/WishlistItem";
 import Product from "@/models/Product";
+import { getAuth } from "@/lib/firebase-admin";
 
 // GET - Fetch user's wishlist
 export async function GET(request) {
@@ -12,13 +13,6 @@ export async function GET(request) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
         const idToken = authHeader.split('Bearer ')[1];
-        // Import admin SDK dynamically to avoid SSR issues
-        const { getAuth } = await import('firebase-admin/auth');
-        const { initializeApp, cert, getApps } = await import('firebase-admin/app');
-        if (getApps().length === 0) {
-            const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY || '{}');
-            initializeApp({ credential: cert(serviceAccount) });
-        }
         let decodedToken;
         try {
             decodedToken = await getAuth().verifyIdToken(idToken);
@@ -67,12 +61,6 @@ export async function POST(request) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
         const idToken = authHeader.split('Bearer ')[1];
-        const { getAuth } = await import('firebase-admin/auth');
-        const { initializeApp, cert, getApps } = await import('firebase-admin/app');
-        if (getApps().length === 0) {
-            const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY || '{}');
-            initializeApp({ credential: cert(serviceAccount) });
-        }
         let decodedToken;
         try {
             decodedToken = await getAuth().verifyIdToken(idToken);

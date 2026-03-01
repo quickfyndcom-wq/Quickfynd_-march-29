@@ -2,23 +2,12 @@ import connectDB from '@/lib/mongodb';
 import GuestUser from '@/models/GuestUser';
 import Order from '@/models/Order';
 import { NextResponse } from "next/server";
-import admin from 'firebase-admin';
+import { getAuth } from '@/lib/firebase-admin';
 
 // Link guest orders to newly created user account
 export async function POST(request) {
     try {
         await connectDB();
-
-        // Initialize Firebase Admin if not already initialized
-        if (!admin.apps.length) {
-            admin.initializeApp({
-                credential: admin.credential.cert({
-                    projectId: process.env.FIREBASE_PROJECT_ID,
-                    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-                    privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-                })
-            });
-        }
 
         const authHeader = request.headers.get('authorization');
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -27,7 +16,7 @@ export async function POST(request) {
         const idToken = authHeader.split('Bearer ')[1];
         let decodedToken;
         try {
-            decodedToken = await admin.auth().verifyIdToken(idToken);
+            decodedToken = await getAuth().verifyIdToken(idToken);
         } catch (err) {
             return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
         }

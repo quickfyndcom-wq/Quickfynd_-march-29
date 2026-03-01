@@ -13,7 +13,7 @@ export async function GET(request) {
         })
     } catch (error) {
         console.error('Error fetching carousel products:', error)
-        return NextResponse.json({ error: error.message }, { status: 400 })
+        return NextResponse.json({ error: error.message }, { status: 500 })
     }
 }
 
@@ -52,6 +52,6 @@ export async function POST(request) {
         });
     } catch (error) {
         console.error('[CarouselProducts API] Error saving carousel products:', error);
-        return NextResponse.json({ error: error.message, details: error }, { status: 400 });
+        return NextResponse.json({ error: error.message, details: error }, { status: 500 });
     }
 }

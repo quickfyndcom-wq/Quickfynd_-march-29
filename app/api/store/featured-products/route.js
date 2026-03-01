@@ -36,7 +36,7 @@ export async function GET(request) {
         })
     } catch (error) {
         console.error('Error fetching featured products:', error)
-        return NextResponse.json({ error: error.message }, { status: 400 })
+        return NextResponse.json({ error: error.message }, { status: 500 })
     }
 }
 
@@ -98,6 +98,6 @@ export async function POST(request) {
         })
     } catch (error) {
         console.error('Error saving featured products:', error)
-        return NextResponse.json({ error: error.message }, { status: 400 })
+        return NextResponse.json({ error: error.message }, { status: 500 })
     }
 }

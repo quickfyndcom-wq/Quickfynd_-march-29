@@ -6,9 +6,12 @@ import { getAuth } from "@/lib/firebase-admin";
 export async function POST(request) {
   try {
     const authHeader = request.headers.get("authorization");
-    const data = await request.json();
-
-    await connectDB();
+    let data = {};
+    try {
+      data = await request.json();
+    } catch {
+      data = {};
+    }
 
     let userId = null;
 
@@ -96,6 +99,7 @@ export async function POST(request) {
 
     // If user is authenticated, save to their profile
     if (userId) {
+      await connectDB();
       let user = await User.findById(userId);
 
       if (!user) {
@@ -149,8 +153,8 @@ export async function POST(request) {
   } catch (error) {
     console.error("Location tracking error:", error);
     return NextResponse.json(
-      { error: error.message },
-      { status: 400 }
+      { success: false, error: error.message },
+      { status: 200 }
     );
   }
 }
