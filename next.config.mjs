@@ -1,43 +1,13 @@
 /** @type {import('next').NextConfig} */
-const imageHosts = [
-    'ik.imagekit.io',
-    'placehold.co',
-    'rukminim2.flixcart.com',
-    'lh3.googleusercontent.com',
-];
-
-try {
-    if (process.env.IMAGEKIT_URL_ENDPOINT) {
-        const endpointHost = new URL(process.env.IMAGEKIT_URL_ENDPOINT).hostname;
-        if (endpointHost && !imageHosts.includes(endpointHost)) imageHosts.push(endpointHost);
-    }
-    if (process.env.NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT) {
-        const endpointHost = new URL(process.env.NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT).hostname;
-        if (endpointHost && !imageHosts.includes(endpointHost)) imageHosts.push(endpointHost);
-    }
-} catch {}
-
-const imageRemotePatterns = imageHosts.flatMap((host) => ([
-    {
-        protocol: 'https',
-        hostname: host,
-        pathname: '/**',
-    },
-    {
-        protocol: 'http',
-        hostname: host,
-        pathname: '/**',
-    },
-]));
-
 const nextConfig = {
     images: {
-        unoptimized: false,
-        remotePatterns: imageRemotePatterns,
-        formats: ['image/avif', 'image/webp'],
-        deviceSizes: [320, 420, 640, 768, 1024, 1280, 1536, 1920],
-        imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
-        qualities: [75, 85, 90, 100]
+        remotePatterns: [
+            {
+                protocol: 'https',
+                hostname: 'ik.imagekit.io',
+                pathname: '/jrstupuke/**',
+            },
+        ],
     },
     // Enable response compression (gzip/brotli) to reduce payload size by 70%
     compress: true,
