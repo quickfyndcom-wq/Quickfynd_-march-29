@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 
 const HEIGHT = 320;
 const SLIDE_INTERVAL = 5000;
-const SKELETON_TIMEOUT = 1000; // Reduced timeout for faster initial display 
 
 const defaultSlides = [];
 
@@ -14,7 +13,6 @@ export default function HeroBannerSlider() {
   const [slides, setSlides] = useState(defaultSlides);
   const [index, setIndex] = useState(0);
   const [loaded, setLoaded] = useState(() => Array(defaultSlides.length).fill(false));
-  const [isInitialLoad, setIsInitialLoad] = useState(true);
   const router = useRouter();
   const intervalRef = useRef(null);
 
@@ -79,21 +77,10 @@ export default function HeroBannerSlider() {
       setIndex((i) => (i + 1) % slides.length);
     }, SLIDE_INTERVAL);
 
-    const skeletonTimer = setTimeout(() => {
-      setIsInitialLoad(false);
-    }, SKELETON_TIMEOUT);
-
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
-      clearTimeout(skeletonTimer);
     };
   }, [slides.length]);
-
-  useEffect(() => {
-    if (loaded[0] || slides.length === 0) {
-      setIsInitialLoad(false);
-    }
-  }, [loaded, slides.length]);
 
   const renderSkeleton = () => (
     <>
@@ -117,14 +104,7 @@ export default function HeroBannerSlider() {
           width: 100%;
           max-width: 1250px;
           height: 100%;
-          background: linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 50%, #f3f4f6 75%);
-          background-size: 200% 100%;
-          animation: shimmer 1.5s ease-in-out infinite;
-        }
-        
-        @keyframes shimmer {
-          0% { background-position: 200% 0; }
-          100% { background-position: -200% 0; }
+          background: #f3f4f6;
         }
         
         @media (max-width: 640px) {
@@ -147,11 +127,7 @@ export default function HeroBannerSlider() {
     </>
   );
 
-  if (isInitialLoad && !loaded[0]) {
-    return renderSkeleton();
-  }
-
-  if (!isInitialLoad && slides.length === 0) {
+  if (slides.length === 0) {
     return renderSkeleton();
   }
 
@@ -224,7 +200,7 @@ export default function HeroBannerSlider() {
           justify-content: center;
           align-items: center;
           margin-left: calc(-50vw + 50%);
-          transition: background 0.7s ease-in-out;
+          transition: none;
         }
 
         .hero-banner__viewport {
