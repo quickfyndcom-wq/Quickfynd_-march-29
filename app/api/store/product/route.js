@@ -9,6 +9,23 @@ import { getAuth } from '@/lib/firebase-admin';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
+const resolveImageUrl = (image) => {
+    if (typeof image === 'string' && image.trim()) return image;
+    if (image && typeof image === 'object') {
+        const directUrl = image.url || image.src || image.thumbnailUrl;
+        if (typeof directUrl === 'string' && directUrl.trim()) return directUrl;
+
+        const imagePath = image.filePath || image.path;
+        const endpoint = process.env.IMAGEKIT_URL_ENDPOINT || process.env.NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT;
+        if (typeof imagePath === 'string' && imagePath.trim() && endpoint) {
+            const safeEndpoint = endpoint.replace(/\/+$/, '');
+            const safePath = imagePath.startsWith('/') ? imagePath : `/${imagePath}`;
+            return `${safeEndpoint}${safePath}`;
+        }
+    }
+    return '';
+};
+
 // Helper: Upload images to ImageKit
 const uploadImages = async (images) => {
     return Promise.all(
@@ -266,7 +283,18 @@ export async function GET(request) {
         await connectDB();
 
         // ADMIN/GLOBAL: Return all products, no auth required
-        const products = await Product.find({}).sort({ createdAt: -1 }).lean();
+        const rawProducts = await Product.find({}).sort({ createdAt: -1 }).lean();
+        const products = rawProducts.map((product) => {
+            const normalizedImages = Array.isArray(product.images)
+                ? product.images.map(resolveImageUrl).filter(Boolean)
+                : [];
+
+            return {
+                ...product,
+                images: normalizedImages,
+                image: normalizedImages[0] || null,
+            };
+        });
         return NextResponse.json(
             { products },
             {
@@ -322,7 +350,7 @@ export async function PUT(request) {
 
             let imagesUrl = product.images;
             if (Array.isArray(images)) {
-                imagesUrl = images.filter(Boolean);
+                imagesUrl = images.map(resolveImageUrl).filter(Boolean);
             }
 
             const updated = await Product.findByIdAndUpdate(

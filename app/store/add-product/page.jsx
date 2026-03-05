@@ -126,6 +126,23 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
         return fallback;
     };
 
+    const resolveImageUrl = (image) => {
+        if (typeof image === 'string' && image.trim()) return image;
+        if (image && typeof image === 'object') {
+            const directUrl = image.url || image.src || image.thumbnailUrl;
+            if (typeof directUrl === 'string' && directUrl.trim()) return directUrl;
+
+            const imagePath = image.filePath || image.path;
+            const endpoint = process.env.NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT;
+            if (typeof imagePath === 'string' && imagePath.trim() && endpoint) {
+                const safeEndpoint = endpoint.replace(/\/+$/, '');
+                const safePath = imagePath.startsWith('/') ? imagePath : `/${imagePath}`;
+                return `${safeEndpoint}${safePath}`;
+            }
+        }
+        return '';
+    };
+
     // Fetch categories from database
     useEffect(() => {
         const fetchCategories = async () => {
@@ -305,7 +322,10 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
             const imgState = { "1": null, "2": null, "3": null, "4": null, "5": null, "6": null, "7": null, "8": null }
             if (product.images && Array.isArray(product.images)) {
                 product.images.forEach((img, i) => {
-                    if (i < 8) imgState[String(i + 1)] = img // Keep as string URL
+                    if (i < 8) {
+                        const imageUrl = resolveImageUrl(img)
+                        imgState[String(i + 1)] = imageUrl || null
+                    }
                 })
             }
             setImages(imgState)
@@ -354,9 +374,13 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
 
             // If editing an existing product, persist the change
             if (product && product._id) {
-                // Collect all non-null images (string URLs only)
+                // Collect all non-null images (normalize object/string)
                 const newImages = Object.values(updated)
-                    .filter(img => typeof img === 'string' && img)
+                    .map((img) => {
+                        if (img?.file) return null;
+                        return resolveImageUrl(img);
+                    })
+                    .filter(Boolean)
                 ;
                 (async () => {
                     try {
@@ -474,8 +498,11 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                     // If it's a string (existing image URL), append as 'images' too
                     if (img.file) {
                         formData.append('images', img.file)
-                    } else if (typeof img === 'string') {
-                        formData.append('images', img)
+                    } else {
+                        const imageUrl = resolveImageUrl(img)
+                        if (imageUrl) {
+                            formData.append('images', imageUrl)
+                        }
                     }
                 }
             })
@@ -919,7 +946,8 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                         {Object.keys(images).map((key) => {
                             const img = images[key]
-                            const hasImage = img && (img.preview || typeof img === 'string')
+                            const imageSrc = img?.preview || resolveImageUrl(img)
+                            const hasImage = Boolean(imageSrc)
                             return (
                                 <div key={key} className="relative border rounded flex items-center justify-center h-32 cursor-pointer bg-gray-50 hover:bg-gray-100 overflow-hidden group">
                                     <label className="absolute inset-0 w-full h-full cursor-pointer">
@@ -927,9 +955,10 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                                         {hasImage ? (
                                             <>
                                                 <Image 
-                                                    src={img.preview || img} 
+                                                    src={imageSrc}
                                                     alt={`Product ${key}`}
                                                     fill
+                                                    unoptimized
                                                     className="object-cover"
                                                 />
                                                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">

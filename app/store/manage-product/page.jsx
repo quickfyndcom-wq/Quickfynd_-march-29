@@ -33,7 +33,18 @@ export default function StoreManageProducts() {
 
     const getImageSrc = (image) => {
         if (typeof image === 'string' && image.trim()) return image
-        if (image && typeof image === 'object') return image.url || image.src || 'https://ik.imagekit.io/jrstupuke/placeholder.png'
+        if (image && typeof image === 'object') {
+            const directUrl = image.url || image.src || image.thumbnailUrl
+            if (typeof directUrl === 'string' && directUrl.trim()) return directUrl
+
+            const imagePath = image.filePath || image.path
+            const endpoint = process.env.NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT
+            if (typeof imagePath === 'string' && imagePath.trim() && endpoint) {
+                const safeEndpoint = endpoint.replace(/\/+$/, '')
+                const safePath = imagePath.startsWith('/') ? imagePath : `/${imagePath}`
+                return `${safeEndpoint}${safePath}`
+            }
+        }
         return 'https://ik.imagekit.io/jrstupuke/placeholder.png'
     }
 
