@@ -2,6 +2,15 @@ import { NextResponse } from 'next/server';
 import dbConnect from '@/lib/mongodb';
 import Product from '@/models/Product';
 
+const resolveImageUrl = (image) => {
+  if (typeof image === 'string' && image.trim()) return image;
+  if (image && typeof image === 'object') {
+    const resolved = image.url || image.src;
+    if (typeof resolved === 'string' && resolved.trim()) return resolved;
+  }
+  return 'https://ik.imagekit.io/jrstupuke/placeholder.png';
+};
+
 export async function POST(request) {
   try {
     const formData = await request.formData();
@@ -130,7 +139,7 @@ export async function POST(request) {
         _id: p._id,
         slug: p.slug,
         name: p.name,
-        image: p.images?.[0] || '',
+        image: resolveImageUrl(p.images?.[0]),
         price: p.price,
         mrp: p.mrp,
         category: p.category
@@ -139,7 +148,7 @@ export async function POST(request) {
         _id: p._id,
         slug: p.slug,
         name: p.name,
-        image: p.images?.[0] || '',
+        image: resolveImageUrl(p.images?.[0]),
         price: p.price,
         mrp: p.mrp,
         category: p.category

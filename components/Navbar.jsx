@@ -44,6 +44,16 @@ const Navbar = () => {
     return fallback;
   };
 
+  const getProductImageSrc = (product) => {
+    const candidate = product?.image || product?.images?.[0];
+    if (typeof candidate === 'string' && candidate.trim()) return candidate;
+    if (candidate && typeof candidate === 'object') {
+      const resolved = candidate.url || candidate.src;
+      if (typeof resolved === 'string' && resolved.trim()) return resolved;
+    }
+    return 'https://ik.imagekit.io/jrstupuke/placeholder.png';
+  };
+
   // Helper function for image search
   const handleImageSearch = async (file) => {
     if (imageSearchLoading) return;
@@ -687,16 +697,14 @@ const Navbar = () => {
                       onClick={() => setSearchFocused(false)}
                     >
                       <div className="relative h-8 w-8 overflow-hidden rounded-md bg-gray-100">
-                        {product.image || product.images?.[0] ? (
-                          <Image
-                            src={product.image || product.images?.[0]}
-                            alt={product.name || 'Product'}
-                            fill
-                            unoptimized
-                            sizes="32px"
-                            className="object-cover"
-                          />
-                        ) : null}
+                        <Image
+                          src={getProductImageSrc(product)}
+                          alt={product.name || 'Product'}
+                          fill
+                          unoptimized
+                          sizes="32px"
+                          className="object-cover"
+                        />
                       </div>
                       <div className="min-w-0">
                         <span className="font-medium block truncate">{product.name}</span>
@@ -868,15 +876,14 @@ const Navbar = () => {
                       onClick={() => setSearchFocused(false)}
                     >
                       <div className="relative h-8 w-8 overflow-hidden rounded-md bg-gray-100 flex-shrink-0">
-                        {product.image || product.images?.[0] ? (
-                          <Image
-                            src={product.image || product.images?.[0]}
-                            alt={product.name || 'Product'}
-                            fill
-                            sizes="32px"
-                            className="object-cover"
-                          />
-                        ) : null}
+                        <Image
+                          src={getProductImageSrc(product)}
+                          alt={product.name || 'Product'}
+                          fill
+                          unoptimized
+                          sizes="32px"
+                          className="object-cover"
+                        />
                       </div>
                       <div className="min-w-0 flex-1">
                         <span className="font-medium block truncate">{product.name}</span>
@@ -969,9 +976,9 @@ const Navbar = () => {
                         className="group cursor-pointer"
                       >
                         <div className="bg-gray-100 rounded-lg overflow-hidden mb-2 h-48 relative group-hover:shadow-lg transition">
-                          {product.image ? (
+                          {getProductImageSrc(product) ? (
                             <Image
-                              src={product.image}
+                              src={getProductImageSrc(product)}
                               alt={product.name}
                               fill
                               unoptimized
