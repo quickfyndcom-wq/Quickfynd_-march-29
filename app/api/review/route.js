@@ -4,12 +4,43 @@ import Rating from '@/models/Rating';
 import Order from '@/models/Order';
 import User from '@/models/User';
 
-const resolveImageUrl = (image) => {
-    if (typeof image === 'string' && image.trim()) return image;
-    if (image && typeof image === 'object') {
-        const resolved = image.url || image.src;
-        if (typeof resolved === 'string' && resolved.trim()) return resolved;
+const IMAGEKIT_ENDPOINT = (process.env.IMAGEKIT_URL_ENDPOINT || process.env.NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT || 'https://ik.imagekit.io/jrstupuke').replace(/\/+$/, '');
+
+const normalizeImageUrl = (value) => {
+    if (typeof value !== 'string') return '';
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+
+    if (trimmed.startsWith('//')) return `https:${trimmed}`;
+    if (trimmed.startsWith('http://')) return `https://${trimmed.slice(7)}`;
+    if (trimmed.startsWith('https://')) return trimmed;
+
+    if (trimmed.startsWith('/')) {
+        return `${IMAGEKIT_ENDPOINT}${trimmed}`;
     }
+
+    if (/^[a-zA-Z0-9._/-]+$/.test(trimmed) && (trimmed.includes('reviews/') || trimmed.includes('products/') || trimmed.includes('profile-images/'))) {
+        const safePath = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+        return `${IMAGEKIT_ENDPOINT}${safePath}`;
+    }
+
+    return trimmed;
+};
+
+const resolveImageUrl = (image) => {
+    if (typeof image === 'string') {
+        const normalized = normalizeImageUrl(image);
+        if (normalized) return normalized;
+    }
+
+    if (image && typeof image === 'object') {
+        const candidates = [image.url, image.src, image.thumbnailUrl, image.filePath, image.path];
+        for (const candidate of candidates) {
+            const normalized = normalizeImageUrl(candidate);
+            if (normalized) return normalized;
+        }
+    }
+
     return 'https://ik.imagekit.io/jrstupuke/placeholder.png';
 };
 

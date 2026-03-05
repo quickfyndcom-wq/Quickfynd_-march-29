@@ -38,11 +38,39 @@ const ProductDescription = ({ product, reviews = [], loadingReviews = false, onR
     const [visibleReviews, setVisibleReviews] = useState(5)
 
     const resolveImageUrl = (image) => {
-        if (typeof image === 'string' && image.trim()) return image
-        if (image && typeof image === 'object') {
-            const resolved = image.url || image.src
-            if (typeof resolved === 'string' && resolved.trim()) return resolved
+        const endpoint = (process.env.NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT || 'https://ik.imagekit.io/jrstupuke').replace(/\/+$/, '')
+
+        const normalize = (value) => {
+            if (typeof value !== 'string') return ''
+            const trimmed = value.trim()
+            if (!trimmed) return ''
+
+            if (trimmed.startsWith('//')) return `https:${trimmed}`
+            if (trimmed.startsWith('http://')) return `https://${trimmed.slice(7)}`
+            if (trimmed.startsWith('https://')) return trimmed
+            if (trimmed.startsWith('/')) return `${endpoint}${trimmed}`
+
+            if (/^[a-zA-Z0-9._/-]+$/.test(trimmed) && (trimmed.includes('reviews/') || trimmed.includes('products/') || trimmed.includes('profile-images/'))) {
+                const safePath = trimmed.startsWith('/') ? trimmed : `/${trimmed}`
+                return `${endpoint}${safePath}`
+            }
+
+            return trimmed
         }
+
+        if (typeof image === 'string') {
+            const normalized = normalize(image)
+            if (normalized) return normalized
+        }
+
+        if (image && typeof image === 'object') {
+            const candidates = [image.url, image.src, image.thumbnailUrl, image.filePath, image.path]
+            for (const candidate of candidates) {
+                const normalized = normalize(candidate)
+                if (normalized) return normalized
+            }
+        }
+
         return 'https://ik.imagekit.io/jrstupuke/placeholder.png'
     }
 
