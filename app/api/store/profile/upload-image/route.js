@@ -1,35 +1,37 @@
 import { NextResponse } from 'next/server';
-import formidable from 'formidable';
-import fs from 'fs';
-import path from 'path';
 import imagekit from '../../../../../configs/imageKit';
-
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
+import { getAuth } from '@/lib/firebase-admin';
+import authSeller from '@/middlewares/authSeller';
 
 export async function POST(req) {
   try {
-    // Parse the form with formidable
-    const form = new formidable.IncomingForm();
-    const data = await new Promise((resolve, reject) => {
-      form.parse(req, (err, fields, files) => {
-        if (err) reject(err);
-        else resolve({ fields, files });
-      });
-    });
-    const file = data.files.image;
+    const authHeader = req.headers.get('authorization') || '';
+    if (!authHeader.startsWith('Bearer ')) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const idToken = authHeader.replace('Bearer ', '');
+    const decodedToken = await getAuth().verifyIdToken(idToken);
+    const userId = decodedToken.uid;
+    const storeId = await authSeller(userId);
+
+    if (!storeId) {
+      return NextResponse.json({ error: 'Forbidden - No store access' }, { status: 403 });
+    }
+
+    const formData = await req.formData();
+    const file = formData.get('image');
+
     if (!file) {
       return NextResponse.json({ error: 'No image uploaded' }, { status: 400 });
     }
-    // Read file buffer
-    const buffer = fs.readFileSync(file.filepath);
+
+    const buffer = Buffer.from(await file.arrayBuffer());
+
     // Upload to ImageKit
     const uploadResponse = await imagekit.upload({
       file: buffer,
-      fileName: file.originalFilename,
+      fileName: `store_profile_${Date.now()}_${file.name || 'image'}`,
       folder: '/profile-images/',
     });
     return NextResponse.json({ url: uploadResponse.url });

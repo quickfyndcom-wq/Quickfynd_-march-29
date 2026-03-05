@@ -4,6 +4,15 @@ import Rating from '@/models/Rating';
 import Order from '@/models/Order';
 import User from '@/models/User';
 
+const resolveImageUrl = (image) => {
+    if (typeof image === 'string' && image.trim()) return image;
+    if (image && typeof image === 'object') {
+        const resolved = image.url || image.src;
+        if (typeof resolved === 'string' && resolved.trim()) return resolved;
+    }
+    return 'https://ik.imagekit.io/jrstupuke/placeholder.png';
+};
+
 
 // POST: Customer adds a review with images
 export async function POST(request) {
@@ -140,6 +149,9 @@ export async function GET(request) {
                 // If no userData found, use customerName from review
                 return {
                     ...review,
+                    images: Array.isArray(review.images)
+                        ? review.images.map(resolveImageUrl).filter(Boolean)
+                        : [],
                     user: userData || { 
                         name: review.customerName || 'Guest', 
                         email: review.customerEmail,

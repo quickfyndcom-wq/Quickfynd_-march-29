@@ -9,7 +9,7 @@ import { auth } from "@/lib/firebase";
 import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 
 export default function RootAdminLayout({ children }) {
-    const { user, loading } = useAuth();
+    const { user, loading, getToken } = useAuth();
     const [mounted, setMounted] = useState(false);
     const [isSigningIn, setIsSigningIn] = useState(false);
     const pathname = usePathname();
@@ -23,14 +23,23 @@ export default function RootAdminLayout({ children }) {
 
     const authenticator = async () => {
         try {
-            const response = await fetch('/api/imagekit-auth')
+            const token = await getToken();
+            if (!token) {
+                throw new Error('Unauthorized');
+            }
+
+            const response = await fetch('/api/imagekit-auth', {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            })
             if (!response.ok) {
                 const errorText = await response.text()
                 throw new Error(`Request failed with status ${response.status}: ${errorText}`)
             }
             const data = await response.json()
-            const { signature, expire, token } = data
-            return { signature, expire, token }
+            const { signature, expire, token: imagekitToken } = data
+            return { signature, expire, token: imagekitToken }
         } catch (error) {
             throw new Error(`Authentication request failed: ${error.message}`)
         }

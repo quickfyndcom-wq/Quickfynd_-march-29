@@ -37,16 +37,34 @@ const ProductDescription = ({ product, reviews = [], loadingReviews = false, onR
     const [lightboxImage, setLightboxImage] = useState(null)
     const [visibleReviews, setVisibleReviews] = useState(5)
 
+    const resolveImageUrl = (image) => {
+        if (typeof image === 'string' && image.trim()) return image
+        if (image && typeof image === 'object') {
+            const resolved = image.url || image.src
+            if (typeof resolved === 'string' && resolved.trim()) return resolved
+        }
+        return 'https://ik.imagekit.io/jrstupuke/placeholder.png'
+    }
+
+    const normalizedReviews = reviews.map((review) => ({
+        ...review,
+        images: Array.isArray(review.images)
+            ? review.images.map(resolveImageUrl).filter(Boolean)
+            : []
+    }))
+
+    const reviewPhotoList = normalizedReviews.flatMap((review) => review.images || [])
+
     // Calculate rating distribution
     const ratingCounts = [0, 0, 0, 0, 0]
-    reviews.forEach(review => {
+    normalizedReviews.forEach(review => {
         if (review.rating >= 1 && review.rating <= 5) {
             ratingCounts[review.rating - 1]++
         }
     })
 
-    const averageRating = reviews.length > 0
-        ? (reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length).toFixed(1)
+    const averageRating = normalizedReviews.length > 0
+        ? (normalizedReviews.reduce((sum, r) => sum + r.rating, 0) / normalizedReviews.length).toFixed(1)
         : 0
 
     useEffect(() => {
@@ -145,14 +163,14 @@ const ProductDescription = ({ product, reviews = [], loadingReviews = false, onR
                                         />
                                     ))}
                                 </div>
-                                <div className="text-sm text-gray-500">{reviews.length} Review{reviews.length !== 1 ? 's' : ''}</div>
+                                <div className="text-sm text-gray-500">{normalizedReviews.length} Review{normalizedReviews.length !== 1 ? 's' : ''}</div>
                             </div>
 
                             {/* Right: Rating Distribution Bars */}
                             <div className="flex-1 space-y-2">
                                 {[5, 4, 3, 2, 1].map((star) => {
                                     const count = ratingCounts[star - 1]
-                                    const percentage = reviews.length > 0 ? (count / reviews.length) * 100 : 0
+                                    const percentage = normalizedReviews.length > 0 ? (count / normalizedReviews.length) * 100 : 0
                                     return (
                                         <div key={star} className="flex items-center gap-3">
                                             <div className="flex items-center gap-1 min-w-[45px]">
@@ -183,18 +201,19 @@ const ProductDescription = ({ product, reviews = [], loadingReviews = false, onR
                     </div>
 
                     {/* Customer Photos Section */}
-                    {reviews.some(r => r.images && r.images.length > 0) && (
+                    {reviewPhotoList.length > 0 && (
                         <div className="mb-8 pb-8 border-b border-gray-200">
-                            <h3 className="text-lg font-bold text-gray-900 mb-4">Customer Photos ({reviews.reduce((acc, r) => acc + (r.images?.length || 0), 0)})</h3>
+                            <h3 className="text-lg font-bold text-gray-900 mb-4">Customer Photos ({reviewPhotoList.length})</h3>
                             <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
-                                {reviews.flatMap(review => review.images || []).map((img, idx) => (
+                                {reviewPhotoList.map((img, idx) => (
                                     <div key={idx} className="relative aspect-square group">
                                         <Image
-                                            src={img}
+                                            src={resolveImageUrl(img)}
                                             alt={`Customer photo ${idx + 1}`}
                                             fill
+                                            unoptimized
                                             className="rounded-lg object-cover border border-gray-200 hover:border-orange-400 transition-all cursor-pointer hover:scale-105"
-                                            onClick={() => setLightboxImage(img)}
+                                            onClick={() => setLightboxImage(resolveImageUrl(img))}
                                         />
                                     </div>
                                 ))}
@@ -207,13 +226,13 @@ const ProductDescription = ({ product, reviews = [], loadingReviews = false, onR
                         <div className="flex justify-center py-8">
                             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
                         </div>
-                    ) : reviews.length === 0 ? (
+                    ) : normalizedReviews.length === 0 ? (
                         <div className="text-center py-12 bg-gray-50 rounded-lg">
                             <p className="text-gray-500">No reviews yet. Be the first to review!</p>
                         </div>
                     ) : (
                         <div className="space-y-6">
-                            {reviews.slice(0, visibleReviews).map((item, idx) => (
+                            {normalizedReviews.slice(0, visibleReviews).map((item, idx) => (
                                 <div key={item.id || item._id || idx} className="pb-6 border-b border-gray-100 last:border-0">
                                     <div className="flex gap-4">
                                         {/* User Avatar */}
@@ -254,12 +273,13 @@ const ProductDescription = ({ product, reviews = [], loadingReviews = false, onR
                                                     {item.images.map((img, idx) => (
                                                         <div key={idx} className="relative group">
                                                             <Image
-                                                                src={img}
+                                                                src={resolveImageUrl(img)}
                                                                 alt={`Review image ${idx + 1}`}
                                                                 width={80}
                                                                 height={80}
+                                                                unoptimized
                                                                 className="rounded-lg object-cover border border-gray-200 hover:border-orange-400 transition-colors cursor-pointer"
-                                                                onClick={() => setLightboxImage(img)}
+                                                                onClick={() => setLightboxImage(resolveImageUrl(img))}
                                                             />
                                                         </div>
                                                     ))}
@@ -276,13 +296,13 @@ const ProductDescription = ({ product, reviews = [], loadingReviews = false, onR
                             ))}
                             
                             {/* Load More Button */}
-                            {reviews.length > visibleReviews && (
+                            {normalizedReviews.length > visibleReviews && (
                                 <div className="text-center pt-6">
                                     <button
                                         onClick={() => setVisibleReviews(prev => prev + 5)}
                                         className="px-6 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-medium rounded-lg transition-colors"
                                     >
-                                        Load More Reviews ({reviews.length - visibleReviews} more)
+                                        Load More Reviews ({normalizedReviews.length - visibleReviews} more)
                                     </button>
                                 </div>
                             )}

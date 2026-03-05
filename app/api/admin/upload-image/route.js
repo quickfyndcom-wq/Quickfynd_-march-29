@@ -1,5 +1,5 @@
 import imagekit, { ensureImageKit } from "@/configs/imageKit";
-// TODO: Import your Firebase Auth server-side utilities here
+import { getAuth } from "@/lib/firebase-admin";
 import authAdmin from "@/middlewares/authAdmin";
 
 export async function POST(request) {
@@ -11,12 +11,20 @@ export async function POST(request) {
       return Response.json({ error: "Media service not configured" }, { status: 503 });
     }
 
-    // TODO: Replace with your Firebase Auth server-side authentication logic
-    // Example: const userId = await getFirebaseUserId(request);
-    // Example: const isAdmin = await authAdmin(userId);
-    // if (!isAdmin) {
-    //   return Response.json({ error: "Unauthorized" }, { status: 401 });
-    // }
+    const authHeader = request.headers.get('authorization') || '';
+    if (!authHeader.startsWith('Bearer ')) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const idToken = authHeader.replace('Bearer ', '');
+    const decodedToken = await getAuth().verifyIdToken(idToken);
+    const userId = decodedToken.uid;
+    const email = decodedToken.email;
+
+    const isAdmin = await authAdmin(userId, email);
+    if (!isAdmin) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
     const formData = await request.formData();
     const image = formData.get("image");
