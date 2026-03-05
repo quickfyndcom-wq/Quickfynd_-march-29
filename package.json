@@ -6,7 +6,9 @@
     "dev": "next dev",
     "dev:turbo": "next dev --turbopack",
     "build": "next build",
-    "start": "node .next/standalone/server.js",
+    "start": "node .next/standalone/server.js || next start",
+    "start:standalone": "node .next/standalone/server.js",
+    "start:legacy": "next start",
     "lint": "next lint"
   },
   "dependencies": {
