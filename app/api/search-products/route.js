@@ -16,7 +16,7 @@ export async function GET(request) {
 
       const categoryQuery = {
         category: { $regex: category, $options: 'i' },
-        inStock: true
+        inStock: { $ne: false }
       };
 
       if (excludeId) {
@@ -61,7 +61,7 @@ export async function GET(request) {
       $or: [
         { name: { $regex: keyword, $options: 'i' } },
       ],
-      inStock: true
+      inStock: { $ne: false }
     })
     .select('_id name slug images price mrp category tags inStock')
     .limit(limit)
@@ -76,7 +76,7 @@ export async function GET(request) {
           { category: wordBoundaryRegex },
           { tags: wordBoundaryRegex },
         ],
-        inStock: true
+        inStock: { $ne: false }
       })
       .select('_id name slug images price mrp category tags inStock')
       .limit(limit)
@@ -93,7 +93,7 @@ export async function GET(request) {
           { tags: partialRegex },
           { shortDescription: partialRegex },
         ],
-        inStock: true
+        inStock: { $ne: false }
       })
       .select('_id name slug images price mrp category tags inStock')
       .limit(limit)
@@ -108,7 +108,7 @@ export async function GET(request) {
           { name: prefixRegex },
           { category: prefixRegex },
         ],
-        inStock: true
+        inStock: { $ne: false }
       })
       .select('_id name slug images price mrp category tags inStock')
       .limit(limit)
@@ -117,7 +117,7 @@ export async function GET(request) {
 
     // Strategy 5: Fallback to popular products
     if (products.length === 0) {
-      products = await Product.find({ inStock: true })
+      products = await Product.find({ inStock: { $ne: false } })
         .select('_id name slug images price mrp category tags inStock')
         .sort({ createdAt: -1 })
         .limit(limit)

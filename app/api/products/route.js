@@ -76,7 +76,7 @@ export async function GET(request){
         // }
 
         // OPTIMIZED: Use simple find with field selection (aggregation was causing errors)
-        const matchStage = includeOutOfStock ? {} : { inStock: true };
+        const matchStage = includeOutOfStock ? {} : { inStock: { $ne: false } };
         if (fastDelivery === 'true') {
             matchStage.fastDelivery = true;
         }

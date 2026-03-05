@@ -73,7 +73,7 @@ export async function POST(request) {
       $or: [
         { name: { $regex: exactPhrase, $options: 'i' } },
       ],
-      inStock: true
+      inStock: { $ne: false }
     })
     .select('_id name slug images price mrp category tags inStock')
     .limit(12)
@@ -89,7 +89,7 @@ export async function POST(request) {
           { category: mainKeywordRegex },
           { tags: mainKeywordRegex },
         ],
-        inStock: true
+        inStock: { $ne: false }
       })
       .select('_id name slug images price mrp category tags inStock')
       .limit(12)
@@ -105,7 +105,7 @@ export async function POST(request) {
           { category: keywordRegex },
           { tags: keywordRegex },
         ],
-        inStock: true
+        inStock: { $ne: false }
       })
       .select('_id name slug images price mrp category tags inStock')
       .limit(12)
@@ -114,7 +114,7 @@ export async function POST(request) {
 
     let recommendedProducts = [];
     if (products.length === 0) {
-      recommendedProducts = await Product.find({ inStock: true })
+      recommendedProducts = await Product.find({ inStock: { $ne: false } })
         .select('_id name slug images price mrp category tags inStock')
         .sort({ createdAt: -1 })
         .limit(12)

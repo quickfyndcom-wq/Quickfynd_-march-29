@@ -35,7 +35,7 @@ export async function GET(request) {
         const aggregationPipeline = [
             { 
                 $match: { 
-                    inStock: true,
+                    inStock: { $ne: false },
                     mrp: { $exists: true, $ne: null },
                     price: { $exists: true, $ne: null }
                 } 
@@ -80,7 +80,7 @@ export async function GET(request) {
         const countPipeline = [
             { 
                 $match: { 
-                    inStock: true,
+                    inStock: { $ne: false },
                     mrp: { $exists: true, $ne: null },
                     price: { $exists: true, $ne: null }
                 } 

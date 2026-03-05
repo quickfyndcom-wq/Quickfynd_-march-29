@@ -109,7 +109,7 @@ function ShopContent() {
         // Fallback: ensure general list is available when no category filter
         if (!categoryParam && !fetchedRef.current.general && !loading) {
             fetchedRef.current.general = true;
-            dispatch(fetchProducts({ limit: 300 }));
+            dispatch(fetchProducts({ limit: 300, includeOutOfStock: true }));
         }
 
         return () => {

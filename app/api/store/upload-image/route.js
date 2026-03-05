@@ -1,5 +1,6 @@
 import authSeller from "@/middlewares/authSeller";
 import imagekit from "@/configs/imageKit";
+import { getAuth } from "@/lib/firebase-admin";
 
 
 export async function POST(request) {
@@ -9,10 +10,13 @@ export async function POST(request) {
         let userId = null;
         if (authHeader.startsWith('Bearer ')) {
             const token = authHeader.replace('Bearer ', '');
-            // Decode Firebase token to get userId (sub)
-            const base64Payload = token.split('.')[1];
-            const payload = JSON.parse(Buffer.from(base64Payload, 'base64').toString());
-            userId = payload.user_id || payload.sub || null;
+            try {
+                const decodedToken = await getAuth().verifyIdToken(token);
+                userId = decodedToken.uid || null;
+            } catch (error) {
+                console.error('Upload auth verification failed:', error?.message || error);
+                return Response.json({ error: "Unauthorized" }, { status: 401 });
+            }
         }
         if (!userId) {
             return Response.json({ error: "Unauthorized" }, { status: 401 });

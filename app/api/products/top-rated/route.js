@@ -63,7 +63,7 @@ export async function GET(request) {
         },
       },
       // Only in-stock products
-      { $match: { inStock: true } },
+      { $match: { inStock: { $ne: false } } },
       // Sort by rating desc, then count desc
       { $sort: { averageRating: -1, ratingCount: -1, createdAt: -1 } },
       { $limit: limit },
