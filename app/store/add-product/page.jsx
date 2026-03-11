@@ -143,6 +143,31 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
         return '';
     };
 
+    const isVideoUrl = (url) => {
+        if (!url || typeof url !== 'string') return false;
+        return /\.(mp4|webm|ogg|mov|m4v)(\?|#|$)/i.test(url);
+    };
+
+    const uploadMediaAndGetUrl = async (file, token) => {
+        const mediaForm = new FormData();
+        const isVideo = file?.type?.startsWith('video/');
+        mediaForm.append('file', file);
+        mediaForm.append('folder', isVideo ? 'products/videos' : 'products/images');
+
+        const { data } = await axios.post('/api/imagekit-auth/upload', mediaForm, {
+            headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'multipart/form-data'
+            }
+        });
+
+        if (!data?.url) {
+            throw new Error(data?.error || data?.message || 'Failed to upload media');
+        }
+
+        return data.url;
+    };
+
     // Fetch categories from database
     useEffect(() => {
         const fetchCategories = async () => {
@@ -363,6 +388,12 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
     }
 
     const handleImageUpload = async (key, file) => {
+        const isVideo = file?.type?.startsWith('video/');
+        if (isVideo && file.size > 50 * 1024 * 1024) {
+            toast.error('Video file too large (max 50MB)');
+            return;
+        }
+
         // Create preview URL for the file
         const previewUrl = URL.createObjectURL(file)
         setImages(prev => ({ ...prev, [key]: { file, preview: previewUrl } }))
@@ -391,9 +422,9 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                         }, {
                             headers: { Authorization: `Bearer ${token}` }
                         });
-                        toast.success('Image deleted and saved!');
+                        toast.success('Media deleted and saved!');
                     } catch (err) {
-                        toast.error('Failed to delete image on server');
+                        toast.error('Failed to delete media on server');
                     }
                 })();
             }
@@ -416,10 +447,11 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
         e.preventDefault()
         try {
             const hasImage = Object.values(images).some(img => img)
-            if (!hasImage) return toast.error('Please upload at least one product image')
+            if (!hasImage) return toast.error('Please upload at least one product media')
 
             setLoading(true)
             const formData = new FormData()
+            const token = await getToken()
 
             Object.entries(productInfo).forEach(([key, value]) => {
                 if (["colors", "sizes"].includes(key)) {
@@ -491,13 +523,12 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                 formData.append('variants', JSON.stringify(variantsToSend))
             }
 
-            Object.keys(images).forEach(key => {
+            for (const key of Object.keys(images)) {
                 const img = images[key]
                 if (img) {
-                    // If it's an object with file property (new upload), use the file
-                    // If it's a string (existing image URL), append as 'images' too
                     if (img.file) {
-                        formData.append('images', img.file)
+                        const uploadedUrl = await uploadMediaAndGetUrl(img.file, token)
+                        formData.append('images', uploadedUrl)
                     } else {
                         const imageUrl = resolveImageUrl(img)
                         if (imageUrl) {
@@ -505,7 +536,7 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                         }
                     }
                 }
-            })
+            }
 
             productInfo.reviews.forEach((rev, index) => {
                 if (rev.image) formData.append(`reviewImages_${index}`, rev.image)
@@ -516,17 +547,18 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                 formData.append('productId', product._id)
             }
 
-            const token = await getToken()
             console.log('Submitting product with token:', token);
             const apiCall = product
                 ? axios.put(`/api/store/product`, formData, { 
                     headers: { 
-                        'Authorization': `Bearer ${token}`
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'multipart/form-data'
                     } 
                 })
                 : axios.post('/api/store/product', formData, { 
                     headers: { 
-                        'Authorization': `Bearer ${token}`
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'multipart/form-data'
                     } 
                 })
 
@@ -854,11 +886,15 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                                     
                                     try {
                                         const formData = new FormData()
-                                        formData.append('image', file)
+                                        formData.append('file', file)
+                                        formData.append('folder', 'products/descriptions/images')
                                         
                                         const token = await getToken()
-                                        const { data } = await axios.post('/api/store/upload-image', formData, {
-                                            headers: { Authorization: `Bearer ${token}` }
+                                        const { data } = await axios.post('/api/imagekit-auth/upload', formData, {
+                                            headers: {
+                                                Authorization: `Bearer ${token}`,
+                                                'Content-Type': 'multipart/form-data'
+                                            }
                                         })
                                         
                                         editor?.chain().focus().setImage({ src: data.url }).run()
@@ -889,11 +925,15 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                                     try {
                                         toast.loading('Uploading video...')
                                         const formData = new FormData()
-                                        formData.append('image', file) // Using same endpoint
+                                        formData.append('file', file)
+                                        formData.append('folder', 'products/descriptions/videos')
                                         
                                         const token = await getToken()
-                                        const { data } = await axios.post('/api/store/upload-image', formData, {
-                                            headers: { Authorization: `Bearer ${token}` }
+                                        const { data } = await axios.post('/api/imagekit-auth/upload', formData, {
+                                            headers: {
+                                                Authorization: `Bearer ${token}`,
+                                                'Content-Type': 'multipart/form-data'
+                                            }
                                         })
                                         
                                         editor?.chain().focus().setVideo({ src: data.url }).run()
@@ -922,9 +962,9 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                     <p className="text-xs text-gray-500 mt-1">💡 You can upload images and videos (max 50MB) directly into the description</p>
                 </div>
 
-                {/* Images */}
+                {/* Media */}
                 <div>
-                    <label className="block text-sm font-medium mb-2">Product Images (up to 8)</label>
+                    <label className="block text-sm font-medium mb-2">Product Media (Images/Videos, up to 8)</label>
                     <div className="flex flex-wrap items-center gap-2 mb-3 text-sm">
                         <span className="text-gray-700 font-medium">Image Aspect Ratio:</span>
                         {aspectRatioOptions.map((ratio) => (
@@ -941,33 +981,46 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                                 {ratio}
                             </button>
                         ))}
-                        <span className="text-xs text-gray-500">Pick how product images render on the product page.</span>
+                        <span className="text-xs text-gray-500">Pick how product media render on the product page.</span>
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                         {Object.keys(images).map((key) => {
                             const img = images[key]
                             const imageSrc = img?.preview || resolveImageUrl(img)
                             const hasImage = Boolean(imageSrc)
+                            const isVideo = Boolean(img?.file?.type?.startsWith('video/')) || isVideoUrl(imageSrc)
                             return (
                                 <div key={key} className="relative border rounded flex items-center justify-center h-32 cursor-pointer bg-gray-50 hover:bg-gray-100 overflow-hidden group">
                                     <label className="absolute inset-0 w-full h-full cursor-pointer">
-                                        <input type="file" accept="image/*" className="hidden" onChange={(e)=> e.target.files && handleImageUpload(key, e.target.files[0])} />
+                                        <input type="file" accept="image/*,video/*" className="hidden" onChange={(e)=> e.target.files && handleImageUpload(key, e.target.files[0])} />
                                         {hasImage ? (
                                             <>
-                                                <Image 
-                                                    src={imageSrc}
-                                                    alt={`Product ${key}`}
-                                                    fill
-                                                    unoptimized
-                                                    className="object-cover"
-                                                />
+                                                {isVideo ? (
+                                                    <video
+                                                        src={imageSrc}
+                                                        className="w-full h-full object-cover"
+                                                        muted
+                                                        autoPlay
+                                                        loop
+                                                        playsInline
+                                                        preload="metadata"
+                                                    />
+                                                ) : (
+                                                    <Image 
+                                                        src={imageSrc}
+                                                        alt={`Product ${key}`}
+                                                        fill
+                                                        unoptimized
+                                                        className="object-cover"
+                                                    />
+                                                )}
                                                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                                     <span className="text-white text-sm">Change</span>
                                                 </div>
                                             </>
                                         ) : (
                                             <div className="text-center">
-                                                <span className="text-gray-400 text-sm">+ Image {key}</span>
+                                                <span className="text-gray-400 text-sm">+ Media {key}</span>
                                             </div>
                                         )}
                                     </label>

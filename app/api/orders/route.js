@@ -553,153 +553,65 @@ export async function POST(request) {
             // Create order
             console.log('ORDER API DEBUG: orderData keys:', Object.keys(orderData));
             console.log('ORDER API DEBUG: orderData before Order.create:', JSON.stringify(orderData, null, 2));
-            
             const order = await Order.create(orderData);
 
-            // Mark personalized offers as used
-            const usedOfferIds = sellerItems
-                .filter(item => item.appliedOffer && item.appliedOffer.offerId)
-                .map(item => item.appliedOffer.offerId);
-            
-            if (usedOfferIds.length > 0) {
-                await PersonalizedOffer.updateMany(
-                    { _id: { $in: usedOfferIds } },
-                    { 
-                        $set: { 
-                            isUsed: true, 
-                            usedAt: new Date(),
-                            orderId: order._id.toString()
-                        } 
-                    }
-                );
-                console.log(`Marked ${usedOfferIds.length} personalized offer(s) as used for order ${order._id}`);
-            }
-
-            // Deduct wallet coins once when applied
-            if (coinsRedeemed > 0 && userId) {
-                await Wallet.findOneAndUpdate(
-                    { userId },
-                    {
-                        $inc: { coins: -coinsRedeemed },
-                        $push: { transactions: { type: 'REDEEM', coins: coinsRedeemed, rupees: walletDiscount, orderId: order._id.toString() } }
-                    },
-                    { new: true }
-                );
-            }
-            
-            // Increment coupon usage count if coupon was applied
-            if (coupon && coupon.code) {
-                await Coupon.findOneAndUpdate(
-                    { code: coupon.code.toUpperCase(), storeId: storeId },
-                    { $inc: { usedCount: 1 } }
-                );
-            }
-            
-            // Set shortOrderNumber (last 6 hex digits of ObjectId as decimal)
-            const hex = order._id.toString().slice(-6);
-            const shortOrderNumber = parseInt(hex, 16);
-            order.shortOrderNumber = shortOrderNumber;
-            await order.save();
-            // Populate order with related data
-            const populatedOrder = await Order.findById(order._id)
-                .populate('userId')
-                .populate({
-                    path: 'orderItems.productId',
-                    model: 'Product'
-                });
-            orderIds.push(order._id.toString());
-
-            // Email notification using sendOrderConfirmationEmail
+            // --- AUTOMATIC DELHIVERY SHIPMENT CREATION ---
             try {
-                let customerEmail = '';
-                let customerName = '';
-
-                if (isGuest) {
-                    customerEmail = guestInfo.email;
-                    customerName = guestInfo.name;
-                } else {
-                    const user = await User.findById(userId).lean();
-                    customerEmail = user?.email || '';
-                    customerName = user?.name || '';
-                }
-
-                if (customerEmail) {
-                    console.log('Sending order confirmation email with:', {
-                        email: customerEmail,
-                        name: customerName,
-                        orderId: order._id,
-                        shortOrderNumber: order.shortOrderNumber,
-                        total: order.total,
-                        orderItems: order.orderItems,
-                        shippingAddress: order.shippingAddress,
-                        createdAt: order.createdAt,
-                        paymentMethod: order.paymentMethod || paymentMethod
-                    });
-                    await sendOrderConfirmationEmail({
-                        email: customerEmail,
-                        name: customerName,
-                        orderId: order._id,
-                        shortOrderNumber: order.shortOrderNumber,
-                        total: order.total,
-                        orderItems: order.orderItems,
-                        shippingAddress: order.shippingAddress,
-                        createdAt: order.createdAt,
-                        paymentMethod: order.paymentMethod || paymentMethod
-                    });
-                    console.log('Order confirmation email sent to customer:', customerEmail);
-                    
-                    // Send guest account creation invitation if guest checkout
-                    if (isGuest && customerEmail) {
-                        try {
-                            await sendGuestAccountCreationEmail({
-                                email: customerEmail,
-                                name: customerName,
-                                orderId: order._id,
-                                shortOrderNumber: order.shortOrderNumber
-                            });
-                            console.log('Guest account creation email sent to:', customerEmail);
-                        } catch (guestEmailError) {
-                            console.error('Error sending guest account creation email:', guestEmailError);
-                            // Don't fail the order if email fails
-                        }
-                    }
-                }
-            } catch (emailError) {
-                console.error('Error sending order confirmation email:', emailError);
-                // Don't fail the order if email fails
-            }
-            // Decrement stock for each item in this store order (atomic)
-            for (const item of sellerItems) {
-                try {
-                    const requestedQty = Number(item.quantity) || 0;
-                    if (requestedQty > 0) {
-                        // Decrement product-level stock
-                        const updated = await Product.findByIdAndUpdate(
-                            item.id,
-                            { $inc: { stockQuantity: -requestedQty } },
-                            { new: true }
-                        );
-                        if (updated) {
-                            // Update inStock flag based on remaining quantity
-                            const stillInStock = (typeof updated.stockQuantity === 'number' ? updated.stockQuantity : 0) > 0;
-                            if (updated.inStock !== stillInStock) {
-                                await Product.findByIdAndUpdate(item.id, { $set: { inStock: stillInStock } });
+                // 1. Generate waybill
+                const waybillRes = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || ''}/api/delhivery/waybill?count=1`);
+                const waybillData = await waybillRes.json();
+                const waybill = waybillData.success && Array.isArray(waybillData.waybills) ? waybillData.waybills[0] : null;
+                if (waybill) {
+                    // 2. Prepare shipment payload
+                    const shipping = order.shippingAddress || {};
+                    const shipmentPayload = {
+                        shipments: [
+                            {
+                                waybill,
+                                order: order.shortOrderNumber || order._id.toString(),
+                                products_desc: order.orderItems.map(i => i.productId.name || 'Product').join(', '),
+                                total_amount: order.total,
+                                cod_amount: order.paymentMethod === 'COD' ? order.total : 0,
+                                consignee: shipping.name,
+                                consignee_address1: shipping.street,
+                                consignee_address2: shipping.city,
+                                consignee_pincode: shipping.zip,
+                                consignee_city: shipping.city,
+                                consignee_state: shipping.state,
+                                consignee_country: shipping.country,
+                                consignee_phone: shipping.phone,
+                                consignee_email: shipping.email,
+                                pickup_location: shipping.city || 'Warehouse',
+                                payment_mode: order.paymentMethod === 'COD' ? 'COD' : 'Prepaid',
+                                weight: 1,
+                                length: 30,
+                                breadth: 20,
+                                height: 10
                             }
-                        }
-
-                        // Optional: decrement variant stock when options provided
-                        if (item.variantOptions && item.variantOptions.color && item.variantOptions.size) {
-                            await Product.updateOne(
-                                { _id: item.id, 'variants.options.color': item.variantOptions.color, 'variants.options.size': item.variantOptions.size },
-                                { $inc: { 'variants.$.stock': -requestedQty } }
-                            );
-                        }
-                    }
-                } catch (stockErr) {
-                    console.error('Stock decrement error for product', item.id, stockErr);
-                    // Do not fail the order if stock decrement fails, but log it
+                        ]
+                    };
+                    // 3. Create shipment
+                    const shipmentRes = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || ''}/api/delhivery/create-shipment`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(shipmentPayload)
+                    });
+                    const shipmentData = await shipmentRes.json();
+                    // 4. Save Delhivery info to order
+                    order.delhivery = {
+                        waybill,
+                        shipment: shipmentData,
+                        status: shipmentData.status || 'created',
+                        createdAt: new Date()
+                    };
+                    await order.save();
                 }
+            } catch (delhiveryErr) {
+                console.error('Delhivery automation error:', delhiveryErr);
             }
+            // --- END AUTOMATION ---
+
+            // ...existing code...
         }
 
         // Coupon usage count

@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { ShoppingCartIcon, StarIcon } from 'lucide-react'
@@ -20,6 +20,30 @@ const getImageSrc = (product) => {
         if (typeof first === 'string' && first.trim() !== '') return first
     }
     return 'https://ik.imagekit.io/jrstupuke/placeholder.png'
+}
+
+const getImageSrcAt = (product, index = 0) => {
+    if (Array.isArray(product.images) && product.images.length > index) {
+        const item = product.images[index]
+        if (item?.url) return item.url
+        if (item?.src) return item.src
+        if (typeof item === 'string' && item.trim() !== '') return item
+    }
+    return ''
+}
+
+const isVideoUrl = (url) => {
+    if (!url || typeof url !== 'string') return false
+    return /\.(mp4|webm|ogg|mov|m4v)(\?|#|$)/i.test(url)
+}
+
+const getVideoPreviewImageSrc = (product) => {
+    const fallback = 'https://ik.imagekit.io/jrstupuke/placeholder.png'
+    const second = getImageSrcAt(product, 1)
+    const third = getImageSrcAt(product, 2)
+    if (second && !isVideoUrl(second) && second !== fallback) return second
+    if (third && !isVideoUrl(third) && third !== fallback) return third
+    return fallback
 }
 
 // Normalize price-like values (numbers or strings with currency symbols)
@@ -56,6 +80,9 @@ const ProductCard = ({ product }) => {
     const itemQuantity = cartItems[product._id] || 0
 
     const [reviews, setReviews] = useState([])
+    const [hovered, setHovered] = useState(false)
+    const [videoReady, setVideoReady] = useState(false)
+    const videoRef = useRef(null)
     const [, setLoadingReviews] = useState(false)
 
     useEffect(() => {
@@ -134,9 +161,27 @@ const ProductCard = ({ product }) => {
     const showPrice = priceNum > 0 || mrpNum > 0
 
     const imageSrc = getImageSrc(product)
+    const showVideo = isVideoUrl(imageSrc)
+    const preHoverImageSrc = showVideo ? getVideoPreviewImageSrc(product) : imageSrc
+
+    useEffect(() => {
+        if (!showVideo || !videoRef.current) return
+        if (hovered) {
+            videoRef.current.play().catch(() => {})
+        } else {
+            videoRef.current.pause()
+            videoRef.current.currentTime = 0
+            setVideoReady(false)
+        }
+    }, [hovered, showVideo])
 
     return (
-        <Link href={`/product/${product.slug || product._id || ''}`} className="group w-full">
+        <Link
+            href={`/product/${product.slug || product._id || ''}`}
+            className="group w-full"
+            onMouseEnter={() => setHovered(true)}
+            onMouseLeave={() => setHovered(false)}
+        >
             <div className="bg-white rounded-2xl shadow-sm hover:shadow-lg transition-shadow duration-300 overflow-hidden flex flex-col h-full relative">
                 {/* Product Image */}
                 <div className={`relative w-full bg-gray-50 overflow-hidden ${getAspectRatioClass(product.aspectRatio)}`}>
@@ -145,18 +190,57 @@ const ProductCard = ({ product }) => {
                             Fast
                         </span>
                     )}
-                    <Image
-                        src={imageSrc}
-                        alt={displayName}
-                        fill
-                        unoptimized
-                        className="object-cover transition-transform duration-300 group-hover:scale-105"
-                        onError={(e) => {
-                            if (e.currentTarget.src !== 'https://ik.imagekit.io/jrstupuke/placeholder.png') {
-                                e.currentTarget.src = 'https://ik.imagekit.io/jrstupuke/placeholder.png'
-                            }
-                        }}
-                    />
+                    {showVideo ? (
+                        <>
+                            <Image
+                                src={preHoverImageSrc}
+                                alt={displayName}
+                                fill
+                                unoptimized
+                                className={`object-cover transition-transform duration-300 group-hover:scale-105 ${hovered && videoReady ? 'invisible' : 'visible'}`}
+                                onError={(e) => {
+                                    if (e.currentTarget.src !== 'https://ik.imagekit.io/jrstupuke/placeholder.png') {
+                                        e.currentTarget.src = 'https://ik.imagekit.io/jrstupuke/placeholder.png'
+                                    }
+                                }}
+                            />
+                            <video
+                                ref={videoRef}
+                                src={imageSrc}
+                                poster={preHoverImageSrc}
+                                className={`absolute inset-0 w-full h-full object-cover transition-transform duration-300 group-hover:scale-105 ${hovered && videoReady ? 'visible' : 'invisible'}`}
+                                muted
+                                loop
+                                playsInline
+                                preload="metadata"
+                                disablePictureInPicture
+                                controlsList="nodownload noplaybackrate noremoteplayback"
+                                onContextMenu={(e) => e.preventDefault()}
+                                onVolumeChange={(e) => {
+                                    if (!e.currentTarget.muted || e.currentTarget.volume !== 0) {
+                                        e.currentTarget.muted = true
+                                        e.currentTarget.volume = 0
+                                    }
+                                }}
+                                onLoadedData={() => setVideoReady(true)}
+                                onPlaying={() => setVideoReady(true)}
+                                onWaiting={() => setVideoReady(false)}
+                            />
+                        </>
+                    ) : (
+                        <Image
+                            src={imageSrc}
+                            alt={displayName}
+                            fill
+                            unoptimized
+                            className="object-cover transition-transform duration-300 group-hover:scale-105"
+                            onError={(e) => {
+                                if (e.currentTarget.src !== 'https://ik.imagekit.io/jrstupuke/placeholder.png') {
+                                    e.currentTarget.src = 'https://ik.imagekit.io/jrstupuke/placeholder.png'
+                                }
+                            }}
+                        />
+                    )}
                 </div>
 
                 {/* Product Details */}

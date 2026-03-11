@@ -61,6 +61,7 @@ export default function PincodeModal({ open, onClose, onPincodeSubmit }) {
           We'll auto-fill your address details based on your pincode
         </p>
 
+
         <form onSubmit={handleSubmit}>
           <div className="mb-4">
             <input
@@ -68,21 +69,53 @@ export default function PincodeModal({ open, onClose, onPincodeSubmit }) {
               className="w-full border border-gray-300 rounded-lg px-4 py-3 text-lg focus:border-orange-500 focus:ring-2 focus:ring-orange-200 outline-none"
               placeholder="Enter 6-digit pincode"
               value={pincode}
-              onChange={(e) => {
+              onChange={async (e) => {
                 const value = e.target.value.replace(/\D/g, '').slice(0, 6);
                 setPincode(value);
                 setError("");
+                if (value.length === 6) {
+                  setLoading(true);
+                  try {
+                    const delhiveryRes = await fetch(`/api/delhivery/pincode-serviceability?pincode=${value}`);
+                    const delhiveryData = await delhiveryRes.json();
+                    let isServiceable = false;
+                    let embargoRemark = '';
+                    if (delhiveryData?.delivery_codes && Array.isArray(delhiveryData.delivery_codes) && delhiveryData.delivery_codes.length > 0) {
+                      const pc = delhiveryData.delivery_codes[0]?.postal_code;
+                      if (pc) {
+                        // If embargo/remark present, show it
+                        if (pc.remarks && pc.remarks.trim() !== '') {
+                          embargoRemark = pc.remarks;
+                        }
+                        // Check if cod or pre_paid is 'Y'
+                        if (pc.cod === 'Y' || pc.pre_paid === 'Y') {
+                          isServiceable = true;
+                        }
+                      }
+                    }
+                    if (embargoRemark) {
+                      setError("Delivery temporarily unavailable for this pincode. Please try again later.");
+                    } else if (isServiceable) {
+                      setError("Pincode is serviceable for delivery.");
+                    } else {
+                      setError("Sorry, this pincode is not serviceable for delivery.");
+                    }
+                  } catch (err) {
+                    setError("Failed to check serviceability. Please try again.");
+                  } finally {
+                    setLoading(false);
+                  }
+                }
               }}
               maxLength={6}
               autoFocus
               required
             />
             {error && (
-              <div className="text-red-600 text-sm mt-2">{error}</div>
+              <div className={`text-sm mt-2 ${error.includes('not serviceable') ? 'text-red-600' : error.includes('serviceable') ? 'text-green-600' : 'text-red-600'}`}>{error}</div>
             )}
           </div>
-
-          <div className="flex gap-3">
+          <div className="flex gap-3 mt-4">
             <button
               type="button"
               onClick={onClose}
@@ -94,7 +127,14 @@ export default function PincodeModal({ open, onClose, onPincodeSubmit }) {
             <button
               type="submit"
               className="flex-1 px-4 py-3 bg-orange-500 text-white rounded-lg font-semibold hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={loading}
+              disabled={
+                loading ||
+                !pincode ||
+                pincode.length !== 6 ||
+                error.includes('not serviceable') ||
+                error.includes('Failed to check') ||
+                error.includes('temporarily unavailable')
+              }
             >
               {loading ? "Fetching..." : "Continue"}
             </button>

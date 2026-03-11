@@ -163,8 +163,14 @@ export default function StoreOrders() {
             texts.push(delhivery.current_status.toLowerCase());
         }
 
+        // Use the event with the latest timestamp
         if (Array.isArray(delhivery.events) && delhivery.events.length > 0) {
-            const latestEvent = delhivery.events[delhivery.events.length - 1];
+            const latestEvent = delhivery.events.reduce((latest, event) => {
+                if (!latest) return event;
+                const latestTime = new Date(latest.time || latest.timestamp || 0).getTime();
+                const eventTime = new Date(event.time || event.timestamp || 0).getTime();
+                return eventTime > latestTime ? event : latest;
+            }, null);
             if (latestEvent?.status) {
                 texts.push(latestEvent.status.toLowerCase());
             }
@@ -897,17 +903,51 @@ export default function StoreOrders() {
                                 <th className="px-4 py-3">Total</th>
                                 <th className="px-4 py-3">Payment</th>
                                 <th className="px-4 py-3">Status</th>
+                                <th className="px-4 py-3">Need to Pick</th>
                                 <th className="px-4 py-3">Tracking</th>
                                 <th className="px-4 py-3">Date</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
-                            {filteredOrders.map((order, index) => (
-                                <tr
+                            {filteredOrders.map((order, index) => {
+                                                                // Show 'Yes' in Need to Pick if pickup is scheduled (from Delhivery events) and not yet picked up or delivered/cancelled
+                                                                let needToPick = false;
+                                                                let latestTrackingStatus = '';
+                                                                if (!['DELIVERED', 'CANCELLED'].includes(order.status)) {
+                                                                    if (order.delhivery && Array.isArray(order.delhivery.events) && order.delhivery.events.length > 0) {
+                                                                        // Get the latest event (by time)
+                                                                        const sortedEvents = [...order.delhivery.events].sort((a, b) => new Date(b.time) - new Date(a.time));
+                                                                        latestTrackingStatus = sortedEvents[0]?.status || '';
+                                                                        const scheduledEvent = order.delhivery.events.find(e => (e.status || '').toLowerCase().includes('pickup scheduled'));
+                                                                        const pickedEvent = order.delhivery.events.find(e => (e.status || '').toLowerCase().includes('picked up'));
+                                                                        needToPick = !!scheduledEvent && !pickedEvent;
+                                                                    } else {
+                                                                        needToPick = !order.trackingId;
+                                                                    }
+                                                                }
+                                                                // Pickup date: Prefer order.pickupDate, else extract from Delhivery events
+                                                                let pickupDate = '';
+                                                                let pickupScheduled = '';
+                                                                let pickedUp = '';
+                                                                if (order.pickupDate) {
+                                                                    pickupDate = new Date(order.pickupDate).toLocaleDateString();
+                                                                } else if (order.delhivery && Array.isArray(order.delhivery.events)) {
+                                                                    // Find pickup scheduled and picked up events
+                                                                    const scheduledEvent = order.delhivery.events.find(e => (e.status || '').toLowerCase().includes('pickup scheduled'));
+                                                                    const pickedEvent = order.delhivery.events.find(e => (e.status || '').toLowerCase().includes('picked up'));
+                                                                    if (scheduledEvent) {
+                                                                        pickupScheduled = `Scheduled: ${new Date(scheduledEvent.time).toLocaleString()}`;
+                                                                    }
+                                                                    if (pickedEvent) {
+                                                                        pickedUp = `Picked: ${new Date(pickedEvent.time).toLocaleString()}`;
+                                                                    }
+                                                                }
+                                return (
+                                  <tr
                                     key={order._id}
                                     className="hover:bg-gray-50 transition-colors duration-150 cursor-pointer"
                                     onClick={() => openModal(order)}
-                                >
+                                  >
                                     <td className="pl-6 text-green-600 font-medium">{index + 1}</td>
                                     <td className="px-4 py-3 font-mono text-xs text-slate-700">{order.shortOrderNumber || order._id.slice(0, 8)}</td>
                                     <td className="px-4 py-3">
@@ -931,28 +971,18 @@ export default function StoreOrders() {
                                         </span>
                                     </td>
                                     <td className="px-4 py-3" onClick={e => { e.stopPropagation(); }}>
-                                        <div className="flex items-center gap-2">
-                                            <select
-                                                value={order.status}
-                                                onChange={e => updateOrderStatus(order._id, e.target.value, getToken, fetchOrders)}
-                                                className={`border-gray-300 rounded-md text-sm font-medium px-2 py-1 focus:ring focus:ring-blue-200 ${getStatusColor(order.status)}`}
-                                            >
-                                                {STATUS_OPTIONS.map(status => (
-                                                    <option key={status.value} value={status.value}>{status.label}</option>
-                                                ))}
-                                            </select>
-                                            {order.trackingId && (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => autoSyncStatusFromTracking(order)}
-                                                    className="text-xs font-semibold px-2 py-1 rounded border border-slate-300 text-slate-700 hover:bg-slate-100"
-                                                    title="Auto-set status from latest tracking"
-                                                >
-                                                    Auto
-                                                </button>
-                                            )}
-                                        </div>
+                                        {(() => {
+                                            // Use mapped status from tracking if available, else fallback to order.status
+                                            const mappedStatus = mapDelhiveryStatusToOrderStatus(order.delhivery, order.status) || order.status;
+                                            const mappedStatusLabel = STATUS_OPTIONS.find(s => s.value === mappedStatus)?.label || mappedStatus;
+                                            return (
+                                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(mappedStatus)}`}>{mappedStatusLabel}</span>
+                                            );
+                                        })()}
                                     </td>
+                                                                        <td className="px-4 py-3 font-bold text-orange-600">
+                                                                            {latestTrackingStatus ? latestTrackingStatus : (needToPick ? 'Yes' : '')}
+                                                                        </td>
                                     <td className="px-4 py-3">
                                         {order.trackingId ? (
                                             <span className="bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded-full font-medium">
@@ -963,8 +993,9 @@ export default function StoreOrders() {
                                         )}
                                     </td>
                                     <td className="px-4 py-3 text-gray-500 text-xs">{new Date(order.createdAt).toLocaleDateString()}</td>
-                                </tr>
-                            ))}
+                                  </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>
@@ -1238,245 +1269,7 @@ export default function StoreOrders() {
                                     </div>
                                 )}
 
-                                <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
-                                    <p className="text-sm font-semibold text-slate-800 mb-3">Courier Actions (Delhivery LTL)</p>
-                                    <div className="space-y-3">
-                                        {/* Generate AWB Section */}
-                                        {!trackingData.trackingId && (
-                                            <div className="bg-gradient-to-r from-blue-50 to-purple-50 border-2 border-blue-300 rounded-lg p-4">
-                                                <p className="text-xs font-bold text-blue-800 mb-3">📦 Generate New AWB</p>
-                                                <div className="grid grid-cols-2 gap-3 mb-3">
-                                                    <div>
-                                                        <label className="block text-[10px] font-semibold text-slate-600 mb-1">Pickup Warehouse *</label>
-                                                        <input
-                                                            value={awbManifestData.pickup_location_name}
-                                                            onChange={(e) => setAwbManifestData(prev => ({ ...prev, pickup_location_name: e.target.value }))}
-                                                            className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs"
-                                                            placeholder="Enter registered warehouse name"
-                                                        />
-                                                    </div>
-                                                    <div>
-                                                        <label className="block text-[10px] font-semibold text-slate-600 mb-1">Payment Mode</label>
-                                                        <select
-                                                            value={awbManifestData.payment_mode}
-                                                            onChange={(e) => setAwbManifestData(prev => ({ ...prev, payment_mode: e.target.value }))}
-                                                            className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs"
-                                                        >
-                                                            <option value="cod">COD (Cash on Delivery)</option>
-                                                            <option value="prepaid">Prepaid</option>
-                                                        </select>
-                                                    </div>
-                                                    <div>
-                                                        <label className="block text-[10px] font-semibold text-slate-600 mb-1">COD Amount (₹)</label>
-                                                        <input
-                                                            value={awbManifestData.cod_amount}
-                                                            onChange={(e) => setAwbManifestData(prev => ({ ...prev, cod_amount: Number(e.target.value) }))}
-                                                            type="number"
-                                                            className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs"
-                                                            placeholder="Amount to collect"
-                                                            disabled={awbManifestData.payment_mode !== 'cod'}
-                                                        />
-                                                    </div>
-                                                    <div>
-                                                        <label className="block text-[10px] font-semibold text-slate-600 mb-1">Weight (grams)</label>
-                                                        <input
-                                                            value={awbManifestData.weight}
-                                                            onChange={(e) => setAwbManifestData(prev => ({ ...prev, weight: Number(e.target.value) }))}
-                                                            type="number"
-                                                            className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs"
-                                                            placeholder="Package weight"
-                                                        />
-                                                    </div>
-                                                </div>
-                                                <button
-                                                    onClick={async () => {
-                                                        if (!awbManifestData.pickup_location_name) {
-                                                            toast.error('Enter warehouse name');
-                                                            return;
-                                                        }
-                                                        if (!selectedOrder.shippingAddress) {
-                                                            toast.error('No shipping address');
-                                                            return;
-                                                        }
-                                                        setGeneratingAwb(true);
-                                                        try {
-                                                            const manifestPayload = {
-                                                                pickup_location_name: awbManifestData.pickup_location_name,
-                                                                payment_mode: awbManifestData.payment_mode,
-                                                                cod_amount: awbManifestData.payment_mode === 'cod' ? awbManifestData.cod_amount : 0,
-                                                                weight: awbManifestData.weight,
-                                                                dropoff_location: JSON.stringify({
-                                                                    consignee_name: selectedOrder.shippingAddress.name || selectedOrder.guestName,
-                                                                    address: selectedOrder.shippingAddress.street || '',
-                                                                    city: selectedOrder.shippingAddress.city || '',
-                                                                    state: selectedOrder.shippingAddress.state || '',
-                                                                    zip: selectedOrder.shippingAddress.zip || selectedOrder.shippingAddress.pincode || '',
-                                                                    phone: selectedOrder.shippingAddress.phone || selectedOrder.guestPhone || '',
-                                                                    email: selectedOrder.shippingAddress.email || selectedOrder.guestEmail || ''
-                                                                }),
-                                                                dimensions: JSON.stringify(awbManifestData.dimensions),
-                                                                invoices: JSON.stringify([{
-                                                                    inv_num: selectedOrder.shortOrderNumber || selectedOrder._id.slice(0, 8),
-                                                                    inv_amt: selectedOrder.total
-                                                                }]),
-                                                                shipment_details: JSON.stringify([{
-                                                                    order_id: selectedOrder.shortOrderNumber || selectedOrder._id.slice(0, 8),
-                                                                    box_count: 1,
-                                                                    description: `Order ${selectedOrder.shortOrderNumber}`,
-                                                                    weight: awbManifestData.weight,
-                                                                    waybills: [],
-                                                                    master: false
-                                                                }])
-                                                            };
-                                                            const result = await callCourierProxy('manifest_create', null, manifestPayload);
-                                                            if (result?.lrn || result?.LRN) {
-                                                                const generatedLrn = result.lrn || result.LRN;
-                                                                setTrackingData(prev => ({ ...prev, trackingId: generatedLrn }));
-                                                                toast.success(`AWB Generated: ${generatedLrn}`);
-                                                            }
-                                                        } catch (err) {
-                                                            console.error('AWB generation error:', err);
-                                                        } finally {
-                                                            setGeneratingAwb(false);
-                                                        }
-                                                    }}
-                                                    disabled={generatingAwb || ltlLoading}
-                                                    className="w-full rounded-lg bg-gradient-to-r from-blue-600 to-purple-600 px-3 py-2 text-xs font-bold text-white hover:from-blue-700 hover:to-purple-700 disabled:opacity-60"
-                                                >
-                                                    {generatingAwb ? '⏳ Generating AWB...' : '🚀 Generate AWB'}
-                                                </button>
-                                            </div>
-                                        )}
-                                        <div>
-                                            <label className="text-xs text-slate-500">LRN / Tracking ID {trackingData.trackingId && <span className="text-green-600 font-bold">✓</span>}</label>
-                                            <input
-                                                value={trackingData.trackingId}
-                                                onChange={(e) => setTrackingData(prev => ({ ...prev, trackingId: e.target.value }))}
-                                                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono"
-                                                placeholder="Enter LRN or Generate AWB"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-semibold text-slate-600 mb-1.5">📦 Schedule Pickup Details</label>
-                                            <div className="grid grid-cols-2 gap-2">
-                                                <div>
-                                                    <label className="block text-[10px] text-slate-500 mb-1">Warehouse Name</label>
-                                                    <input
-                                                        value={ltlPickupData.client_warehouse}
-                                                        onChange={(e) => setLtlPickupData(prev => ({ ...prev, client_warehouse: e.target.value }))}
-                                                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
-                                                        placeholder="Client warehouse"
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label className="block text-[10px] text-slate-500 mb-1">Package Count</label>
-                                                    <input
-                                                        value={ltlPickupData.expected_package_count}
-                                                        onChange={(e) => setLtlPickupData(prev => ({ ...prev, expected_package_count: Number(e.target.value || 1) }))}
-                                                        type="number"
-                                                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
-                                                        placeholder="No. of packages"
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label className="block text-[10px] text-slate-500 mb-1">Pickup Date</label>
-                                                    <input
-                                                        value={ltlPickupData.pickup_date}
-                                                        onChange={(e) => setLtlPickupData(prev => ({ ...prev, pickup_date: e.target.value }))}
-                                                        type="date"
-                                                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label className="block text-[10px] text-slate-500 mb-1">Start Time</label>
-                                                    <input
-                                                        value={ltlPickupData.start_time}
-                                                        onChange={(e) => setLtlPickupData(prev => ({ ...prev, start_time: e.target.value }))}
-                                                        type="time"
-                                                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
-                                                    />
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-semibold text-slate-600 mb-1.5">🏷️ Shipping Label</label>
-                                            <div className="grid grid-cols-2 gap-2">
-                                                <div>
-                                                    <label className="block text-[10px] text-slate-500 mb-1">Label Size</label>
-                                                    <select
-                                                        value={ltlLabelSize}
-                                                        onChange={(e) => setLtlLabelSize(e.target.value)}
-                                                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
-                                                    >
-                                                        <option value="std">Standard</option>
-                                                        <option value="a4">A4</option>
-                                                        <option value="thermal">Thermal</option>
-                                                    </select>
-                                                </div>
-                                                <div className="flex items-end">
-                                                    <button
-                                                        onClick={async () => {
-                                                            if (!trackingData.trackingId) {
-                                                                toast.error('Add LRN first');
-                                                                return;
-                                                            }
-                                                            await callCourierProxy('label_get', {
-                                                                size: ltlLabelSize,
-                                                                lrn: trackingData.trackingId
-                                                            });
-                                                        }}
-                                                        disabled={ltlLoading}
-                                                        className="w-full rounded-lg bg-slate-800 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-900 disabled:opacity-60"
-                                                    >
-                                                        📄 Get Label URL
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-semibold text-slate-600 mb-1.5">⚡ Quick Actions</label>
-                                            <div className="grid grid-cols-2 gap-2">
-                                                <button
-                                                    onClick={async () => {
-                                                        if (!trackingData.trackingId) {
-                                                            toast.error('Add LRN first');
-                                                            return;
-                                                        }
-                                                        await callCourierProxy('lrn_track', { lrnum: trackingData.trackingId });
-                                                    }}
-                                                    disabled={ltlLoading}
-                                                    className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
-                                                >
-                                                    📍 Track LRN
-                                                </button>
-                                                <button
-                                                    onClick={async () => {
-                                                        if (!ltlPickupData.client_warehouse || !ltlPickupData.pickup_date || !ltlPickupData.start_time) {
-                                                            toast.error('Fill pickup details');
-                                                            return;
-                                                        }
-                                                        await callCourierProxy('pickup_create', null, ltlPickupData);
-                                                    }}
-                                                    disabled={ltlLoading}
-                                                    className="rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-60"
-                                                >
-                                                    🚚 Create Pickup
-                                                </button>
-                                            </div>
-                                        </div>
-                                        <button
-                                            onClick={() => {
-                                                const lrnParam = trackingData.trackingId ? `lrn=${encodeURIComponent(trackingData.trackingId)}` : '';
-                                                const orderParam = `orderId=${encodeURIComponent(selectedOrder._id)}`;
-                                                const query = [lrnParam, orderParam].filter(Boolean).join('&');
-                                                router.push(`/store/courior?${query}`);
-                                            }}
-                                            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"
-                                        >
-                                            🎛️ Open Courier Console
-                                        </button>
-                                    </div>
-                                </div>
+                                {/* ...existing code... */}
                             </div>
 
                             {/* Return/Replacement Request Section */}

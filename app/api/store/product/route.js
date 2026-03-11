@@ -31,11 +31,15 @@ const uploadImages = async (images) => {
     return Promise.all(
         images.map(async (image) => {
             const buffer = Buffer.from(await image.arrayBuffer());
+            const isVideo = typeof image?.type === 'string' && image.type.startsWith('video/');
             const response = await imagekit.upload({
                 file: buffer,
                 fileName: image.name,
                 folder: "products"
             });
+            if (isVideo) {
+                return response.url;
+            }
             return imagekit.url({
                 path: response.filePath,
                 transformation: [

@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react";
+import { FaChevronLeft, FaChevronRight } from "react-icons/fa";
 import { useSelector } from "react-redux";
 import Image from "next/image";
 import Link from "next/link";
@@ -116,7 +117,7 @@ export default function HighDiscountCarousel() {
           product.inStock !== false &&
           product.salePrice > 0 &&
           product.mrpPrice > product.salePrice &&
-          product.discount > 75
+          product.discount > 55
       )
       .slice(0, 20);
   }, [sourceProducts]);
@@ -228,9 +229,9 @@ export default function HighDiscountCarousel() {
     return (
       <section className="max-w-[1250px] mx-auto px-3 sm:px-6 mt-6">
         <div className="rounded-2xl p-4 sm:p-5" style={{ backgroundColor: hourlyBgColor }}>
-          <h2 className="text-xl font-bold mb-3" style={{ color: BRAND_COLORS.white }}>Mega 75% OFF Sale</h2>
+          <h2 className="text-xl font-bold mb-3" style={{ color: BRAND_COLORS.white }}>Mega 50% OFF Sale</h2>
           <div className="rounded-xl p-4 text-sm" style={{ backgroundColor: BRAND_COLORS.lightPeach, color: BRAND_COLORS.darkGrey }}>
-            No products above 75% OFF right now.
+            No products above 50% OFF right now.
           </div>
         </div>
       </section>
@@ -249,20 +250,24 @@ export default function HighDiscountCarousel() {
               <button
                 type="button"
                 onClick={goPrev}
-                className="h-8 w-8 rounded-full text-sm font-bold"
-                style={{ backgroundColor: BRAND_COLORS.white, color: BRAND_COLORS.darkRed }}
+                className="h-12 w-12 rounded-full flex items-center justify-center text-2xl font-bold shadow-md border-2 border-white hover:scale-105 transition"
+                style={{ backgroundColor: BRAND_COLORS.white, color: BRAND_COLORS.darkRed, padding: 0 }}
                 aria-label="Previous products"
               >
-                ‹
+                <span className="flex items-center justify-center w-full h-full" style={{ fontSize: '2rem', lineHeight: 1 }}>
+                  <FaChevronLeft />
+                </span>
               </button>
               <button
                 type="button"
                 onClick={goNext}
-                className="h-8 w-8 rounded-full text-sm font-bold"
-                style={{ backgroundColor: BRAND_COLORS.white, color: BRAND_COLORS.darkRed }}
+                className="h-12 w-12 rounded-full flex items-center justify-center text-2xl font-bold shadow-md border-2 border-white hover:scale-105 transition"
+                style={{ backgroundColor: BRAND_COLORS.white, color: BRAND_COLORS.darkRed, padding: 0 }}
                 aria-label="Next products"
               >
-                ›
+                <span className="flex items-center justify-center w-full h-full" style={{ fontSize: '2rem', lineHeight: 1 }}>
+                  <FaChevronRight />
+                </span>
               </button>
             </div>
           )}

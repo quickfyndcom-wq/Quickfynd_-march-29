@@ -4,6 +4,7 @@ import Order from "@/models/Order";
 import Product from "@/models/Product";
 import MarketingExpense from "@/models/MarketingExpense";
 import { getAuth } from '@/lib/firebase-admin';
+import fetch from 'node-fetch';
 
 export async function GET(req) {
     try {
@@ -131,9 +132,9 @@ export async function GET(req) {
         
         const ordersWithProfit = [];
         
+        const inTransitOrdersWithProfit = [];
         for (const order of orders) {
             let orderProductCost = 0;
-            
             // Calculate product costs for this order
             if (order.orderItems && order.orderItems.length > 0) {
                 for (const item of order.orderItems) {
@@ -143,16 +144,14 @@ export async function GET(req) {
                     }
                 }
             }
-            
             const orderRevenue = order.total || 0;
-            const orderDeliveryCost = order.shippingFee || 0;
+            // Use saved shippingFee for delivery cost
+            let orderDeliveryCost = order.shippingFee || 0;
             const orderProfit = orderRevenue - orderProductCost - orderDeliveryCost;
-            
             totalRevenue += orderRevenue;
             totalProductCosts += orderProductCost;
             totalDeliveryCosts += orderDeliveryCost;
-            
-            ordersWithProfit.push({
+            const orderData = {
                 _id: order._id,
                 shortOrderNumber: order.shortOrderNumber,
                 createdAt: order.createdAt,
@@ -161,7 +160,12 @@ export async function GET(req) {
                 shippingFee: orderDeliveryCost,
                 profit: orderProfit,
                 status: order.status
-            });
+            };
+            // Add to in-transit list if status is SHIPPED or OUT_FOR_DELIVERY
+            if (String(order.status).toUpperCase() === 'SHIPPED' || String(order.status).toUpperCase() === 'OUT_FOR_DELIVERY') {
+                inTransitOrdersWithProfit.push(orderData);
+            }
+            ordersWithProfit.push(orderData);
         }
         
         const totalCosts = totalProductCosts + totalDeliveryCosts + totalMarketingCosts;
@@ -216,7 +220,8 @@ export async function GET(req) {
         return NextResponse.json({
             success: true,
             report,
-            orders: ordersWithProfit
+            orders: ordersWithProfit,
+            inTransitOrders: inTransitOrdersWithProfit
         });
         
     } catch (error) {

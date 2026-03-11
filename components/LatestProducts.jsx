@@ -1,7 +1,7 @@
 'use client'
 
 import { useDispatch, useSelector } from 'react-redux'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import axios from 'axios'
 import Image from 'next/image'
 import Link from 'next/link'
@@ -22,6 +22,11 @@ const getImageSrc = (product, index = 0) => {
     if (typeof product.images[index] === 'string') return product.images[index]
   }
   return 'https://ik.imagekit.io/jrstupuke/placeholder.png'
+}
+
+const isVideoUrl = (url) => {
+  if (!url || typeof url !== 'string') return false
+  return /\.(mp4|webm|ogg|mov|m4v)(\?|#|$)/i.test(url)
 }
 
 // Helper to normalize price-like values (handles numbers and strings with currency symbols)
@@ -65,6 +70,7 @@ const getMrpPrice = (product) => {
 
 const ProductCard = ({ product }) => {
   const [hovered, setHovered] = useState(false)
+  const videoRef = useRef(null)
   const dispatch = useDispatch()
   const { getToken } = useAuth()
   const cartItems = useSelector(state => state.cart.cartItems)
@@ -72,6 +78,7 @@ const ProductCard = ({ product }) => {
 
   const primaryImage = getImageSrc(product, 0)
   const secondaryImage = getImageSrc(product, 1)
+  const primaryIsVideo = isVideoUrl(primaryImage)
 
   let priceNum = getSalePrice(product)
   let mrpNum = getMrpPrice(product)
@@ -93,6 +100,17 @@ const ProductCard = ({ product }) => {
   const hasSecondary = secondaryImage !== 'https://ik.imagekit.io/jrstupuke/placeholder.png' && 
                        secondaryImage !== primaryImage &&
                        product.images?.length > 1
+  const enableHoverMedia = hasSecondary || primaryIsVideo
+
+  useEffect(() => {
+    if (!primaryIsVideo || !videoRef.current) return
+    if (hovered) {
+      videoRef.current.play().catch(() => {})
+    } else {
+      videoRef.current.pause()
+      videoRef.current.currentTime = 0
+    }
+  }, [hovered, primaryIsVideo])
 
   const explicitDiscount = parseAmount(
     product.discountPercent ??
@@ -162,8 +180,8 @@ const ProductCard = ({ product }) => {
     <Link
       href={`/product/${product.slug || product._id || ''}`}
       className={`group bg-white rounded-2xl border border-slate-200/80 ${hasSecondary ? 'hover:shadow-xl' : 'hover:shadow-md'} transition-all duration-300 flex flex-col relative overflow-hidden hover:-translate-y-0.5`}
-      onMouseEnter={hasSecondary ? () => setHovered(true) : null}
-      onMouseLeave={hasSecondary ? () => setHovered(false) : null}
+      onMouseEnter={enableHoverMedia ? () => setHovered(true) : null}
+      onMouseLeave={enableHoverMedia ? () => setHovered(false) : null}
     >
       {/* Image Container */}
       <div className="relative w-full h-40 sm:h-64 overflow-hidden bg-gray-50 aspect-square sm:aspect-auto">
@@ -172,19 +190,40 @@ const ProductCard = ({ product }) => {
             Fast Delivery
           </span>
         )}
-        <Image
-          src={primaryImage}
-          alt={productName}
-          fill
-          unoptimized
-          style={{ objectFit: 'cover' }}
-          className={`w-full h-full object-cover z-0 ${hasSecondary ? 'transition-opacity duration-500' : ''} ${
-            hasSecondary && hovered ? 'opacity-0' : 'opacity-100'
-          }`}
-          sizes="(max-width: 768px) 100vw, (max-width: 1300px) 50vw, 25vw"
-          priority
-          onError={(e) => { e.currentTarget.src = 'https://ik.imagekit.io/jrstupuke/placeholder.png' }}
-        />
+        {primaryIsVideo ? (
+          <video
+            ref={videoRef}
+            src={primaryImage}
+            className="w-full h-full object-cover z-0"
+            muted
+            loop
+            playsInline
+            preload="metadata"
+            disablePictureInPicture
+            controlsList="nodownload noplaybackrate noremoteplayback"
+            onContextMenu={(e) => e.preventDefault()}
+            onVolumeChange={(e) => {
+              if (!e.currentTarget.muted || e.currentTarget.volume !== 0) {
+                e.currentTarget.muted = true
+                e.currentTarget.volume = 0
+              }
+            }}
+          />
+        ) : (
+          <Image
+            src={primaryImage}
+            alt={productName}
+            fill
+            unoptimized
+            style={{ objectFit: 'cover' }}
+            className={`w-full h-full object-cover z-0 ${hasSecondary ? 'transition-opacity duration-500' : ''} ${
+              hasSecondary && hovered ? 'opacity-0' : 'opacity-100'
+            }`}
+            sizes="(max-width: 768px) 100vw, (max-width: 1300px) 50vw, 25vw"
+            priority
+            onError={(e) => { e.currentTarget.src = 'https://ik.imagekit.io/jrstupuke/placeholder.png' }}
+          />
+        )}
 
         {hasSecondary && (
           <Image

@@ -124,18 +124,108 @@ export async function POST(request) {
             }
         );
 
-        // TODO: Integrate with actual Delhivery API to send order
-        // For now, we're just marking it as sent and updating status
 
-        return new Response(JSON.stringify({
-            success: true,
-            message: 'Order sent to Delhivery successfully. Waiting for AWB assignment.',
-            orderStatus: 'PENDING_ASSIGNMENT',
-            orderData
-        }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' }
-        });
+        // Integrate with Delhivery API
+        const shipmentPayload = {
+            reference_id: order._id,
+            shipments: [
+                {
+                    waybill: undefined, // Will be assigned by backend pool logic
+                    order: order.shortOrderNumber?.toString() || order._id.toString(),
+                    name: order.shippingAddress.name || 'Customer',
+                    address: order.shippingAddress.street || '',
+                    city: order.shippingAddress.city || '',
+                    state: order.shippingAddress.state || '',
+                    country: order.shippingAddress.country || 'India',
+                    phone: order.shippingAddress.phone || '',
+                    payment_mode: order.paymentMethod === 'COD' ? 'COD' : 'Prepaid',
+                    total_amount: order.total || 0,
+                    cod_amount: order.paymentMethod === 'COD' ? order.total || 0 : 0,
+                    weight: order.shipmentWeight || 0.5,
+                    quantity: order.orderItems?.length || 1,
+                    seller_gst_tin: order.sellerGst || '',
+                    // Add more fields as needed
+                }
+            ]
+        };
+
+        // Call the Delhivery create-shipment API (your backend pool logic)
+        let baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.BASE_URL || '';
+        if (!baseUrl) {
+            console.error('BASE_URL is not set in environment variables.');
+            return new Response(JSON.stringify({
+                error: 'Server misconfiguration: BASE_URL is not set. Please set NEXT_PUBLIC_BASE_URL or BASE_URL in your .env file.'
+            }), {
+                status: 500,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
+        if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
+        let delhiveryData = null;
+        try {
+            const delhiveryRes = await fetch(`${baseUrl}/api/delhivery/create-shipment`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(shipmentPayload)
+            });
+            delhiveryData = await delhiveryRes.json();
+        } catch (err) {
+            console.error('Error calling Delhivery create-shipment API:', err);
+            return new Response(JSON.stringify({
+                error: 'Failed to contact Delhivery shipment API',
+                details: err.message
+            }), {
+                status: 500,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
+
+        if (delhiveryData && delhiveryData.success && delhiveryData.trackingId) {
+            // Mark order as sent, update trackingId, etc.
+            await Order.updateOne(
+                { _id: orderId, storeId: sellerId },
+                {
+                    $set: {
+                        sentToDelhivery: true,
+                        sentToDelhiveryAt: new Date(),
+                        orderStatus: 'PENDING_ASSIGNMENT',
+                        trackingId: delhiveryData.trackingId,
+                        courier: 'Delhivery',
+                        statusTimeline: [
+                            {
+                                status: 'ORDER_PLACED',
+                                timestamp: order.createdAt || new Date(),
+                                description: 'Order received'
+                            },
+                            {
+                                status: 'PENDING_ASSIGNMENT',
+                                timestamp: new Date(),
+                                description: 'Sent to courier - waiting for AWB assignment'
+                            }
+                        ]
+                    }
+                }
+            );
+            return new Response(JSON.stringify({
+                success: true,
+                message: 'Order sent to Delhivery. AWB assigned.',
+                trackingId: delhiveryData.trackingId,
+                delhivery: delhiveryData.delhivery
+            }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        } else {
+            // Delhivery failed, show error
+            return new Response(JSON.stringify({
+                success: false,
+                error: (delhiveryData && delhiveryData.error) || 'Delhivery did not assign AWB',
+                delhivery: (delhiveryData && (delhiveryData.delhivery || delhiveryData)) || null
+            }), {
+                status: 400,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
 
     } catch (error) {
         console.error('Send to Delhivery error:', error);

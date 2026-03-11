@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import toast from "react-hot-toast";
 import axios from "axios";
 import { countryCodes } from "@/assets/countryCodes";
 import { indiaStatesAndDistricts } from "@/assets/indiaStatesAndDistricts";
@@ -549,13 +550,28 @@ export default function CheckoutPage() {
 
   const handleAutoFillClick = async () => {
     const pincode = form.pincode?.trim();
-    
     // If pincode is already filled and valid, fetch directly
     if (pincode && pincode.length === 6 && /^\d{6}$/.test(pincode)) {
       try {
+        // 1. Check Delhivery serviceability
+        const delhiveryRes = await fetch(`/api/delhivery/pincode-serviceability?pincode=${pincode}`);
+        const delhiveryData = await delhiveryRes.json();
+        let isServiceable = false;
+        // Delhivery API returns array for normal, object for heavy
+        if (Array.isArray(delhiveryData) && delhiveryData.length > 0) {
+          // Normal API: remark blank means serviceable
+          isServiceable = !delhiveryData[0]?.remark;
+        } else if (delhiveryData?.delivery_codes) {
+          // Heavy API: check payment_type or NSZ
+          isServiceable = delhiveryData.delivery_codes.some(dc => dc.postal_code === pincode && (!dc.remark || dc.remark === ''));
+        }
+        if (!isServiceable) {
+          toast.error("Sorry, this pincode is not serviceable for delivery.");
+          return;
+        }
+        // 2. Fetch address details from Indian Postal API
         const response = await fetch(`https://api.postalpincode.in/pincode/${pincode}`);
         const data = await response.json();
-
         if (data[0]?.Status === "Success" && data[0]?.PostOffice?.length > 0) {
           const postOffice = data[0].PostOffice[0];
           handlePincodeSubmit({

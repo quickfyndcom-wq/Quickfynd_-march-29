@@ -31,6 +31,7 @@ export default function SalesReport() {
     const [fromDate, setFromDate] = useState('');
     const [toDate, setToDate] = useState('');
     const [ordersData, setOrdersData] = useState([]);
+    const [inTransitOrders, setInTransitOrders] = useState([]);
     
     useEffect(() => {
         if (!authLoading && !user) {
@@ -57,6 +58,7 @@ export default function SalesReport() {
             
             setReportData(response.data.report);
             setOrdersData(response.data.orders);
+            setInTransitOrders(response.data.inTransitOrders || []);
         } catch (error) {
             console.error('Error fetching report:', error);
             toast.error(error?.response?.data?.error || 'Failed to load report');
@@ -98,6 +100,10 @@ export default function SalesReport() {
     
     const isProfitable = reportData?.totalProfit >= 0;
     
+    // Calculate delivered order profit (must be after ordersData is defined)
+    const deliveredOrders = Array.isArray(ordersData) ? ordersData.filter(order => String(order.status).toUpperCase() === 'DELIVERED') : [];
+    const deliveredProfit = deliveredOrders.reduce((sum, order) => sum + (order.profit || 0), 0);
+
     return (
         <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-white p-6">
             <div className="max-w-7xl mx-auto space-y-6">
@@ -236,6 +242,15 @@ export default function SalesReport() {
                         <p className="text-sm text-purple-100 mt-2">Avg Profit: {currency}{reportData?.avgProfit?.toLocaleString('en-IN') || 0}</p>
                     </div>
                     
+                    {/* Delivered Orders Profit */}
+                    <div className="bg-gradient-to-br from-green-400 to-green-600 rounded-xl shadow-lg p-6 text-white">
+                        <div className="flex items-center justify-between mb-2">
+                            <span className="text-green-100">Delivered Order Profit</span>
+                            <TrendingUp size={24} className="text-green-200" />
+                        </div>
+                        <p className="text-3xl font-bold">{currency}{deliveredProfit.toLocaleString('en-IN')}</p>
+                        <p className="text-sm text-green-100 mt-2">{deliveredOrders.length} delivered orders</p>
+                    </div>
                 </div>
                 
                 {/* Marketing Expenses (if tracked) */}
@@ -284,7 +299,6 @@ export default function SalesReport() {
                                     ordersData.map((order) => {
                                         const orderProfit = order.profit || 0;
                                         const isOrderProfitable = orderProfit >= 0;
-                                        
                                         return (
                                             <tr key={order._id} className="hover:bg-slate-50 transition-colors">
                                                 <td className="px-6 py-4 text-sm font-medium text-slate-900">
@@ -328,6 +342,64 @@ export default function SalesReport() {
                         </table>
                     </div>
                 </div>
+                
+                {/* In-Transit Orders Table */}
+                {inTransitOrders && inTransitOrders.length > 0 && (
+                    <div className="bg-white rounded-xl shadow-md border border-yellow-200 overflow-hidden mt-8">
+                        <div className="p-6 border-b border-yellow-200 bg-gradient-to-r from-yellow-50 to-white">
+                            <h3 className="text-xl font-bold text-yellow-800">Projected Profit (In-Transit Orders)</h3>
+                            <p className="text-sm text-yellow-700 mt-1">Orders that are shipped or out for delivery (not yet delivered)</p>
+                        </div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full">
+                                <thead className="bg-yellow-100 border-b border-yellow-200">
+                                    <tr>
+                                        <th className="px-6 py-3 text-left text-xs font-semibold text-yellow-700 uppercase">Order #</th>
+                                        <th className="px-6 py-3 text-left text-xs font-semibold text-yellow-700 uppercase">Date</th>
+                                        <th className="px-6 py-3 text-left text-xs font-semibold text-yellow-700 uppercase">Revenue</th>
+                                        <th className="px-6 py-3 text-left text-xs font-semibold text-yellow-700 uppercase">Product Cost</th>
+                                        <th className="px-6 py-3 text-left text-xs font-semibold text-yellow-700 uppercase">Delivery</th>
+                                        <th className="px-6 py-3 text-left text-xs font-semibold text-yellow-700 uppercase">Projected Profit</th>
+                                        <th className="px-6 py-3 text-left text-xs font-semibold text-yellow-700 uppercase">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-yellow-200">
+                                    {inTransitOrders.map((order) => {
+                                        const orderProfit = order.profit || 0;
+                                        const isOrderProfitable = orderProfit >= 0;
+                                        return (
+                                            <tr key={order._id} className="hover:bg-yellow-50 transition-colors">
+                                                <td className="px-6 py-4 text-sm font-medium text-yellow-900">
+                                                    #{order.shortOrderNumber}
+                                                </td>
+                                                <td className="px-6 py-4 text-sm text-yellow-700">
+                                                    {new Date(order.createdAt).toLocaleDateString('en-IN')}
+                                                </td>
+                                                <td className="px-6 py-4 text-sm font-semibold text-yellow-900">
+                                                    {currency}{order.total?.toLocaleString('en-IN') || 0}
+                                                </td>
+                                                <td className="px-6 py-4 text-sm text-yellow-700">
+                                                    {currency}{order.productCost?.toLocaleString('en-IN') || 0}
+                                                </td>
+                                                <td className="px-6 py-4 text-sm text-yellow-700">
+                                                    {currency}{order.shippingFee?.toLocaleString('en-IN') || 0}
+                                                </td>
+                                                <td className={`px-6 py-4 text-sm font-bold ${isOrderProfitable ? 'text-emerald-600' : 'text-red-600'}`}>
+                                                    {isOrderProfitable ? '+' : ''}{currency}{orderProfit.toLocaleString('en-IN')}
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <span className={`px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800`}>
+                                                        {order.status}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                )}
                 
                 {/* Monthly Breakdown */}
                 {reportData?.monthlyData && reportData.monthlyData.length > 0 && (

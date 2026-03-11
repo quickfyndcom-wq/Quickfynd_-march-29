@@ -1,7 +1,7 @@
 'use client'
 
 import { useDispatch, useSelector } from 'react-redux'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import axios from 'axios'
 import Image from 'next/image'
 import Link from 'next/link'
@@ -23,9 +23,15 @@ const getImageSrc = (product, index = 0) => {
   return 'https://ik.imagekit.io/jrstupuke/placeholder.png'
 }
 
+const isVideoUrl = (url) => {
+  if (!url || typeof url !== 'string') return false
+  return /\.(mp4|webm|ogg|mov|m4v)(\?|#|$)/i.test(url)
+}
+
 // Product Card Component
 const ProductCard = ({ product }) => {
   const [hovered, setHovered] = useState(false)
+  const videoRef = useRef(null)
   const dispatch = useDispatch()
   const { getToken } = useAuth()
   const cartItems = useSelector(state => state.cart.cartItems)
@@ -33,11 +39,23 @@ const ProductCard = ({ product }) => {
 
   const primaryImage = getImageSrc(product, 0)
   const secondaryImage = getImageSrc(product, 1)
+  const primaryIsVideo = isVideoUrl(primaryImage)
   
   // Only has secondary if it exists, is not placeholder, and is different from primary
   const hasSecondary = secondaryImage !== 'https://ik.imagekit.io/jrstupuke/placeholder.png' && 
                        secondaryImage !== primaryImage &&
                        product.images?.length > 1
+  const enableHoverMedia = hasSecondary || primaryIsVideo
+
+  useEffect(() => {
+    if (!primaryIsVideo || !videoRef.current) return
+    if (hovered) {
+      videoRef.current.play().catch(() => {})
+    } else {
+      videoRef.current.pause()
+      videoRef.current.currentTime = 0
+    }
+  }, [hovered, primaryIsVideo])
   
   const discount =
     product.mrp && product.mrp > product.price
@@ -71,8 +89,8 @@ const ProductCard = ({ product }) => {
     <Link
       href={`/product/${product.slug || product.id || ''}`}
       className={`group bg-white rounded-2xl border border-gray-200 shadow-sm ${hasSecondary ? 'hover:shadow-lg' : ''} transition-all duration-300 flex flex-col w-full h-full relative`}
-      onMouseEnter={hasSecondary ? () => setHovered(true) : null}
-      onMouseLeave={hasSecondary ? () => setHovered(false) : null}
+      onMouseEnter={enableHoverMedia ? () => setHovered(true) : null}
+      onMouseLeave={enableHoverMedia ? () => setHovered(false) : null}
     >
       {/* Image Container */}
       <div className="relative w-full h-56 overflow-hidden bg-gray-50" style={{ borderRadius: '10px 10px 0 0' }}>
@@ -81,19 +99,40 @@ const ProductCard = ({ product }) => {
             Fast Delivery
           </span>
         )}
-        <Image
-          src={primaryImage}
-          alt={productName}
-          fill
-          unoptimized
-          style={{ objectFit: 'cover' }}
-          className={`w-full h-full object-cover ${hasSecondary ? 'transition-opacity duration-500' : ''} ${
-            hasSecondary && hovered ? 'opacity-0' : 'opacity-100'
-          }`}
-          sizes="(max-width: 768px) 100vw, (max-width: 1300px) 50vw, 25vw"
-          priority
-          onError={(e) => { e.currentTarget.src = 'https://ik.imagekit.io/jrstupuke/placeholder.png' }}
-        />
+        {primaryIsVideo ? (
+          <video
+            ref={videoRef}
+            src={primaryImage}
+            className="w-full h-full object-cover"
+            muted
+            loop
+            playsInline
+            preload="metadata"
+            disablePictureInPicture
+            controlsList="nodownload noplaybackrate noremoteplayback"
+            onContextMenu={(e) => e.preventDefault()}
+            onVolumeChange={(e) => {
+              if (!e.currentTarget.muted || e.currentTarget.volume !== 0) {
+                e.currentTarget.muted = true
+                e.currentTarget.volume = 0
+              }
+            }}
+          />
+        ) : (
+          <Image
+            src={primaryImage}
+            alt={productName}
+            fill
+            unoptimized
+            style={{ objectFit: 'cover' }}
+            className={`w-full h-full object-cover ${hasSecondary ? 'transition-opacity duration-500' : ''} ${
+              hasSecondary && hovered ? 'opacity-0' : 'opacity-100'
+            }`}
+            sizes="(max-width: 768px) 100vw, (max-width: 1300px) 50vw, 25vw"
+            priority
+            onError={(e) => { e.currentTarget.src = 'https://ik.imagekit.io/jrstupuke/placeholder.png' }}
+          />
+        )}
 
         {hasSecondary && (
           <Image
@@ -220,18 +259,16 @@ const BestSelling = () => {
 
   return (
     <div className="px-4 my-16 max-w-[1250px] w-full mx-auto">
-    <Title
-  title="Fast Selling Products"
-  description="Grab the best deals before they're gone!"
-  visibleButton={false}
-/>
+      <Title
+        title="Fast Selling Products"
+        description="Grab the best deals before they're gone!"
+        visibleButton={false}
+      />
 
-  <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-3 md:gap-6">
+      <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-3 md:gap-6">
         {shown.map((product) => (
           <ProductCard key={product._id} product={product} />
         ))}
-        </div>
-      </div>
       </div>
     </div>
   )

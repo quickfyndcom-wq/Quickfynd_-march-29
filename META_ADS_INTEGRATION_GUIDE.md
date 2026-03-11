@@ -158,6 +158,6 @@ Example campaigns:
 **Your App Details:**
 - **Meta App ID**: 820947720963942
 - **Meta App Secret**: Stored securely in .env
-- **Meta Pixel ID**: 3893836517580309 (already connected)
+- **Meta Pixel ID**: 3093893836517580 (already connected)
 
 Your Meta Pixel is already tracking conversions. Now sync your ad spend to see complete ROI!

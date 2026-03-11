@@ -7,6 +7,7 @@ const StoreSidebar = ({storeInfo}) => {
     const pathname = usePathname()
 
     const sidebarLinks = [
+        { name: 'Most Selling Products', href: '/store/most-selling-products', icon: BarChart3 },
         { name: 'Dashboard', href: '/store', icon: HomeIcon },
         { name: 'Categories', href: '/store/categories', icon: FolderIcon },
         { name: 'Add Product', href: '/store/add-product', icon: SquarePlusIcon },
@@ -16,6 +17,7 @@ const StoreSidebar = ({storeInfo}) => {
         { name: 'Navbar Menu', href: '/store/navbar-menu', icon: LayoutListIcon },
         { name: 'Home Categories', href: '/store/storefront/home-menu-categories', icon: FolderIcon },
         { name: 'Hero Slider', href: '/store/storefront/hero-slider', icon: Sparkles },
+        { name: 'Carousel Slider', href: '/store/storefront/carousel-slider', icon: Sparkles },
         { name: 'Deals of the Day', href: '/store/storefront/deals', icon: StarIcon },
         { name: 'Promotional Offers', href: '/store/personalized-offers', icon: Gift },
         { name: 'Media', href: '/store/media', icon: ImageIcon },
@@ -56,6 +58,7 @@ const StoreSidebar = ({storeInfo}) => {
                 '/store/navbar-menu',
                 '/store/storefront/home-menu-categories',
                 '/store/storefront/hero-slider',
+                '/store/storefront/carousel-slider',
                 '/store/storefront/deals',
                 '/store/media',
             ]
@@ -80,6 +83,7 @@ const StoreSidebar = ({storeInfo}) => {
                 '/store/return-requests',
                 '/store/balance',
                 '/store/sales-report',
+                '/store/most-selling-products',
             ]
         },
         {
@@ -105,23 +109,6 @@ const StoreSidebar = ({storeInfo}) => {
             return pathname === href.split('#')[0];
         }
         return pathname === href;
-    }
-
-    const getSectionIcon = (sectionName) => {
-        switch (sectionName) {
-            case 'Core':
-                return HomeIcon;
-            case 'Storefront':
-                return Sparkles;
-            case 'Marketing':
-                return Gift;
-            case 'Sales & Operations':
-                return LayoutListIcon;
-            case 'Customers & Support':
-                return UsersIcon;
-            default:
-                return LayoutListIcon;
-        }
     }
 
     const getSectionTheme = (sectionName) => {
@@ -207,6 +194,30 @@ const StoreSidebar = ({storeInfo}) => {
         }
     }
 
+    // Helper to get section icon by section name
+    function getSectionIcon(sectionName) {
+        switch (sectionName) {
+            case 'Core':
+                return HomeIcon;
+            case 'Storefront':
+                return LayoutListIcon;
+            case 'Orders':
+                return ShoppingCart;
+            case 'Customers':
+                return UsersIcon;
+            case 'Promotions':
+                return Gift;
+            case 'Support':
+                return MessageSquare;
+            case 'Notifications':
+                return BellIcon;
+            case 'Media':
+                return ImageIcon;
+            default:
+                return StarIcon;
+        }
+    }
+
     return (
         <div className="flex h-screen">
             {/* Sidebar */}
@@ -233,41 +244,36 @@ const StoreSidebar = ({storeInfo}) => {
 
                                 <div className="space-y-1">
                                     {section.links.map((href) => {
-                                            const link = linkByHref[href]
-                                            if (!link) return null
-
-                                            const Icon = link.icon
-                                            const isActive = resolveActive(link.href)
-                                            return (
-                                                <Link
-                                                    key={`${section.name}-${link.href}`}
-                                                    href={link.href}
-                                                    className={`group flex items-center gap-3 px-4 py-3 text-sm rounded-xl transition-all duration-200 ${
-                                                        isActive
-                                                            ? `${theme.activeLink} scale-[1.01]`
-                                                            : `text-slate-700 ${theme.hoverLink} hover:shadow-sm`
-                                                    }`}
-                                                >
-                                                    <div className={`p-1.5 rounded-lg transition-colors ${
-                                                        isActive 
-                                                            ? `${theme.activeIconBg}`
-                                                            : `bg-slate-100 ${theme.hoverIconBg}`
-                                                    }`}>
-                                                        <Icon size={18} className={isActive ? theme.activeIconText : `text-slate-600 ${theme.hoverIconText}`} />
-                                                    </div>
-                                                    <span className="flex-1">{link.name}</span>
-                                                    {isActive && (
-                                                        <div className={`w-1.5 h-1.5 rounded-full ${theme.dot} animate-pulse`}></div>
-                                                    )}
-                                                </Link>
-                                            )
-                                        })}
+                                        const link = linkByHref[href];
+                                        if (!link) return null;
+                                        const Icon = link.icon;
+                                        const isActive = resolveActive(link.href);
+                                        return (
+                                            <Link
+                                                key={`${section.name}-${link.href}`}
+                                                href={link.href}
+                                                className={`group flex items-center gap-3 px-4 py-3 text-sm rounded-xl transition-all duration-200 ${
+                                                    isActive
+                                                        ? `${theme.activeLink} scale-[1.01]`
+                                                        : `text-slate-700 ${theme.hoverLink} hover:shadow-sm`
+                                                }`}
+                                            >
+                                                <div className={`p-1.5 rounded-lg transition-colors ${
+                                                    isActive
+                                                        ? `${theme.activeIconBg}`
+                                                        : `bg-slate-100 ${theme.hoverIconBg}`
+                                                }`}>
+                                                    <Icon size={18} className={isActive ? theme.activeIconText : theme.hoverIconText} />
+                                                </div>
+                                                <span className="truncate">{link.name}</span>
+                                            </Link>
+                                        );
+                                    })}
                                 </div>
                             </div>
-                        )
+                        );
                     })}
                 </div>
-
                 {/* Settings Button */}
                 <div className="border-t border-slate-200 px-3 py-4 bg-slate-50/50">
                     <Link
@@ -283,7 +289,7 @@ const StoreSidebar = ({storeInfo}) => {
                 </div>
             </div>
         </div>
-    )
+    );
 }
 
 export default StoreSidebar

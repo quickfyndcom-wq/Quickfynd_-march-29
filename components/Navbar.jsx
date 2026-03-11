@@ -27,6 +27,7 @@ const Navbar = () => {
   const [imageSearchLoading, setImageSearchLoading] = useState(false);
   const [showImageSearchResults, setShowImageSearchResults] = useState(false);
   const imagePasteCooldownRef = useRef(0);
+  const wishlistFetchInFlightRef = useRef(false);
 
   const normalizeErrorMessage = (value, fallback = 'Something went wrong') => {
     if (!value) return fallback;
@@ -540,31 +541,56 @@ const Navbar = () => {
   }, [firebaseUser, pathname]);
 
   const fetchWishlistCount = async () => {
+    if (wishlistFetchInFlightRef.current) return;
+    wishlistFetchInFlightRef.current = true;
     try {
       if (!auth.currentUser) {
         // Get guest wishlist count from localStorage
         try {
           const guestWishlist = JSON.parse(localStorage.getItem('guestWishlist') || '[]');
-          setWishlistCount(Array.isArray(guestWishlist) ? guestWishlist.length : 0);
+          const validGuestItems = Array.isArray(guestWishlist)
+            ? guestWishlist.filter((item) => item && (item.productId || item.id))
+            : [];
+          setWishlistCount(validGuestItems.length);
         } catch {
           setWishlistCount(0);
         }
         return;
       }
+
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        return;
+      }
+
       const token = await auth.currentUser.getIdToken();
-      const { data } = await axios.get('/api/wishlist', {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 10000);
+      const response = await fetch('/api/wishlist', {
+        method: 'GET',
         headers: {
           Authorization: `Bearer ${token}`,
         },
+        signal: controller.signal,
       });
+      clearTimeout(timer);
+
+      if (!response.ok) {
+        return;
+      }
+
+      const data = await response.json().catch(() => ({}));
       // Only count wishlist items that have valid products (same filter as wishlist page)
       const validItems = data.wishlist?.filter(item => {
         return item && item.productId && item.product;
       }) || [];
       setWishlistCount(validItems.length);
     } catch (error) {
-      console.error('Error fetching wishlist count:', error);
-      setWishlistCount(0);
+      const isAbortError = error?.name === 'AbortError';
+      if (!isAbortError) {
+        console.error('Error fetching wishlist count:', error);
+      }
+    } finally {
+      wishlistFetchInFlightRef.current = false;
     }
   };
 

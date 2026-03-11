@@ -25,7 +25,15 @@ export async function POST(request) {
         if (!storeId) {
             return Response.json({ error: "Store not approved or not found" }, { status: 403 });
         }
-        const formData = await request.formData();
+
+        let formData;
+        try {
+            formData = await request.formData();
+        } catch (parseError) {
+            return Response.json({
+                error: 'Failed to parse upload body as FormData.'
+            }, { status: 400 });
+        }
         const image = formData.get('image');
         const type = formData.get('type'); // 'logo' or 'banner'
         
@@ -35,9 +43,16 @@ export async function POST(request) {
         
         // Convert file to buffer
         const buffer = Buffer.from(await image.arrayBuffer());
+        const isVideo = typeof image?.type === 'string' && image.type.startsWith('video/');
         
         // Determine folder and transformation based on type
-        const folder = type === 'logo' ? 'stores/logos' : type === 'banner' ? 'stores/banners' : 'products/descriptions';
+        const folder = isVideo
+            ? 'products/videos'
+            : type === 'logo'
+                ? 'stores/logos'
+                : type === 'banner'
+                    ? 'stores/banners'
+                    : 'products/descriptions';
         const fileName = type ? `${type}_${Date.now()}_${image.name}` : `desc_${Date.now()}_${image.name}`;
         
         // Upload to ImageKit
@@ -48,7 +63,9 @@ export async function POST(request) {
         });
         
         // Return transformed URL based on type
-        const url = type === 'banner'
+        const url = isVideo
+            ? response.url
+            : type === 'banner'
             ? response.url
             : imagekit.url({
                 path: response.filePath,

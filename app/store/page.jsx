@@ -35,6 +35,9 @@ export default function Dashboard() {
         abandonedCarts: 0,
         ratings: [],
     })
+    // Orders for detailed stats
+    const [orders, setOrders] = useState([]);
+    const [ordersLoading, setOrdersLoading] = useState(true);
     
     // Invitation states
     const [inviteEmail, setInviteEmail] = useState('')
@@ -71,6 +74,7 @@ export default function Dashboard() {
             if (!user) {
                 setLoading(false);
                 setLoadingUsers(false);
+                setOrdersLoading(false);
                 return;
             }
 
@@ -80,7 +84,13 @@ export default function Dashboard() {
                     headers: { Authorization: `Bearer ${token}` }
                 });
                 setDashboardData(data.dashboardData);
-                
+
+                // Fetch all orders for detailed stats
+                const ordersRes = await axios.get('/api/store/orders', {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+                setOrders(ordersRes.data.orders || []);
+
                 // Fetch team users
                 await fetchTeamUsers();
             } catch (error) {
@@ -88,6 +98,7 @@ export default function Dashboard() {
                 toast.error(error?.response?.data?.error || 'Failed to load dashboard');
             } finally {
                 setLoading(false);
+                setOrdersLoading(false);
             }
         };
 
@@ -122,7 +133,7 @@ export default function Dashboard() {
         }
     };
 
-    if (authLoading || loading) return <Loading />
+    if (authLoading || loading || ordersLoading) return <Loading />
 
     if (!user) {
         return (
@@ -131,6 +142,19 @@ export default function Dashboard() {
             </div>
         );
     }
+
+    // --- Detailed order/earnings summary ---
+    const today = new Date();
+    const todayStr = today.toISOString().slice(0, 10);
+    const isToday = (date) => date && date.startsWith(todayStr);
+    const deliveredOrders = orders.filter(o => o.status === 'DELIVERED');
+    const codOrders = orders.filter(o => (o.paymentMethod || '').toLowerCase() === 'cod');
+    const cardOrders = orders.filter(o => (o.paymentMethod || '').toLowerCase() !== 'cod');
+    const inTransitOrders = orders.filter(o => ['SHIPPED', 'OUT_FOR_DELIVERY', 'IN_TRANSIT'].includes(o.status));
+    const pendingPaymentOrders = orders.filter(o => !o.isPaid && (o.status !== 'CANCELLED'));
+    const canceledOrders = orders.filter(o => o.status === 'CANCELLED');
+    const todayOrders = orders.filter(o => isToday(o.createdAt));
+    const deliveredEarnings = deliveredOrders.reduce((sum, o) => sum + (o.total || 0), 0);
 
     return (
         <div className=" text-slate-500 mb-28">
@@ -143,6 +167,18 @@ export default function Dashboard() {
                     <UserPlusIcon size={18} />
                     <span>Invite Team Members</span>
                 </Link>
+            </div>
+
+            {/* Detailed Order/Earnings Summary */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5 my-8">
+                <SummaryCard label="Today's Orders" value={todayOrders.length} />
+                <SummaryCard label="Total Delivered" value={deliveredOrders.length} />
+                <SummaryCard label="Paid by Card" value={cardOrders.length} />
+                <SummaryCard label="COD Orders" value={codOrders.length} />
+                <SummaryCard label="In Transit" value={inTransitOrders.length} />
+                <SummaryCard label="Pending Payment" value={pendingPaymentOrders.length} />
+                <SummaryCard label="Canceled" value={canceledOrders.length} />
+                <SummaryCard label="Earnings (Delivered)" value={currency + deliveredEarnings} />
             </div>
 
             <div className="flex flex-wrap gap-5 my-10 mt-4">
@@ -159,16 +195,17 @@ export default function Dashboard() {
                 }
             </div>
 
-
-            {/* CarouselProducts and reviews removed as requested */}
-
-            {/* Customer Location Analytics */}
-            <div className="mt-10">
-                <CustomerLocationAnalytics />
-            </div>
-
             {/* Contact Us Messages Section */}
             <ContactMessagesSeller />
         </div>
     )
+// --- SummaryCard component ---
+function SummaryCard({ label, value }) {
+    return (
+        <div className="flex flex-col gap-2 border border-slate-200 p-4 rounded-lg bg-white shadow-sm">
+            <span className="text-xs text-slate-400">{label}</span>
+            <span className="text-xl font-bold text-slate-700">{value}</span>
+        </div>
+    );
+}
 }

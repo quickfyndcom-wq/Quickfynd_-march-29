@@ -13,11 +13,27 @@ import MobileProductActions from "./MobileProductActions";
 import { useAuth } from '@/lib/useAuth';
 import { trackMetaEvent } from "@/lib/metaPixelClient";
 
+const PLACEHOLDER_IMAGE = 'https://ik.imagekit.io/jrstupuke/placeholder.png';
+
+const resolveMediaUrl = (media) => {
+  if (typeof media === 'string' && media.trim()) return media;
+  if (media && typeof media === 'object') {
+    const direct = media.url || media.src || media.thumbnailUrl;
+    if (typeof direct === 'string' && direct.trim()) return direct;
+  }
+  return '';
+};
+
+const isVideoUrl = (url) => {
+  if (!url || typeof url !== 'string') return false;
+  return /\.(mp4|webm|ogg|mov|m4v)(\?|#|$)/i.test(url);
+};
+
 const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = null }) => {
   // Assume product loading state from redux if available
   const loading = useSelector(state => state.product?.status === 'loading');
   const currency = '₹';
-  const [mainImage, setMainImage] = useState(product.images?.[0]);
+  const [mainImage, setMainImage] = useState(resolveMediaUrl(product.images?.[0]) || PLACEHOLDER_IMAGE);
   const [quantity, setQuantity] = useState(1);
   const [isInWishlist, setIsInWishlist] = useState(false);
   const [showShareMenu, setShowShareMenu] = useState(false);
@@ -33,7 +49,11 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
   const [showSecurityInfo, setShowSecurityInfo] = useState(false);
   const [isQuickViewOpen, setIsQuickViewOpen] = useState(false);
   const [quickViewZoom, setQuickViewZoom] = useState(1);
-  const { isSignedIn, userId } = useAuth();
+  const [deliveryAddress, setDeliveryAddress] = useState(null);
+  const [deliveryAddressLoading, setDeliveryAddressLoading] = useState(false);
+  const { user, loading: authLoading, getToken } = useAuth();
+  const isSignedIn = Boolean(user);
+  const userId = user?.uid || null;
   const router = useRouter();
   const dispatch = useDispatch();
   const cartCount = useSelector((state) => state.cart.total);
@@ -103,6 +123,50 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
     };
     fetchReviews();
   }, [product._id]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchDeliveryAddress = async () => {
+      if (!isSignedIn) {
+        if (isMounted) {
+          setDeliveryAddress(null);
+          setDeliveryAddressLoading(false);
+        }
+        return;
+      }
+
+      try {
+        if (isMounted) setDeliveryAddressLoading(true);
+        const token = await getToken?.();
+        if (!token) {
+          if (isMounted) setDeliveryAddress(null);
+          return;
+        }
+
+        const { data } = await axios.get('/api/address', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        const addresses = Array.isArray(data?.addresses) ? data.addresses : [];
+        const primaryAddress =
+          addresses.find((addr) => addr?.isDefault || addr?.default || addr?.primary || addr?.isPrimary) ||
+          addresses[0] ||
+          null;
+        if (isMounted) setDeliveryAddress(primaryAddress);
+      } catch {
+        if (isMounted) setDeliveryAddress(null);
+      } finally {
+        if (isMounted) setDeliveryAddressLoading(false);
+      }
+    };
+
+    fetchDeliveryAddress();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isSignedIn, userId, getToken]);
 
   // Fetch FBT products
   useEffect(() => {
@@ -287,6 +351,38 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
 
   const paymentText = 'Secure transaction';
 
+  const hasFastDelivery = Boolean(
+    product?.fastDelivery || product?.fast_delivery ||
+    product?.fastDeliveryAvailable || product?.fast_delivery_available ||
+    product?.isFastDelivery || product?.is_fast_delivery ||
+    product?.fast || product?.expressDelivery || product?.express_delivery ||
+    product?.deliverySpeed === 'fast' || product?.delivery_speed === 'fast'
+  );
+
+  const getFastDeliveryDateLabel = () => {
+    const now = new Date();
+    const cutoffHour = 14; // 2pm
+    let daysToAdd = 2;
+    if (now.getHours() >= cutoffHour) {
+      daysToAdd = 3;
+    }
+    const deliveryDate = new Date(now);
+    deliveryDate.setDate(now.getDate() + daysToAdd);
+    const calendarDate = deliveryDate.toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: 'short'
+    });
+    const weekdayShort = deliveryDate.toLocaleDateString('en-IN', { weekday: 'short' });
+    return `${calendarDate}, ${weekdayShort}`;
+  };
+
+  const fastDeliveryDateLabel = getFastDeliveryDateLabel();
+  const deliveryAddressText = deliveryAddress
+    ? [deliveryAddress.street, deliveryAddress.city, deliveryAddress.state, deliveryAddress.zip]
+        .filter(Boolean)
+        .join(', ')
+    : '';
+
   const hasSellerMeta = Boolean(deliveredByText || soldByText || paymentText);
   const securityInfoRef = useRef(null);
 
@@ -359,6 +455,25 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
   }, []);
 
   const shareMenuRef = useRef(null);
+  const mediaList = (Array.isArray(product.images) ? product.images : [])
+    .map(resolveMediaUrl)
+    .filter(Boolean);
+  const getVideoThumbnailPreview = (index) => {
+    const fallback = mediaList[0] || PLACEHOLDER_IMAGE;
+    const candidate1 = mediaList[index + 1];
+    const candidate2 = mediaList[index + 2];
+    if (candidate1 && !isVideoUrl(candidate1)) return candidate1;
+    if (candidate2 && !isVideoUrl(candidate2)) return candidate2;
+    const firstImage = mediaList.find((item) => item && !isVideoUrl(item));
+    return firstImage || fallback;
+  };
+  const activeMedia = mainImage || mediaList[0] || PLACEHOLDER_IMAGE;
+  const isMainVideo = isVideoUrl(activeMedia);
+
+  useEffect(() => {
+    const initialMedia = mediaList[0] || PLACEHOLDER_IMAGE;
+    setMainImage(initialMedia);
+  }, [product?._id]);
 
   const aspectRatioClass = (() => {
     switch (product.imageAspectRatio) {
@@ -688,7 +803,7 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
             <div className="hidden lg:flex gap-2">
               {/* Thumbnail Gallery - Vertical with Scroll */}
               <div className="flex flex-col gap-2 w-14 flex-shrink-0 overflow-y-auto h-[500px] xl:h-[560px] max-h-[calc(100vh-140px)] scrollbar-hide cursor-grab active:cursor-grabbing">
-                {product.images?.map((image, index) => (
+                {mediaList.map((image, index) => (
                   <button
                     key={index}
                     onClick={() => setMainImage(image)}
@@ -698,15 +813,36 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
                         : 'border-gray-200 hover:border-gray-300'
                     }`}
                   >
-                    <Image
-                      src={image || 'https://ik.imagekit.io/jrstupuke/placeholder.png'}
-                      alt={`${product.name} ${index + 1}`}
-                      width={56}
-                      height={56}
-                      unoptimized
-                      className="object-cover w-full h-full"
-                      onError={(e) => { e.currentTarget.src = 'https://ik.imagekit.io/jrstupuke/placeholder.png'; }}
-                    />
+                    {isVideoUrl(image) ? (
+                      <div className="relative w-full h-full">
+                        <Image
+                          src={getVideoThumbnailPreview(index)}
+                          alt={`${product.name} ${index + 1}`}
+                          width={56}
+                          height={56}
+                          unoptimized
+                          className="object-cover w-full h-full"
+                          onError={(e) => { e.currentTarget.src = PLACEHOLDER_IMAGE; }}
+                        />
+                        <span className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                          <span className="w-5 h-5 rounded-full bg-black/60 flex items-center justify-center">
+                            <svg className="w-2.5 h-2.5 text-white" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                              <path d="M7 5.5v9l7-4.5-7-4.5z" />
+                            </svg>
+                          </span>
+                        </span>
+                      </div>
+                    ) : (
+                      <Image
+                        src={image || PLACEHOLDER_IMAGE}
+                        alt={`${product.name} ${index + 1}`}
+                        width={56}
+                        height={56}
+                        unoptimized
+                        className="object-cover w-full h-full"
+                        onError={(e) => { e.currentTarget.src = PLACEHOLDER_IMAGE; }}
+                      />
+                    )}
                   </button>
                 ))}
               </div>
@@ -759,17 +895,38 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
                     </button>
                   </div>
 
-                  <div className="overflow-hidden w-full h-full relative cursor-zoom-in" onClick={openQuickView}>
-                    <Image
-                      src={mainImage || 'https://ik.imagekit.io/jrstupuke/placeholder.png'}
-                      alt={product.name}
-                      fill
-                      unoptimized
-                      sizes="100vw"
-                      className="object-cover"
-                      priority
-                      onError={(e) => { e.currentTarget.src = 'https://ik.imagekit.io/jrstupuke/placeholder.png'; }}
-                    />
+                  <div className={`overflow-hidden w-full h-full relative ${isMainVideo ? '' : 'cursor-zoom-in'}`} onClick={openQuickView}>
+                    {isMainVideo ? (
+                      <video
+                        src={activeMedia}
+                        className="w-full h-full object-cover"
+                        autoPlay
+                        muted
+                        loop
+                        playsInline
+                        preload="metadata"
+                        disablePictureInPicture
+                        controlsList="nodownload noplaybackrate noremoteplayback"
+                        onContextMenu={(e) => e.preventDefault()}
+                        onVolumeChange={(e) => {
+                          if (!e.currentTarget.muted || e.currentTarget.volume !== 0) {
+                            e.currentTarget.muted = true
+                            e.currentTarget.volume = 0
+                          }
+                        }}
+                      />
+                    ) : (
+                      <Image
+                        src={activeMedia || PLACEHOLDER_IMAGE}
+                        alt={product.name}
+                        fill
+                        unoptimized
+                        sizes="100vw"
+                        className="object-cover"
+                        priority
+                        onError={(e) => { e.currentTarget.src = PLACEHOLDER_IMAGE; }}
+                      />
+                    )}
                   </div>
                 </div>
               </div>
@@ -823,23 +980,44 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
                   </button>
                 </div>
 
-                <div className="w-full h-full cursor-zoom-in" onClick={openQuickView}>
-                  <Image
-                    src={mainImage || 'https://ik.imagekit.io/jrstupuke/placeholder.png'}
-                    alt={product.name}
-                    fill
-                    unoptimized
-                    className="object-cover"
-                    priority
-                    onError={(e) => { e.currentTarget.src = 'https://ik.imagekit.io/jrstupuke/placeholder.png'; }}
-                  />
+                <div className={`w-full h-full ${isMainVideo ? '' : 'cursor-zoom-in'}`} onClick={openQuickView}>
+                  {isMainVideo ? (
+                    <video
+                      src={activeMedia}
+                      className="w-full h-full object-cover"
+                      autoPlay
+                      muted
+                      loop
+                      playsInline
+                      preload="metadata"
+                      disablePictureInPicture
+                      controlsList="nodownload noplaybackrate noremoteplayback"
+                      onContextMenu={(e) => e.preventDefault()}
+                      onVolumeChange={(e) => {
+                        if (!e.currentTarget.muted || e.currentTarget.volume !== 0) {
+                          e.currentTarget.muted = true
+                          e.currentTarget.volume = 0
+                        }
+                      }}
+                    />
+                  ) : (
+                    <Image
+                      src={activeMedia || PLACEHOLDER_IMAGE}
+                      alt={product.name}
+                      fill
+                      unoptimized
+                      className="object-cover"
+                      priority
+                      onError={(e) => { e.currentTarget.src = PLACEHOLDER_IMAGE; }}
+                    />
+                  )}
                 </div>
               </div>
             </div>
 
             {/* Mobile Thumbnail Gallery */}
             <div className="lg:hidden -mx-4 sm:mx-0 px-4 sm:px-0 flex gap-2 overflow-x-auto pb-2 scrollbar-hide cursor-grab active:cursor-grabbing">
-              {product.images?.map((image, index) => (
+              {mediaList.map((image, index) => (
                 <button
                   key={index}
                   onClick={() => setMainImage(image)}
@@ -849,15 +1027,36 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
                       : 'border-gray-200'
                   }`}
                 >
-                  <Image
-                    src={image || 'https://ik.imagekit.io/jrstupuke/placeholder.png'}
-                    alt={`${product.name} ${index + 1}`}
-                    width={56}
-                    height={56}
-                    unoptimized
-                    className="object-cover w-full h-full"
-                    onError={(e) => { e.currentTarget.src = 'https://ik.imagekit.io/jrstupuke/placeholder.png'; }}
-                  />
+                  {isVideoUrl(image) ? (
+                    <div className="relative w-full h-full">
+                      <Image
+                        src={getVideoThumbnailPreview(index)}
+                        alt={`${product.name} ${index + 1}`}
+                        width={56}
+                        height={56}
+                        unoptimized
+                        className="object-cover w-full h-full"
+                        onError={(e) => { e.currentTarget.src = PLACEHOLDER_IMAGE; }}
+                      />
+                      <span className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                        <span className="w-5 h-5 rounded-full bg-black/60 flex items-center justify-center">
+                          <svg className="w-2.5 h-2.5 text-white" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                            <path d="M7 5.5v9l7-4.5-7-4.5z" />
+                          </svg>
+                        </span>
+                      </span>
+                    </div>
+                  ) : (
+                    <Image
+                      src={image || PLACEHOLDER_IMAGE}
+                      alt={`${product.name} ${index + 1}`}
+                      width={56}
+                      height={56}
+                      unoptimized
+                      className="object-cover w-full h-full"
+                      onError={(e) => { e.currentTarget.src = PLACEHOLDER_IMAGE; }}
+                    />
+                  )}
                 </button>
               ))}
             </div>
@@ -887,10 +1086,13 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
               </a>
             </div> */}
 
+
             {/* Product Title */}
-            <h1 className="text-2xl md:text-3xl font-bold text-gray-900 leading-tight">
+       
+          
+            <h2 className="text-2xl md:text-3xl font-bold text-gray-900 leading-tight">
               {product.name}
-            </h1>
+            </h2>
 
             {/* Special Offer - Discount Badge */}
             {offerData?.discountBadge && (
@@ -1039,6 +1241,79 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
               )}
             </div>
 
+
+            {hasFastDelivery && (
+              <div className="w-full">
+                <h3 className="text-base font-semibold text-gray-900 mb-3">Delivery details</h3>
+
+                <div className="w-full rounded-lg border border-gray-200 overflow-hidden bg-white">
+                  <div className="px-3 py-2.5 bg-white border-b border-gray-200">
+                    {authLoading || (isSignedIn && deliveryAddressLoading) ? (
+                      <p className="text-sm text-gray-600">Loading saved address...</p>
+                    ) : isSignedIn ? (
+                      deliveryAddressText ? (
+                        <div className="flex items-center gap-2">
+                          <svg className="w-4 h-4 text-gray-700 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                            <path d="M10 2a5 5 0 00-5 5v3.382l-.724.724a1 1 0 00.708 1.708H8v3a1 1 0 102 0v-3h3.016a1 1 0 00.708-1.708L13 10.382V7a5 5 0 00-3-4.582V2z" />
+                          </svg>
+                          <span className="text-xs font-semibold text-gray-900 uppercase tracking-wide shrink-0">HOME</span>
+                          <span className="text-sm text-gray-700 truncate">{deliveryAddressText}</span>
+                          <button
+                            type="button"
+                            className="ml-auto text-sm text-gray-600 hover:text-gray-900"
+                            onClick={() => router.push('/dashboard/profile')}
+                            aria-label="Manage address"
+                          >
+                            ›
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm text-gray-700">No saved address found</p>
+                          <button
+                            type="button"
+                            onClick={() => router.push('/dashboard/profile')}
+                            className="text-sm font-semibold text-blue-700 hover:underline"
+                          >
+                            Add address
+                          </button>
+                        </div>
+                      )
+                    ) : (
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm text-gray-700">Sign in to use your saved address</p>
+                        <button
+                          type="button"
+                          onClick={() => router.push('/sign-in')}
+                          className="text-sm font-semibold text-blue-700 hover:underline"
+                        >
+                          Sign in
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="px-3 py-2 bg-white flex flex-col gap-1 group relative" style={{overflow: 'visible'}}>
+                    <div className="flex items-center gap-2 cursor-pointer relative group" tabIndex={0} style={{overflow: 'visible'}}>
+                      <svg className="w-4 h-4 text-gray-700 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                        <path d="M2 4a1 1 0 011-1h8a1 1 0 011 1v2h2.586a1 1 0 01.707.293l1.414 1.414A1 1 0 0117 8.414V12a2 2 0 01-2 2h-1a2 2 0 11-4 0H8a2 2 0 11-4 0H3a1 1 0 01-1-1V4zm10 4v2h3V8.828L14.172 8H12z" />
+                      </svg>
+                      <span className="text-sm font-semibold text-gray-900">Delivery by {fastDeliveryDateLabel}</span>
+                      <span className="ml-1 text-xs text-gray-400">ⓘ</span>
+                    </div>
+                    {(() => {
+                      const now = new Date();
+                      if (now.getHours() < 14) {
+                        return (
+                          <span className="text-xs text-gray-500 mt-0.5">Order before 2:00&nbsp;PM to get delivery by this date</span>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </div>
+                </div>
+              </div>
+            )}
             {/* Payment Offers */}
             <div>
               <h3 className="text-base font-semibold text-gray-900 mb-3">Offers</h3>
@@ -1635,6 +1910,7 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
               <X size={18} />
             </button>
 
+            {!isMainVideo && (
             <div className="absolute top-3 left-3 z-20 flex items-center gap-2 bg-white/95 border border-gray-200 rounded-full px-2 py-1.5 shadow-sm">
               <button
                 type="button"
@@ -1654,19 +1930,41 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
                 <PlusIcon size={14} />
               </button>
             </div>
+            )}
 
             <div className="w-full h-full bg-gray-100 overflow-auto">
               <div className="w-full h-full flex items-center justify-center p-4">
-                <img
-                  src={mainImage || 'https://ik.imagekit.io/jrstupuke/placeholder.png'}
-                  alt={product.name}
-                  className="max-w-full max-h-full object-contain select-none"
-                  style={{
-                    transform: `scale(${quickViewZoom})`,
-                    transformOrigin: 'center center',
-                    transition: 'transform 150ms ease'
-                  }}
-                />
+                {isMainVideo ? (
+                  <video
+                    src={activeMedia}
+                    className="max-w-full max-h-full object-contain"
+                    autoPlay
+                    muted
+                    loop
+                    playsInline
+                    preload="metadata"
+                    disablePictureInPicture
+                    controlsList="nodownload noplaybackrate noremoteplayback"
+                    onContextMenu={(e) => e.preventDefault()}
+                    onVolumeChange={(e) => {
+                      if (!e.currentTarget.muted || e.currentTarget.volume !== 0) {
+                        e.currentTarget.muted = true
+                        e.currentTarget.volume = 0
+                      }
+                    }}
+                  />
+                ) : (
+                  <img
+                    src={activeMedia || PLACEHOLDER_IMAGE}
+                    alt={product.name}
+                    className="max-w-full max-h-full object-contain select-none"
+                    style={{
+                      transform: `scale(${quickViewZoom})`,
+                      transformOrigin: 'center center',
+                      transition: 'transform 150ms ease'
+                    }}
+                  />
+                )}
               </div>
             </div>
           </div>
