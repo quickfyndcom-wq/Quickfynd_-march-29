@@ -14,6 +14,7 @@ import Wallet from '@/models/Wallet';
 import PersonalizedOffer from '@/models/PersonalizedOffer';
 import { sendOrderConfirmationEmail, sendGuestAccountCreationEmail } from '@/lib/email';
 import { fetchNormalizedDelhiveryTracking } from '@/lib/delhivery';
+import { getAuth } from '@/lib/firebase-admin';
 
 const PaymentMethod = {
     COD: 'COD',
@@ -219,12 +220,6 @@ export async function POST(request) {
             }
             const idToken = authHeader.split('Bearer ')[1];
             try {
-                const { getAuth } = await import('firebase-admin/auth');
-                const { initializeApp, cert, getApps } = await import('firebase-admin/app');
-                if (getApps().length === 0) {
-                    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY || '{}');
-                    initializeApp({ credential: cert(serviceAccount) });
-                }
                 const decodedToken = await getAuth().verifyIdToken(idToken);
                 userId = decodedToken.uid;
                 isPlusMember = decodedToken.plan === 'plus';
@@ -895,11 +890,6 @@ export async function GET(request) {
         let userId = null;
         if (authHeader && authHeader.startsWith('Bearer ')) {
             const idToken = authHeader.split('Bearer ')[1];
-            const { getAuth } = await import('firebase-admin/auth');
-            const { initializeApp, applicationDefault, getApps } = await import('firebase-admin/app');
-            if (getApps().length === 0) {
-                initializeApp({ credential: applicationDefault() });
-            }
             try {
                 const decodedToken = await getAuth().verifyIdToken(idToken);
                 userId = decodedToken.uid;

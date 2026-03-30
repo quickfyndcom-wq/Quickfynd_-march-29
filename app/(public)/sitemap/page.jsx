@@ -139,15 +139,27 @@ export default function SitemapPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-slate-50">
       {/* Header Section */}
-      <div className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white py-16 px-4">
+      <div className="px-4 pt-8 pb-2">
         <div className="max-w-[1280px] mx-auto">
-          <div className="flex items-center gap-3 mb-4">
-            <span className="text-4xl">📋</span>
-            <h1 className="text-4xl md:text-5xl font-bold">Sitemap</h1>
+          <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-900 via-blue-900 to-indigo-800 px-5 py-8 sm:px-8 sm:py-10 text-white shadow-lg">
+            <div className="pointer-events-none absolute -right-12 -top-12 h-36 w-36 rounded-full bg-white/10 blur-2xl" />
+            <div className="pointer-events-none absolute -left-10 -bottom-12 h-32 w-32 rounded-full bg-blue-300/20 blur-2xl" />
+
+            <div className="relative z-10">
+              <span className="inline-flex items-center rounded-full border border-white/25 bg-white/10 px-3 py-1 text-xs font-semibold tracking-wide text-blue-100">
+                Website Navigation
+              </span>
+
+              <div className="mt-4 flex items-center gap-3">
+                <span className="text-3xl sm:text-4xl">🗂️</span>
+                <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold leading-tight">Sitemap</h1>
+              </div>
+
+              <p className="mt-4 max-w-2xl text-sm sm:text-base md:text-lg text-blue-100/95 leading-relaxed">
+                Explore all key pages of QuickFynd in one place. Use this directory to quickly discover products, categories, and important support pages.
+              </p>
+            </div>
           </div>
-          <p className="text-blue-100 text-lg max-w-2xl">
-            Find all pages and sections of QuickFynd in one place. Navigate easily to any part of our platform.
-          </p>
         </div>
       </div>
 

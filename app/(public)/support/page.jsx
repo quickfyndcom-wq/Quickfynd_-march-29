@@ -110,10 +110,22 @@ export default function SupportPage() {
   return (
     <div className="bg-gradient-to-b from-slate-50 to-white">
       {/* Header Section */}
-      <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white py-12 px-4">
-        <div className="max-w-4xl mx-auto">
-          <h1 className="text-4xl font-bold mb-2">How Can We Help?</h1>
-          <p className="text-blue-100 text-lg">We're here to assist you 24/7</p>
+      <div className="px-4 pt-8 pb-2">
+        <div className="max-w-5xl mx-auto">
+          <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-sky-600 via-blue-700 to-indigo-800 px-5 py-8 sm:px-8 sm:py-10 text-white shadow-lg">
+            <div className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-white/15 blur-2xl" />
+            <div className="pointer-events-none absolute -left-8 -bottom-10 h-28 w-28 rounded-full bg-blue-300/20 blur-2xl" />
+
+            <div className="relative z-10">
+              <span className="inline-flex items-center rounded-full border border-white/30 bg-white/10 px-3 py-1 text-xs font-semibold tracking-wide text-blue-100">
+                Customer Support
+              </span>
+              <h1 className="mt-4 text-3xl sm:text-4xl md:text-5xl font-bold leading-tight">How Can We Help?</h1>
+              <p className="mt-3 text-sm sm:text-base md:text-lg text-blue-100/95">
+                We&apos;re here to assist you 24/7. Share your issue and our team will get back to you quickly.
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 

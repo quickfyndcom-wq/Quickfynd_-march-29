@@ -27,7 +27,11 @@ export async function POST(request) {
     }
 
     const formData = await request.formData();
-    const files = formData.getAll('files');
+    let files = formData.getAll('files');
+    if (!files || files.length === 0) {
+      const singleFile = formData.get('file');
+      files = singleFile ? [singleFile] : [];
+    }
     
     if (!files || files.length === 0) {
       return Response.json({ error: "No files provided" }, { status: 400 });
@@ -66,7 +70,8 @@ export async function POST(request) {
 
     return Response.json({ 
       success: true, 
-      urls: uploadedUrls 
+      urls: uploadedUrls,
+      url: uploadedUrls[0] || null
     });
   } catch (error) {
     console.error('File upload error:', error);

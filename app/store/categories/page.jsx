@@ -98,14 +98,17 @@ export default function StoreCategoryMenu() {
       // Upload image if new file selected
       if (imageFile) {
         const uploadFormData = new FormData();
-        uploadFormData.append('file', imageFile);
+        uploadFormData.append('files', imageFile);
         const uploadRes = await axios.post('/api/upload', uploadFormData, {
           headers: {
             'Content-Type': 'multipart/form-data',
             Authorization: `Bearer ${token}`,
           },
         });
-        imageUrl = uploadRes.data.url;
+        imageUrl = uploadRes?.data?.urls?.[0] || '';
+        if (!imageUrl) {
+          throw new Error('Image upload failed');
+        }
       }
 
       let updatedCategories;

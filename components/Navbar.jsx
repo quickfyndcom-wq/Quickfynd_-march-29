@@ -779,7 +779,7 @@ const Navbar = () => {
             
             {/* Logo */}
             <Link href="/" className="flex items-center gap-2 flex-shrink-0">
-              <Image src={Logo} alt="Qui Logo" width={198} height={56} className="object-contain" priority />
+              <Image src={Logo} alt="Qui Logo" width={198} height={56} className="w-[150px] sm:w-[198px] h-auto object-contain" priority />
             </Link>
           </div>
 
