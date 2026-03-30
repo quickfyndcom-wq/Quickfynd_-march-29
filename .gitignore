@@ -53,6 +53,7 @@ ehthumbs.db
 # Local env files
 .env.local
 .env.*.local
+firebase-key.json
 
 # Vercel
 .vercel
