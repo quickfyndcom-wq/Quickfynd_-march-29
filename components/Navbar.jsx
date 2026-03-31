@@ -1058,14 +1058,14 @@ const Navbar = () => {
                     <span>Wallet: ₹{Number(walletCoins || 0).toLocaleString()}</span>
                   </Link>
                 </div>
-                {/* Dashboard button for seller */}
+                {/* Store button for seller */}
                 {isSeller && (
-                  <button
+                  <Link
+                    href="/store"
                     className="ml-2 px-3 py-1 bg-orange-500 hover:bg-orange-600 text-white text-xs rounded-full transition"
-                    onClick={() => router.push('/store')}
                   >
-                    Dashboard
-                  </button>
+                    Store
+                  </Link>
                 )}
                 {/* User Dropdown */}
                 {userDropdownOpen && (
@@ -1390,6 +1390,16 @@ const Navbar = () => {
               <div className="flex flex-col gap-1">
                 {firebaseUser && (
                   <>
+                    {isSeller && (
+                      <Link 
+                        href="/store" 
+                        className="flex items-center gap-3 px-4 py-3 hover:bg-gray-100 rounded-lg transition text-gray-700 font-medium"
+                        onClick={() => setMobileMenuOpen(false)}
+                      >
+                        <span className="bg-orange-500 text-white text-xs font-bold px-2 py-1 rounded-full">Seller</span>
+                        <span>Store Access</span>
+                      </Link>
+                    )}
                     <Link 
                       href="/dashboard/profile" 
                       className="flex items-center gap-3 px-4 py-3 hover:bg-gray-100 rounded-lg transition text-gray-700 font-medium"
@@ -1488,7 +1498,7 @@ const Navbar = () => {
                     onClick={() => setMobileMenuOpen(false)}
                   >
                     <span className="bg-orange-500 text-white text-xs font-bold px-2 py-1 rounded-full">Seller</span>
-                    <span>Dashboard</span>
+                    <span>Store Access</span>
                   </Link>
                 )}
               </div>

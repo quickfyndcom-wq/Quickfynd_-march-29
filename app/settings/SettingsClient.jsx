@@ -355,9 +355,9 @@ export default function SettingsClient() {
             <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-6">
               <h2 className="text-lg font-semibold text-slate-800 mb-4">🔒 Privacy</h2>
               <p className="text-slate-600 text-sm mb-4">Control how your data is used and shared.</p>
-              <button className="px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-700">
+              <Link href="/settings/privacy" className="inline-flex px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-700">
                 Manage Privacy Settings
-              </button>
+              </Link>
             </div>
 
             <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-6">

@@ -10,8 +10,10 @@ import toast from 'react-hot-toast'
 import DashboardSidebar from '@/components/DashboardSidebar'
 import { downloadInvoice } from '@/lib/generateInvoice'
 import ReviewForm from '@/components/ReviewForm'
+import { useSearchParams } from 'next/navigation'
 
 export default function DashboardOrdersPage() {
+  const searchParams = useSearchParams()
   const [user, setUser] = useState(undefined)
   const [orders, setOrders] = useState([])
   const [loadingOrders, setLoadingOrders] = useState(true)
@@ -37,6 +39,25 @@ export default function DashboardOrdersPage() {
   const [activeReviewKey, setActiveReviewKey] = useState(null)
   const [razorpayLoaded, setRazorpayLoaded] = useState(false)
   const [payingCodOrderId, setPayingCodOrderId] = useState(null)
+  const [showDeliveryReviewModal, setShowDeliveryReviewModal] = useState(false)
+  const [selectedOrderForReview, setSelectedOrderForReview] = useState(null)
+  const [deliveryRating, setDeliveryRating] = useState(0)
+  const [deliveryFeedback, setDeliveryFeedback] = useState('')
+  const [deliveryAgentBehavior, setDeliveryAgentBehavior] = useState('')
+  const [deliveryPackageCondition, setDeliveryPackageCondition] = useState('')
+  const [deliveryDamagePhotoUrl, setDeliveryDamagePhotoUrl] = useState('')
+  const [uploadingDeliveryDamagePhoto, setUploadingDeliveryDamagePhoto] = useState(false)
+  const [submittingDeliveryReview, setSubmittingDeliveryReview] = useState(false)
+
+  const reviewOrderFromUrl = searchParams.get('reviewOrder')
+
+  const resetDeliveryReviewForm = () => {
+    setDeliveryRating(0)
+    setDeliveryFeedback('')
+    setDeliveryAgentBehavior('')
+    setDeliveryPackageCondition('')
+    setDeliveryDamagePhotoUrl('')
+  }
 
   const orderStatuses = [
     { value: 'ALL', label: 'All Orders', icon: '📦' },
@@ -411,6 +432,66 @@ export default function DashboardOrdersPage() {
     loadOrders()
   }, [user])
 
+  useEffect(() => {
+    if (!reviewOrderFromUrl || !orders.length) return
+    const targetOrder = orders.find((order) => {
+      const orderId = order?._id || order?.id
+      return String(orderId) === String(reviewOrderFromUrl)
+    })
+    if (!targetOrder) return
+    if (String(targetOrder.status || '').toUpperCase() !== 'DELIVERED') return
+    if (targetOrder.deliveryReview?.reviewed) return
+
+    const targetOrderId = targetOrder._id || targetOrder.id
+    setExpandedOrder(targetOrderId)
+    setSelectedOrderForReview(targetOrder)
+    resetDeliveryReviewForm()
+    setShowDeliveryReviewModal(true)
+
+    if (typeof window !== 'undefined') {
+      const nextUrl = new URL(window.location.href)
+      nextUrl.searchParams.delete('reviewOrder')
+      window.history.replaceState({}, '', nextUrl.toString())
+    }
+  }, [reviewOrderFromUrl, orders])
+
+  const handleDeliveryDamagePhotoUpload = async (file) => {
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please upload an image file only')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image must be 5MB or smaller')
+      return
+    }
+
+    try {
+      setUploadingDeliveryDamagePhoto(true)
+      const token = await auth.currentUser.getIdToken(true)
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const uploadRes = await axios.post('/api/upload', formData, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'multipart/form-data'
+        }
+      })
+
+      const imageUrl = uploadRes?.data?.url || uploadRes?.data?.urls?.[0]
+      if (!imageUrl) {
+        throw new Error('Upload failed')
+      }
+      setDeliveryDamagePhotoUrl(imageUrl)
+      toast.success('Damage photo uploaded')
+    } catch (error) {
+      toast.error(error?.response?.data?.error || 'Failed to upload damage photo')
+    } finally {
+      setUploadingDeliveryDamagePhoto(false)
+    }
+  }
+
   // Auto-refresh tracking data every 30 seconds for expanded order
   useEffect(() => {
     if (!expandedOrder) return;
@@ -466,6 +547,48 @@ export default function DashboardOrdersPage() {
     // Cleanup interval when order is collapsed or component unmounts
     return () => clearInterval(interval);
   }, [expandedOrder, orders.find(o => (o._id || o.id) === expandedOrder)?.trackingId]);
+
+  const handleDeliveryReview = async () => {
+    if (!selectedOrderForReview) return
+    if (deliveryRating === 0) {
+      toast.error('Please select a rating')
+      return
+    }
+
+    try {
+      setSubmittingDeliveryReview(true)
+      const token = await auth.currentUser.getIdToken(true)
+      const orderId = selectedOrderForReview._id || selectedOrderForReview.id
+
+      await axios.post('/api/orders/delivery-review', {
+        orderId,
+        rating: deliveryRating,
+        feedback: deliveryFeedback.trim(),
+        agentBehavior: deliveryAgentBehavior || null,
+        packageCondition: deliveryPackageCondition || null,
+        damagePhotoUrl: deliveryDamagePhotoUrl || ''
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+
+      toast.success('Thank you for your delivery feedback!')
+      setShowDeliveryReviewModal(false)
+      resetDeliveryReviewForm()
+      setSelectedOrderForReview(null)
+
+      // Refresh orders
+      const { data } = await axios.get('/api/orders', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      const list = Array.isArray(data?.orders) ? data.orders : (Array.isArray(data) ? data : [])
+      setOrders(list)
+    } catch (err) {
+      console.error('Delivery review error:', err)
+      toast.error(err?.response?.data?.error || 'Failed to submit delivery feedback')
+    } finally {
+      setSubmittingDeliveryReview(false)
+    }
+  }
 
   const handleReturnRequest = async () => {
     if (!returnReason.trim()) {
@@ -1139,30 +1262,180 @@ export default function DashboardOrdersPage() {
 
                         {/* Delivered order actions */}
                         {order.status === 'DELIVERED' && (
-                          <div className="flex flex-wrap gap-2 justify-end">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                downloadInvoice(order)
-                              }}
-                              className="px-4 py-2 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 text-sm font-medium"
-                            >
-                              Download Invoice
-                            </button>
-                            <button
-                              onClick={(e) => handleCreateSupportTicket(order, null, e)}
-                              disabled={creatingTicketForOrderId === orderId}
-                              className={`px-4 py-2 rounded-lg border text-sm font-medium ${creatingTicketForOrderId === orderId ? 'border-slate-200 bg-slate-100 text-slate-500 cursor-not-allowed' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}
-                            >
-                              {creatingTicketForOrderId === orderId ? 'Creating Ticket...' : 'Ticket Support'}
-                            </button>
-                            <Link
-                              href="/dashboard/tickets"
-                              onClick={(e) => e.stopPropagation()}
-                              className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 text-sm font-medium"
-                            >
-                              Ticket Details
-                            </Link>
+                          <div className="space-y-4">
+                            <div className="flex flex-wrap gap-2 justify-end">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  downloadInvoice(order)
+                                }}
+                                className="px-4 py-2 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 text-sm font-medium flex items-center gap-2"
+                              >
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                  <polyline points="7 10 12 15 17 10"></polyline>
+                                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                                </svg>
+                                Download Invoice
+                              </button>
+                              {!order.deliveryReview?.reviewed && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setSelectedOrderForReview(order)
+                                    setShowDeliveryReviewModal(true)
+                                    resetDeliveryReviewForm()
+                                  }}
+                                  className="px-4 py-2 rounded-lg border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 text-sm font-medium flex items-center gap-2"
+                                >
+                                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path>
+                                  </svg>
+                                  Rate Delivery
+                                </button>
+                              )}
+                              <button
+                                onClick={(e) => handleCreateSupportTicket(order, null, e)}
+                                disabled={creatingTicketForOrderId === orderId}
+                                className={`px-4 py-2 rounded-lg border text-sm font-medium flex items-center gap-2 ${creatingTicketForOrderId === orderId ? 'border-slate-200 bg-slate-100 text-slate-500 cursor-not-allowed' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}
+                              >
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <circle cx="11" cy="11" r="8"></circle>
+                                  <path d="m21 21-4.35-4.35"></path>
+                                </svg>
+                                {creatingTicketForOrderId === orderId ? 'Creating...' : 'Support'}
+                              </button>
+                              <Link
+                                href="/dashboard/tickets"
+                                onClick={(e) => e.stopPropagation()}
+                                className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 text-sm font-medium"
+                              >
+                                Ticket Details
+                              </Link>
+                            </div>
+
+                            {/* Delivery Review Info Card - Only show if NOT reviewed */}
+                            {!order.deliveryReview?.reviewed && (
+                              <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg p-4">
+                                <p className="text-xs text-center text-purple-700 font-medium">
+                                  ⭐ Help us improve! Rate your delivery experience and share feedback about your order.
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Display Submitted Delivery Review */}
+                        {order.deliveryReview?.reviewed && (
+                          <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-lg p-4 space-y-3">
+                            <div className="flex items-start justify-between">
+                              <div>
+                                <h4 className="font-semibold text-slate-800 flex items-center gap-2 mb-2">
+                                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" className="text-amber-500">
+                                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path>
+                                  </svg>
+                                  Your Delivery Rating
+                                </h4>
+                                <p className="text-xs text-slate-500">
+                                  Submitted on {new Date(order.deliveryReview.submittedAt).toLocaleDateString()}
+                                </p>
+                              </div>
+                              <span className="px-3 py-1 rounded-full bg-green-200 text-green-800 text-xs font-bold">
+                                RATED ✓
+                              </span>
+                            </div>
+
+                            <div className="space-y-2">
+                              <div>
+                                <p className="text-xs text-slate-600 font-medium mb-1">Rating</p>
+                                <div className="flex gap-1 items-center">
+                                  {[1, 2, 3, 4, 5].map((star) => (
+                                    <svg
+                                      key={star}
+                                      width="20"
+                                      height="20"
+                                      viewBox="0 0 24 24"
+                                      fill={star <= order.deliveryReview.rating ? 'currentColor' : 'none'}
+                                      stroke="currentColor"
+                                      strokeWidth="1.5"
+                                      className={`${star <= order.deliveryReview.rating ? 'text-amber-400' : 'text-slate-300'}`}
+                                    >
+                                      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path>
+                                    </svg>
+                                  ))}
+                                  <span className="ml-2 text-sm font-semibold text-slate-800">
+                                    {order.deliveryReview.rating}/5
+                                  </span>
+                                </div>
+                              </div>
+
+                              {order.deliveryReview.feedback && (
+                                <div>
+                                  <p className="text-xs text-slate-600 font-medium mb-1">Your Feedback</p>
+                                  <p className="text-sm text-slate-700 bg-white rounded-lg p-2 border border-green-100">
+                                    {order.deliveryReview.feedback}
+                                  </p>
+                                </div>
+                              )}
+
+                              {order.deliveryReview.agentBehavior && (
+                                <div>
+                                  <p className="text-xs text-slate-600 font-medium mb-1">Delivery Agent Behavior</p>
+                                  <p className="text-sm text-slate-700 bg-white rounded-lg p-2 border border-green-100">
+                                    {order.deliveryReview.agentBehavior === 'VERY_POLITE'
+                                      ? 'Very Polite'
+                                      : order.deliveryReview.agentBehavior === 'POLITE'
+                                        ? 'Polite'
+                                        : order.deliveryReview.agentBehavior === 'AVERAGE'
+                                          ? 'Average'
+                                          : 'Rude'}
+                                  </p>
+                                </div>
+                              )}
+
+                              {order.deliveryReview.packageCondition && (
+                                <div>
+                                  <p className="text-xs text-slate-600 font-medium mb-1">Package Condition</p>
+                                  <p className="text-sm text-slate-700 bg-white rounded-lg p-2 border border-green-100">
+                                    {order.deliveryReview.packageCondition === 'INTACT'
+                                      ? 'Box Intact'
+                                      : order.deliveryReview.packageCondition === 'MINOR_DAMAGE'
+                                        ? 'Minor Box Damage'
+                                        : 'Damaged Box'}
+                                  </p>
+                                </div>
+                              )}
+
+                              {order.deliveryReview.damagePhotoUrl && (
+                                <div>
+                                  <p className="text-xs text-slate-600 font-medium mb-1">Damage Photo</p>
+                                  <a
+                                    href={order.deliveryReview.damagePhotoUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center text-xs text-blue-600 hover:text-blue-700"
+                                  >
+                                    View uploaded photo
+                                  </a>
+                                </div>
+                              )}
+
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setSelectedOrderForReview(order)
+                                  setShowDeliveryReviewModal(true)
+                                  setDeliveryRating(order.deliveryReview.rating || 0)
+                                  setDeliveryFeedback(order.deliveryReview.feedback || '')
+                                  setDeliveryAgentBehavior(order.deliveryReview.agentBehavior || '')
+                                  setDeliveryPackageCondition(order.deliveryReview.packageCondition || '')
+                                  setDeliveryDamagePhotoUrl(order.deliveryReview.damagePhotoUrl || '')
+                                }}
+                                className="text-xs text-green-700 hover:text-green-800 font-medium mt-2 inline-block"
+                              >
+                                Edit Rating →
+                              </button>
+                            </div>
                           </div>
                         )}
 
@@ -1679,6 +1952,178 @@ export default function DashboardOrdersPage() {
               </div>
             </div>
           )}
+
+        {/* Delivery Review Modal */}
+        {showDeliveryReviewModal && selectedOrderForReview && (
+          <div className="fixed inset-0 bg-black/20 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => !submittingDeliveryReview && setShowDeliveryReviewModal(false)}>
+            <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+              <div className="mb-6">
+                <h3 className="text-xl font-bold text-slate-800 mb-2">Rate Your Delivery Experience</h3>
+                <p className="text-sm text-slate-600">
+                  Help us improve! How was your delivery experience for order #{selectedOrderForReview.shortOrderNumber || selectedOrderForReview._id?.substring(0, 8).toUpperCase()}?
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                {/* Star Rating */}
+                <div>
+                  <label className="block text-sm font-semibold text-slate-800 mb-3">Rate Delivery</label>
+                  <div className="flex gap-3 items-center">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <button
+                        key={star}
+                        onClick={() => setDeliveryRating(star)}
+                        className="p-2 transition-transform hover:scale-110"
+                      >
+                        <svg
+                          width="32"
+                          height="32"
+                          viewBox="0 0 24 24"
+                          fill={star <= deliveryRating ? 'currentColor' : 'none'}
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          className={`transition ${star <= deliveryRating ? 'text-amber-400' : 'text-slate-300'}`}
+                        >
+                          <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path>
+                        </svg>
+                      </button>
+                    ))}
+                  </div>
+                  {deliveryRating > 0 && (
+                    <p className="text-xs text-slate-500 mt-2">
+                      {deliveryRating === 5 ? 'Excellent!' : deliveryRating === 4 ? 'Very Good!' : deliveryRating === 3 ? 'Good' : deliveryRating === 2 ? 'Fair' : 'Poor'}
+                    </p>
+                  )}
+                </div>
+
+                {/* Feedback Textarea */}
+                <div>
+                  <label className="block text-sm font-semibold text-slate-800 mb-2">Feedback (Optional)</label>
+                  <textarea
+                    value={deliveryFeedback}
+                    onChange={(e) => setDeliveryFeedback(e.target.value)}
+                    placeholder="Share your feedback about the delivery experience, delivery partner, packaging, etc."
+                    maxLength={500}
+                    rows={4}
+                    disabled={submittingDeliveryReview}
+                    className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-400 focus:border-amber-400 outline-none transition resize-none disabled:bg-slate-100"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">{deliveryFeedback.length}/500 characters</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-slate-800 mb-2">Delivery Agent Behavior</label>
+                  <select
+                    value={deliveryAgentBehavior}
+                    onChange={(e) => setDeliveryAgentBehavior(e.target.value)}
+                    disabled={submittingDeliveryReview}
+                    className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-400 focus:border-amber-400 outline-none transition disabled:bg-slate-100"
+                  >
+                    <option value="">Select behavior (optional)</option>
+                    <option value="VERY_POLITE">Very Polite</option>
+                    <option value="POLITE">Polite</option>
+                    <option value="AVERAGE">Average</option>
+                    <option value="RUDE">Rude</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-slate-800 mb-2">Package Condition</label>
+                  <select
+                    value={deliveryPackageCondition}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      setDeliveryPackageCondition(value)
+                      if (value === 'INTACT') {
+                        setDeliveryDamagePhotoUrl('')
+                      }
+                    }}
+                    disabled={submittingDeliveryReview}
+                    className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-400 focus:border-amber-400 outline-none transition disabled:bg-slate-100"
+                  >
+                    <option value="">Select condition (optional)</option>
+                    <option value="INTACT">Box Intact</option>
+                    <option value="MINOR_DAMAGE">Minor Box Damage</option>
+                    <option value="DAMAGED">Damaged Box</option>
+                  </select>
+                </div>
+
+                {(deliveryPackageCondition === 'MINOR_DAMAGE' || deliveryPackageCondition === 'DAMAGED') && (
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-800 mb-2">Upload Damage Photo (Optional)</label>
+                    <div className="space-y-2">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        disabled={submittingDeliveryReview || uploadingDeliveryDamagePhoto}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          if (file) handleDeliveryDamagePhotoUpload(file)
+                        }}
+                        className="w-full text-sm text-slate-600"
+                      />
+                      {uploadingDeliveryDamagePhoto && (
+                        <p className="text-xs text-slate-500">Uploading photo...</p>
+                      )}
+                      {deliveryDamagePhotoUrl && (
+                        <div className="rounded-lg border border-slate-200 p-2 bg-slate-50">
+                          <img
+                            src={deliveryDamagePhotoUrl}
+                            alt="Delivery damage"
+                            className="w-full max-h-40 object-contain rounded"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setDeliveryDamagePhotoUrl('')}
+                            className="mt-2 text-xs text-red-600 hover:text-red-700"
+                            disabled={submittingDeliveryReview}
+                          >
+                            Remove photo
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Buttons */}
+                <div className="flex gap-3 pt-4">
+                  <button
+                    onClick={() => {
+                      setShowDeliveryReviewModal(false)
+                      resetDeliveryReviewForm()
+                    }}
+                    disabled={submittingDeliveryReview}
+                    className="flex-1 px-4 py-2.5 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition font-medium disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleDeliveryReview}
+                    disabled={submittingDeliveryReview || deliveryRating === 0}
+                    className="flex-1 px-4 py-2.5 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    {submittingDeliveryReview ? (
+                      <>
+                        <svg className="animate-spin w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="none"></circle>
+                        </svg>
+                        Submitting...
+                      </>
+                    ) : (
+                      <>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path>
+                        </svg>
+                        Submit Rating
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         </main>
       </div>
     )

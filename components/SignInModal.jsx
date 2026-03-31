@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { X, Eye, EyeOff } from 'lucide-react';
-import { auth, googleProvider } from '../lib/firebase';
-import { signInWithPopup, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from 'firebase/auth';
+import { auth } from '../lib/firebase';
+import { signInWithPopup, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, onAuthStateChanged, signOut, GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
 import Image from 'next/image';
 import GoogleIcon from '../assets/google.png';
 import Imageslider from '../assets/signin/76.webp';
@@ -10,6 +10,9 @@ import { countryCodes } from '../assets/countryCodes';
 
 const SignInModal = ({ open, onClose, defaultMode = 'login', bonusMessage = '' }) => {
   const [isRegister, setIsRegister] = useState(false);
+  const [showQuickSignIn, setShowQuickSignIn] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [loadingQuickSignIn, setLoadingQuickSignIn] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -28,6 +31,12 @@ const SignInModal = ({ open, onClose, defaultMode = 'login', bonusMessage = '' }
   const [scrollPos, setScrollPos] = useState(0);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const onCloseRef = useRef(onClose);
+  const oneTapAttemptedRef = useRef(false);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   const getAuthErrorMessage = (err, fallback = 'Something went wrong. Please try again.') => {
     const code = err?.code || '';
@@ -58,6 +67,29 @@ const SignInModal = ({ open, onClose, defaultMode = 'login', bonusMessage = '' }
     return () => clearInterval(interval);
   }, []);
 
+  // Detect existing auth session when modal opens
+  React.useEffect(() => {
+    if (!open) return;
+    
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        // User is signed in, show quick signin option
+        setCurrentUser({
+          email: user.email,
+          displayName: user.displayName || user.email?.split('@')[0] || 'User',
+          photoURL: user.photoURL
+        });
+        setShowQuickSignIn(true);
+      } else {
+        // No user signed in
+        setCurrentUser(null);
+        setShowQuickSignIn(false);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [open]);
+
   React.useEffect(() => {
     if (open) {
       setIsRegister(defaultMode === 'register');
@@ -75,8 +107,6 @@ const SignInModal = ({ open, onClose, defaultMode = 'login', bonusMessage = '' }
       confirmPassword: ''
     });
   }, [isRegister]);
-
-  if (!open) return null;
 
   const validateEmail = (email) => {
     // Simple email regex
@@ -126,45 +156,82 @@ const SignInModal = ({ open, onClose, defaultMode = 'login', bonusMessage = '' }
     }
   };
 
-  const handleGoogleSignIn = async () => {
-    setError('');
-    setLoading(true);
+  const handleAuthSuccess = useCallback(async (user, isNewUser) => {
+    const bonusClaimed = localStorage.getItem('welcomeBonusClaimed');
+    if (bonusClaimed === 'true') {
+      localStorage.setItem('freeShippingEligible', 'true');
+      localStorage.removeItem('welcomeBonusClaimed');
+    }
+
     try {
-      const result = await signInWithPopup(auth, googleProvider);
-      const isNewUser = result.user.metadata.creationTime === result.user.metadata.lastSignInTime;
-      
-      // Check if welcome bonus was claimed from top bar
-      const bonusClaimed = localStorage.getItem('welcomeBonusClaimed');
-      if (bonusClaimed === 'true') {
-        // Mark user as eligible for free shipping on first order
-        localStorage.setItem('freeShippingEligible', 'true');
-        localStorage.removeItem('welcomeBonusClaimed');
+      const token = await user.getIdToken();
+      await trackLoginLocation(token);
+      if (isNewUser) {
+        await axios.post('/api/wallet/bonus', {}, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
       }
-      
-      // Send appropriate email based on whether user is new or returning
-      try {
-        const token = await result.user.getIdToken();
-        await trackLoginLocation(token);
-        if (isNewUser) {
-          await axios.post('/api/wallet/bonus', {}, {
-            headers: { Authorization: `Bearer ${token}` }
-          });
+      const emailEndpoint = isNewUser ? '/api/send-welcome-email' : '/api/send-login-email';
+      axios.post(emailEndpoint, {
+        email: user.email,
+        name: user.displayName
+      }, {
+        headers: {
+          Authorization: `Bearer ${token}`
         }
-        const emailEndpoint = isNewUser ? '/api/send-welcome-email' : '/api/send-login-email';
-        axios.post(emailEndpoint, {
-          email: result.user.email,
-          name: result.user.displayName
+      }).catch(() => {});
+    } catch (_) {
+      // non-blocking
+    }
+  }, []);
+
+  const handleQuickSignIn = async () => {
+    setLoadingQuickSignIn(true);
+    try {
+      if (auth.currentUser) {
+        const token = await auth.currentUser.getIdToken();
+        await trackLoginLocation(token);
+        axios.post('/api/send-login-email', {
+          email: auth.currentUser.email,
+          name: auth.currentUser.displayName || 'Customer'
         }, {
           headers: {
             Authorization: `Bearer ${token}`
           }
-        }).catch(() => {
-          // Silently fail
-        });
-      } catch (emailError) {
-        // Failed to send email (non-critical)
+        }).catch(() => {});
       }
-      
+      onClose();
+    } catch (err) {
+      console.error('Quick sign-in error:', err);
+      setError('Failed to continue. Please try again.');
+    }
+    setLoadingQuickSignIn(false);
+  };
+
+  const handleUseOtherAccount = async () => {
+    try {
+      await signOut(auth);
+    } catch (_) {
+      // non-blocking
+    }
+    setShowQuickSignIn(false);
+    setIsRegister(false);
+    setEmail('');
+    setPassword('');
+    setError('');
+  };
+
+  const handleGoogleSignIn = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({
+        prompt: 'select_account'
+      });
+      const result = await signInWithPopup(auth, provider);
+      const isNewUser = result.user.metadata.creationTime === result.user.metadata.lastSignInTime;
+      await handleAuthSuccess(result.user, isNewUser);
       onClose();
     } catch (err) {
       console.error('Google sign-in error:', err);
@@ -173,6 +240,81 @@ const SignInModal = ({ open, onClose, defaultMode = 'login', bonusMessage = '' }
     }
     setLoading(false);
   };
+
+  useEffect(() => {
+    if (isRegister || showQuickSignIn || typeof window === 'undefined') return;
+    if (auth.currentUser) return;
+    if (oneTapAttemptedRef.current) return;
+
+    const oneTapAttemptKey = 'one_tap_attempted_this_page';
+    if (sessionStorage.getItem(oneTapAttemptKey) === 'true') return;
+
+    // Google One Tap Client ID — get from Firebase Console > Auth > Sign-in method > Google > Web client ID
+    // Format: 861878384152-XXXXXXXX.apps.googleusercontent.com
+    const oneTapClientId = process.env.NEXT_PUBLIC_GOOGLE_ONE_TAP_CLIENT_ID || '';
+    if (!oneTapClientId) return;
+
+    oneTapAttemptedRef.current = true;
+    sessionStorage.setItem(oneTapAttemptKey, 'true');
+
+    let isCancelled = false;
+
+    const initializeOneTap = () => {
+      if (isCancelled || !window.google?.accounts?.id) return;
+
+      window.google.accounts.id.initialize({
+        client_id: oneTapClientId,
+        itp_support: true,
+        auto_select: true,
+        cancel_on_tap_outside: false,
+        context: 'signin',
+        callback: async (response) => {
+          if (isCancelled || !response?.credential) return;
+          setError('');
+          setLoading(true);
+          try {
+            const credential = GoogleAuthProvider.credential(response.credential);
+            const result = await signInWithCredential(auth, credential);
+            const isNewUser = result.user.metadata.creationTime === result.user.metadata.lastSignInTime;
+            await handleAuthSuccess(result.user, isNewUser);
+            onCloseRef.current?.();
+          } catch (err) {
+            const errorMessage = getAuthErrorMessage(err, 'Google One Tap sign-in failed. Please try again.');
+            setError(errorMessage);
+          }
+          setLoading(false);
+        }
+      });
+
+      window.google.accounts.id.prompt();
+    };
+
+    if (window.google?.accounts?.id) {
+      initializeOneTap();
+    } else {
+      const existingScript = document.getElementById('google-one-tap-script');
+      if (existingScript) {
+        existingScript.addEventListener('load', initializeOneTap, { once: true });
+      } else {
+        const script = document.createElement('script');
+        script.id = 'google-one-tap-script';
+        script.src = 'https://accounts.google.com/gsi/client';
+        script.async = true;
+        script.defer = true;
+        script.onload = initializeOneTap;
+        document.head.appendChild(script);
+      }
+    }
+
+    return () => {
+      isCancelled = true;
+      if (window.google?.accounts?.id) {
+        window.google.accounts.id.cancel();
+      }
+    };
+  }, [isRegister, showQuickSignIn, handleAuthSuccess]);
+
+  if (!open) return null;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -401,32 +543,60 @@ const SignInModal = ({ open, onClose, defaultMode = 'login', bonusMessage = '' }
             </div>
           )}
 
-          {/* Tab Buttons */}
+          {/* Quick Sign In Section */}
+          {showQuickSignIn && currentUser && (
+            <div className="mb-4 p-4 bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 rounded-lg">
+              <p className="text-gray-700 text-xs sm:text-sm font-medium mb-3">Continue with your existing account</p>
+              <button
+                type="button"
+                onClick={handleQuickSignIn}
+                className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition mb-2 text-sm flex items-center justify-center gap-2"
+                disabled={loadingQuickSignIn}
+              >
+                <div className="w-6 h-6 rounded-full bg-white flex items-center justify-center text-xs font-bold text-blue-600">
+                  {currentUser.displayName?.[0]?.toUpperCase() || 'U'}
+                </div>
+                {loadingQuickSignIn ? 'Loading...' : `Continue as ${currentUser.displayName}`}
+              </button>
+              <button
+                type="button"
+                onClick={handleUseOtherAccount}
+                className="w-full py-2 px-4 bg-white hover:bg-gray-50 text-gray-700 font-medium rounded-lg border border-gray-300 transition text-sm"
+              >
+                Use Different Account
+              </button>
+            </div>
+          )}
+
+          {/* Tab Buttons - Only show if not using quick signin */}
+          {!showQuickSignIn && (
           <div className="flex gap-2 sm:gap-3 mb-3 sm:mb-4">
-            <button
-              onClick={() => setIsRegister(false)}
-              className={`flex-1 py-2 sm:py-2.5 px-3 sm:px-4 rounded-lg font-semibold transition text-sm ${
-                !isRegister
-                  ? 'bg-gray-800 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              Log in
-            </button>
-            <button
-              onClick={() => setIsRegister(true)}
-              className={`flex-1 py-2 sm:py-2.5 px-3 sm:px-4 rounded-lg font-semibold transition text-sm ${
-                isRegister
-                  ? 'bg-gray-800 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              Sign up
-            </button>
-          </div>
+              <button
+                onClick={() => setIsRegister(false)}
+                className={`flex-1 py-2 sm:py-2.5 px-3 sm:px-4 rounded-lg font-semibold transition text-sm ${
+                  !isRegister
+                    ? 'bg-gray-800 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                Log in
+              </button>
+              <button
+                onClick={() => setIsRegister(true)}
+                className={`flex-1 py-2 sm:py-2.5 px-3 sm:px-4 rounded-lg font-semibold transition text-sm ${
+                  isRegister
+                    ? 'bg-gray-800 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                Sign up
+              </button>
+            </div>
+          )}
 
           {/* Form */}
-          <form className="flex flex-col gap-2.5 sm:gap-3" onSubmit={handleSubmit}>
+          {!showQuickSignIn && (
+            <form className="flex flex-col gap-2.5 sm:gap-3" onSubmit={handleSubmit}>
             {isRegister && (
               <div>
                 <input
@@ -673,7 +843,8 @@ const SignInModal = ({ open, onClose, defaultMode = 'login', bonusMessage = '' }
             >
               {loading ? 'Loading...' : 'CONTINUE'}
             </button>
-          </form>
+            </form>
+          )}
 
           {/* Divider */}
           <div className="flex items-center gap-2 sm:gap-3 my-3 sm:my-4">

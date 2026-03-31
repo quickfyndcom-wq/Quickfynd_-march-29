@@ -29,7 +29,7 @@ import Loading from "@/components/Loading"
 
 import axios from "axios"
 import toast from "react-hot-toast"
-import { Package, Truck, X, Download, Printer, RefreshCw, MapPin } from "lucide-react"
+import { Package, Truck, X, Download, Printer, RefreshCw, MapPin, MessageSquare } from "lucide-react"
 import { downloadInvoice, printInvoice } from "@/lib/generateInvoice"
 import { downloadAwbBill } from "@/lib/generateAwbBill"
 import { schedulePickup } from '@/lib/delhivery'
@@ -276,6 +276,7 @@ export default function StoreOrders() {
             RTO: orders.filter(o => o.status === 'RTO').length,
             RETURNED: orders.filter(o => o.status === 'RETURNED').length,
             RETURN_REQUESTED: orders.filter(o => o.returns && o.returns.some(r => r.status === 'REQUESTED')).length,
+            DAMAGED_REVIEW: orders.filter(o => ['MINOR_DAMAGE', 'DAMAGED'].includes(o?.deliveryReview?.packageCondition)).length,
             PENDING_PAYMENT: orders.filter(o => {
                 // Exclude cancelled and returned orders from pending payment
                 return !isOrderPaid(o) && o.status !== 'CANCELLED' && o.status !== 'RETURNED' && o.status !== 'RTO';
@@ -310,6 +311,7 @@ export default function StoreOrders() {
         });
         if (filterStatus === 'PENDING_SHIPMENT') return dateFiltered.filter(o => !o.trackingId && ['ORDER_PLACED', 'PROCESSING'].includes(o.status));
         if (filterStatus === 'RETURN_REQUESTED') return dateFiltered.filter(o => o.returns && o.returns.some(r => r.status === 'REQUESTED'));
+        if (filterStatus === 'DAMAGED_REVIEW') return dateFiltered.filter(o => ['MINOR_DAMAGE', 'DAMAGED'].includes(o?.deliveryReview?.packageCondition));
         return dateFiltered.filter(o => o.status === filterStatus);
     };
 
@@ -930,7 +932,7 @@ export default function StoreOrders() {
             <h1 className="text-2xl text-slate-500 mb-6">Store <span className="text-slate-800 font-medium">Orders</span></h1>
             
             {/* Order Statistics Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4 mb-6">
                 <div 
                     onClick={() => setFilterStatus('ALL')}
                     className={`p-4 rounded-lg cursor-pointer transition-all ${filterStatus === 'ALL' ? 'bg-blue-600 text-white shadow-lg' : 'bg-white border border-gray-200 text-slate-700'}`}
@@ -966,11 +968,18 @@ export default function StoreOrders() {
                     <p className="text-xs opacity-75">Delivered</p>
                     <p className="text-2xl font-bold">{stats.DELIVERED}</p>
                 </div>
+                <div 
+                    onClick={() => setFilterStatus('DAMAGED_REVIEW')}
+                    className={`p-4 rounded-lg cursor-pointer transition-all ${filterStatus === 'DAMAGED_REVIEW' ? 'bg-red-600 text-white shadow-lg' : 'bg-white border border-gray-200 text-slate-700'}`}
+                >
+                    <p className="text-xs opacity-75">Damaged Review</p>
+                    <p className="text-2xl font-bold">{stats.DAMAGED_REVIEW}</p>
+                </div>
             </div>
 
             {/* Status Filter Tabs */}
             <div className="mb-6 flex flex-wrap gap-2">
-                {['ALL', 'PROCESSING', 'MANIFESTED', 'PICKUP_SCHEDULED', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'PAYMENT_FAILED', 'RTO', 'RETURNED', 'RETURN_REQUESTED'].map(status => (
+                {['ALL', 'PROCESSING', 'MANIFESTED', 'PICKUP_SCHEDULED', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'PAYMENT_FAILED', 'RTO', 'RETURNED', 'RETURN_REQUESTED', 'DAMAGED_REVIEW'].map(status => (
                     <button
                         key={status}
                         onClick={() => setFilterStatus(status)}
@@ -980,12 +989,12 @@ export default function StoreOrders() {
                                 : 'bg-gray-100 text-slate-700 hover:bg-gray-200'
                         }`}
                     >
-                        <span>{status === 'ALL' ? 'All Orders' : status === 'PAYMENT_FAILED' ? 'Payment Failed' : status === 'RETURN_REQUESTED' ? 'Return Requested' : status.replace(/_/g, ' ')}</span>
-                        {status === 'RETURN_REQUESTED' && stats.RETURN_REQUESTED > 0 && (
+                        <span>{status === 'ALL' ? 'All Orders' : status === 'PAYMENT_FAILED' ? 'Payment Failed' : status === 'RETURN_REQUESTED' ? 'Return Requested' : status === 'DAMAGED_REVIEW' ? 'Damaged Review' : status.replace(/_/g, ' ')}</span>
+                        {(status === 'RETURN_REQUESTED' || status === 'DAMAGED_REVIEW') && (status === 'RETURN_REQUESTED' ? stats.RETURN_REQUESTED : stats.DAMAGED_REVIEW) > 0 && (
                             <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
                                 filterStatus === status ? 'bg-blue-800' : 'bg-red-500 text-white'
                             }`}>
-                                {stats.RETURN_REQUESTED}
+                                {status === 'RETURN_REQUESTED' ? stats.RETURN_REQUESTED : stats.DAMAGED_REVIEW}
                             </span>
                         )}
                     </button>
@@ -1068,6 +1077,7 @@ export default function StoreOrders() {
                                 <th className="px-4 py-3">Sr. No.</th>
                                 <th className="px-4 py-3">Order No.</th>
                                 <th className="px-4 py-3">Customer</th>
+                                <th className="px-4 py-3">Delivery Rating</th>
                                 <th className="px-4 py-3">Total</th>
                                 <th className="px-4 py-3">Payment</th>
                                 <th className="px-4 py-3">Status</th>
@@ -1110,6 +1120,28 @@ export default function StoreOrders() {
                                                                         pickedUp = `Picked: ${new Date(pickedEvent.time).toLocaleString()}`;
                                                                     }
                                                                 }
+                                                                const agentBehaviorLabel = order.deliveryReview?.agentBehavior === 'VERY_POLITE'
+                                                                    ? 'Very Polite'
+                                                                    : order.deliveryReview?.agentBehavior === 'POLITE'
+                                                                        ? 'Polite'
+                                                                        : order.deliveryReview?.agentBehavior === 'AVERAGE'
+                                                                            ? 'Average'
+                                                                            : order.deliveryReview?.agentBehavior === 'RUDE'
+                                                                                ? 'Rude'
+                                                                                : '';
+                                                                const packageConditionLabel = order.deliveryReview?.packageCondition === 'INTACT'
+                                                                    ? 'Box Intact'
+                                                                    : order.deliveryReview?.packageCondition === 'MINOR_DAMAGE'
+                                                                        ? 'Minor Box Damage'
+                                                                        : order.deliveryReview?.packageCondition === 'DAMAGED'
+                                                                            ? 'Damaged Box'
+                                                                            : '';
+                                                                const reviewTooltip = [
+                                                                    order.deliveryReview?.feedback?.trim() ? `Feedback: ${order.deliveryReview.feedback.trim()}` : '',
+                                                                    agentBehaviorLabel ? `Agent: ${agentBehaviorLabel}` : '',
+                                                                    packageConditionLabel ? `Package: ${packageConditionLabel}` : '',
+                                                                    order.deliveryReview?.damagePhotoUrl ? 'Damage Photo: Yes' : ''
+                                                                ].filter(Boolean).join(' • ');
                                 return (
                                   <tr
                                     key={order._id}
@@ -1131,6 +1163,36 @@ export default function StoreOrders() {
                                                 </span>
                                             )}
                                         </div>
+                                    </td>
+                                    <td className="px-4 py-3">
+                                        {order.deliveryReview?.rating ? (
+                                            <div className="flex items-center gap-1.5" title={reviewTooltip || `Rating: ${order.deliveryReview.rating}/5`}>
+                                                <div className="flex items-center gap-0.5" aria-label={`Delivery rating ${order.deliveryReview.rating} out of 5`}>
+                                                    {[1, 2, 3, 4, 5].map((star) => (
+                                                        <span
+                                                            key={star}
+                                                            className={`text-xs leading-none ${star <= order.deliveryReview.rating ? 'text-amber-500' : 'text-slate-300'}`}
+                                                        >
+                                                            ★
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                                {order.deliveryReview?.feedback?.trim() && (
+                                                    <MessageSquare size={12} className="text-slate-500" />
+                                                )}
+                                                {order.deliveryReview?.agentBehavior && (
+                                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">A</span>
+                                                )}
+                                                {order.deliveryReview?.packageCondition && (
+                                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">P</span>
+                                                )}
+                                                {order.deliveryReview?.damagePhotoUrl && (
+                                                    <span className="text-[10px] text-red-600 font-semibold">📷</span>
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <span className="text-slate-400 text-xs">—</span>
+                                        )}
                                     </td>
                                     <td className="px-4 py-3 font-medium text-slate-800">{currency}{order.total}</td>
                                     <td className="px-4 py-3">
@@ -1741,6 +1803,78 @@ export default function StoreOrders() {
                                     <div>
                                         <p className="text-slate-500">Order Date</p>
                                         <p className="font-medium text-slate-900">{new Date(selectedOrder.createdAt).toLocaleDateString()}</p>
+                                    </div>
+                                    <div className="md:col-span-3">
+                                        <p className="text-slate-500 mb-1">Delivery Review</p>
+                                        {selectedOrder.deliveryReview?.rating ? (
+                                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="flex items-center gap-0.5" aria-label={`Delivery rating ${selectedOrder.deliveryReview.rating} out of 5`}>
+                                                        {[1, 2, 3, 4, 5].map((star) => (
+                                                            <span
+                                                                key={star}
+                                                                className={`text-sm leading-none ${star <= selectedOrder.deliveryReview.rating ? 'text-amber-500' : 'text-slate-300'}`}
+                                                            >
+                                                                ★
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                    <span className="text-xs text-slate-700 font-medium">
+                                                        {selectedOrder.deliveryReview.rating}/5
+                                                    </span>
+                                                </div>
+
+                                                <div className="mt-2 flex flex-wrap gap-2">
+                                                    {selectedOrder.deliveryReview?.agentBehavior && (
+                                                        <span className="px-2 py-1 rounded bg-white border border-amber-200 text-xs text-slate-700">
+                                                            Agent: {selectedOrder.deliveryReview.agentBehavior === 'VERY_POLITE'
+                                                                ? 'Very Polite'
+                                                                : selectedOrder.deliveryReview.agentBehavior === 'POLITE'
+                                                                    ? 'Polite'
+                                                                    : selectedOrder.deliveryReview.agentBehavior === 'AVERAGE'
+                                                                        ? 'Average'
+                                                                        : 'Rude'}
+                                                        </span>
+                                                    )}
+                                                    {selectedOrder.deliveryReview?.packageCondition && (
+                                                        <span className="px-2 py-1 rounded bg-white border border-amber-200 text-xs text-slate-700">
+                                                            Package: {selectedOrder.deliveryReview.packageCondition === 'INTACT'
+                                                                ? 'Box Intact'
+                                                                : selectedOrder.deliveryReview.packageCondition === 'MINOR_DAMAGE'
+                                                                    ? 'Minor Box Damage'
+                                                                    : 'Damaged Box'}
+                                                        </span>
+                                                    )}
+                                                </div>
+
+                                                {selectedOrder.deliveryReview?.feedback?.trim() && (
+                                                    <div className="mt-2 flex items-start gap-1.5 text-xs text-slate-700 bg-white border border-amber-200 rounded px-2 py-1.5">
+                                                        <MessageSquare size={12} className="mt-0.5 text-slate-500" />
+                                                        <p>{selectedOrder.deliveryReview.feedback}</p>
+                                                    </div>
+                                                )}
+
+                                                {selectedOrder.deliveryReview?.damagePhotoUrl && (
+                                                    <div className="mt-2 space-y-2">
+                                                        <img
+                                                            src={selectedOrder.deliveryReview.damagePhotoUrl}
+                                                            alt="Package damage"
+                                                            className="w-28 h-28 object-cover rounded border border-amber-200"
+                                                        />
+                                                        <a
+                                                            href={selectedOrder.deliveryReview.damagePhotoUrl}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                                                        >
+                                                            View damage photo
+                                                        </a>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <p className="text-xs text-slate-400">No delivery review yet</p>
+                                        )}
                                     </div>
                                 </div>
 

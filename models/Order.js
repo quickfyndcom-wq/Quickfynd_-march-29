@@ -74,6 +74,26 @@ const OrderSchema = new mongoose.Schema({
     rejectionReason: String,
     sellerNotes: String,
   }],
+  
+  // Delivery Review & Feedback
+  deliveryReview: {
+    rating: { type: Number, min: 1, max: 5 },
+    feedback: { type: String, default: '' },
+    agentBehavior: {
+      type: String,
+      enum: ['VERY_POLITE', 'POLITE', 'AVERAGE', 'RUDE'],
+      default: null
+    },
+    packageCondition: {
+      type: String,
+      enum: ['INTACT', 'MINOR_DAMAGE', 'DAMAGED'],
+      default: null
+    },
+    damagePhotoUrl: { type: String, default: '' },
+    submittedAt: Date,
+    reviewed: { type: Boolean, default: false }
+  },
+  
   // Add more fields as needed
 }, { timestamps: true });
 

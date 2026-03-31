@@ -16,7 +16,7 @@ export default function GuestOrderLinker() {
             if (loading || !isSignedIn || checked) return
 
             try {
-                const token = await getToken()
+                const token = await getToken(true)
                 if (!token) return
 
                 const email = user?.email
@@ -24,12 +24,36 @@ export default function GuestOrderLinker() {
 
                 if (!email && !phone) return
 
-                const { data } = await axios.post('/api/user/link-guest-orders', {
-                    email,
-                    phone
-                }, {
-                    headers: { Authorization: `Bearer ${token}` }
-                })
+                let data
+
+                try {
+                    const response = await axios.post('/api/user/link-guest-orders', {
+                        email,
+                        phone
+                    }, {
+                        headers: { Authorization: `Bearer ${token}` }
+                    })
+                    data = response.data
+                } catch (err) {
+                    // Token may be stale right after sign-in; retry once with forced refresh
+                    if (err?.response?.status === 401) {
+                        const refreshedToken = await getToken(true)
+                        if (!refreshedToken) {
+                            setChecked(true)
+                            return
+                        }
+
+                        const retryResponse = await axios.post('/api/user/link-guest-orders', {
+                            email,
+                            phone
+                        }, {
+                            headers: { Authorization: `Bearer ${refreshedToken}` }
+                        })
+                        data = retryResponse.data
+                    } else {
+                        throw err
+                    }
+                }
 
                 if (data.linked && data.count > 0) {
                     toast.success(`Welcome back! We've linked ${data.count} previous order(s) to your account.`, {
@@ -40,7 +64,9 @@ export default function GuestOrderLinker() {
                 setChecked(true)
             } catch (error) {
                 // Silently fail - this is a background operation
-                console.error('Failed to link guest orders:', error)
+                if (error?.response?.status !== 401) {
+                    console.error('Failed to link guest orders:', error)
+                }
                 setChecked(true)
             }
         }

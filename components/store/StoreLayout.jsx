@@ -20,22 +20,45 @@ const StoreLayout = ({ children }) => {
     const [sellerLoading, setSellerLoading] = useState(true);
     const [storeInfo, setStoreInfo] = useState(null);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+    const [sellerReason, setSellerReason] = useState('');
 
     const fetchIsSeller = async () => {
         if (!user) return;
         try {
             const token = await getToken(true); // Force refresh token
             if (!token) {
+                setIsSeller(false);
+                setStoreInfo(null);
+                setSellerReason('missing-token');
                 setSellerLoading(false);
                 return;
             }
             const { data } = await axios.get('/api/store/is-seller', { 
                 headers: { Authorization: `Bearer ${token}` }
             });
-            setIsSeller(data.isSeller);
-            setStoreInfo(data.storeInfo);
+            setIsSeller(!!data.isSeller);
+            setStoreInfo(data.storeInfo || null);
+            setSellerReason(data.isSeller ? '' : (data.reason || 'not-seller-or-not-approved'));
         } catch (error) {
-            setIsSeller(false);
+            try {
+                const retryToken = await getToken(true);
+                if (!retryToken) {
+                    setIsSeller(false);
+                    setStoreInfo(null);
+                    setSellerReason('missing-token');
+                } else {
+                    const { data } = await axios.get('/api/store/is-seller', {
+                        headers: { Authorization: `Bearer ${retryToken}` }
+                    });
+                    setIsSeller(!!data.isSeller);
+                    setStoreInfo(data.storeInfo || null);
+                    setSellerReason(data.isSeller ? '' : (data.reason || 'not-seller-or-not-approved'));
+                }
+            } catch {
+                setIsSeller(false);
+                setStoreInfo(null);
+                setSellerReason('seller-check-failed');
+            }
         } finally {
             setSellerLoading(false);
         }
@@ -85,6 +108,10 @@ const StoreLayout = ({ children }) => {
         <div className="min-h-screen flex flex-col items-center justify-center text-center px-6">
             <h1 className="text-2xl sm:text-4xl font-semibold text-slate-400">You are not authorized to access this page</h1>
             <p className="text-slate-500 mt-4 mb-6">Your account does not have seller access</p>
+            <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                <p>Signed in as: {user?.email || user?.uid || 'Unknown user'}</p>
+                {sellerReason && <p className="mt-1">Access check: {sellerReason}</p>}
+            </div>
             <Link href="/create-store" className="bg-blue-600 text-white flex items-center gap-2 p-2 px-6 max-sm:text-sm rounded-full hover:bg-blue-700 transition">
                 Request Store Access
             </Link>

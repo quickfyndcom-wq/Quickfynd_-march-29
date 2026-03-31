@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import connectDB from '@/lib/mongodb';
 import Order from '@/models/Order';
 import User from '@/models/User';
+import { sendOrderConfirmationEmail } from '@/lib/email';
 
 // Customer order placement (guest or logged-in)
 export async function POST(request) {
@@ -45,6 +46,26 @@ export async function POST(request) {
         model: 'Product'
       })
       .lean();
+
+    // Send confirmation email (non-blocking)
+    try {
+      const recipientEmail = populatedOrder?.email || user?.email;
+      if (recipientEmail) {
+        await sendOrderConfirmationEmail({
+          email: recipientEmail,
+          name: populatedOrder?.name || user?.name || 'there',
+          orderId: populatedOrder?._id,
+          shortOrderNumber: populatedOrder?.shortOrderNumber,
+          total: populatedOrder?.total || 0,
+          orderItems: populatedOrder?.orderItems || [],
+          shippingAddress: populatedOrder?.shippingAddress || null,
+          createdAt: populatedOrder?.createdAt || new Date(),
+          paymentMethod: populatedOrder?.paymentMethod || 'N/A',
+        });
+      }
+    } catch (emailError) {
+      console.error('[store/checkout] Confirmation email failed:', emailError);
+    }
 
     return NextResponse.json({ message: "Order placed successfully", order: populatedOrder });
   } catch (error) {

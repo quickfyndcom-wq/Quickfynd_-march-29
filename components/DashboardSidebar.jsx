@@ -16,6 +16,7 @@ export default function DashboardSidebar() {
     { label: 'Browse History', href: '/browse-history' },
     { label: 'Support Tickets', href: '/dashboard/tickets' },
     { label: 'Account Settings', href: '/settings' },
+    { label: 'Privacy', href: '/settings/privacy', tag: 'NEW' },
     { label: 'Help & Support', href: '/help' },
   ]
 
@@ -84,7 +85,14 @@ export default function DashboardSidebar() {
                     : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                 }`}
               >
-                <span>{item.label}</span>
+                <span className="flex items-center gap-2">
+                  <span>{item.label}</span>
+                  {item.tag && (
+                    <span className="px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[10px] font-semibold">
+                      {item.tag}
+                    </span>
+                  )}
+                </span>
                 {isActive(item.href) && (
                   <span className="w-5 h-5 rounded-full bg-white/20 border border-white/40 flex items-center justify-center">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
@@ -99,20 +107,25 @@ export default function DashboardSidebar() {
       </div>
 
       {/* Desktop sidebar */}
-      <aside className="hidden md:block md:col-span-1 bg-white border border-slate-200 rounded-xl shadow-sm p-4 h-fit">
+      <aside className="hidden md:block md:col-span-1 bg-white border border-slate-200 rounded-xl shadow-sm p-4 h-fit md:sticky md:top-24 max-h-[calc(100vh-7rem)] overflow-hidden">
         <h2 className="text-sm font-semibold text-slate-800 mb-3">Dashboard</h2>
-        <nav className="flex flex-col gap-1 text-sm">
+        <nav className="flex flex-col gap-1 text-sm overflow-y-auto pr-1 max-h-[calc(100vh-12rem)]">
           {menuItems.map((item) => (
             <Link
               key={item.href}
               href={item.href}
-              className={`px-3 py-2 rounded-lg hover:bg-gray-100 font-medium ${
+              className={`px-3 py-2 rounded-lg hover:bg-gray-100 font-medium flex items-center justify-between gap-2 ${
                 isActive(item.href)
                   ? 'bg-gray-100 text-gray-900'
                   : 'text-gray-700'
               }`}
             >
-              {item.label}
+              <span>{item.label}</span>
+              {item.tag && (
+                <span className="px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[10px] font-semibold">
+                  {item.tag}
+                </span>
+              )}
             </Link>
           ))}
         </nav>

@@ -50,6 +50,13 @@ const UserSchema = new mongoose.Schema({
     promotional: { type: Boolean, default: true },
     orders: { type: Boolean, default: true },
     updates: { type: Boolean, default: true }
+  },
+  // Privacy preferences
+  privacyPreferences: {
+    profileVisibility: { type: Boolean, default: true },
+    personalizedOffers: { type: Boolean, default: true },
+    analyticsTracking: { type: Boolean, default: true },
+    thirdPartySharing: { type: Boolean, default: false }
   }
   // Add other fields as needed
 }, { timestamps: true, _id: false }); // Disable auto ObjectId generation

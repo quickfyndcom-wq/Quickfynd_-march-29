@@ -714,6 +714,25 @@ export default function CheckoutPage() {
     }) || null;
   };
 
+  const hasMeaningfulVariantOptions = (variantOptions) => {
+    if (!variantOptions || typeof variantOptions !== 'object') return false;
+    const hasColor = typeof variantOptions?.color === 'string' && variantOptions.color.trim().length > 0;
+    const hasSize = typeof variantOptions?.size === 'string' && variantOptions.size.trim().length > 0;
+    const hasBundleQty = variantOptions?.bundleQty !== null && variantOptions?.bundleQty !== undefined && variantOptions?.bundleQty !== '';
+    return hasColor || hasSize || hasBundleQty;
+  };
+
+  const toCanonicalVariantOptions = (variantOptions = {}) => {
+    if (!variantOptions || typeof variantOptions !== 'object') return null;
+    const canonical = {};
+    if (typeof variantOptions?.color === 'string' && variantOptions.color.trim()) canonical.color = variantOptions.color.trim();
+    if (typeof variantOptions?.size === 'string' && variantOptions.size.trim()) canonical.size = variantOptions.size.trim();
+    if (variantOptions?.bundleQty !== null && variantOptions?.bundleQty !== undefined && variantOptions?.bundleQty !== '') {
+      canonical.bundleQty = Number(variantOptions.bundleQty);
+    }
+    return hasMeaningfulVariantOptions(canonical) ? canonical : null;
+  };
+
   const getCheckoutMaxQty = (item) => {
     if (item?.inStock === false) return 0;
     const cartValue = cartItems?.[item?._cartKey || item?._id];
@@ -1286,10 +1305,18 @@ export default function CheckoutPage() {
       try {
         // Build items from purchasable cart items only
         const itemsFromStateCard = cartArray.map((item) => {
-          const value = cartItems?.[item._id];
+          const productId = item?._cartKey || item?._id;
+          const value = cartItems?.[productId];
           const qty = typeof value === 'number' ? value : value?.quantity || item.quantity || 0;
           const variantOptions = typeof value === 'object' ? value?.variantOptions : undefined;
-          return { id: item._id, quantity: qty, ...(variantOptions ? { variantOptions } : {}) };
+          const selectedVariant = getCheckoutCartVariant(item, value);
+          const canonicalVariantOptions = toCanonicalVariantOptions(selectedVariant?.options || variantOptions || {});
+          return {
+            id: productId,
+            quantity: qty,
+            ...(canonicalVariantOptions ? { variantOptions: canonicalVariantOptions } : {}),
+            ...(selectedVariant?._id ? { variantId: String(selectedVariant._id) } : {}),
+          };
         }).filter(i => i.quantity > 0);
 
         let payload = {
@@ -1414,14 +1441,18 @@ export default function CheckoutPage() {
       
       // Build items directly from cartItems to preserve variantOptions
       const itemsFromState = cartArray.map((item) => {
-        const value = cartItems?.[item._id];
+        const productId = item?._cartKey || item?._id;
+        const value = cartItems?.[productId];
         const qty = typeof value === 'number' ? value : value?.quantity || item.quantity || 0;
         const variantOptions = typeof value === 'object' ? value?.variantOptions : undefined;
         const offerToken = typeof value === 'object' ? value?.offerToken : undefined;
+        const selectedVariant = getCheckoutCartVariant(item, value);
+        const canonicalVariantOptions = toCanonicalVariantOptions(selectedVariant?.options || variantOptions || {});
         return {
-          id: item._id,
+          id: productId,
           quantity: qty,
-          ...(variantOptions ? { variantOptions } : {}),
+          ...(canonicalVariantOptions ? { variantOptions: canonicalVariantOptions } : {}),
+          ...(selectedVariant?._id ? { variantId: String(selectedVariant._id) } : {}),
           ...(offerToken ? { offerToken } : {})
         };
       }).filter(i => i.quantity > 0);

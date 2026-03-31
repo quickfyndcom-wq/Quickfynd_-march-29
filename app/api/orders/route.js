@@ -71,6 +71,53 @@ function buildVariantElemMatch(variantOptions = {}, requiredQty = null) {
     return elemMatch;
 }
 
+function hasMeaningfulVariantOptions(variantOptions) {
+    if (!variantOptions || typeof variantOptions !== 'object') return false;
+
+    const hasColor = typeof variantOptions.color === 'string' && variantOptions.color.trim().length > 0;
+    const hasSize = typeof variantOptions.size === 'string' && variantOptions.size.trim().length > 0;
+    const hasBundleQty = variantOptions.bundleQty !== null && variantOptions.bundleQty !== undefined && variantOptions.bundleQty !== '';
+
+    return hasColor || hasSize || hasBundleQty;
+}
+
+function normalizeVariantText(value) {
+    return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function toCanonicalVariantOptions(options = {}) {
+    if (!options || typeof options !== 'object') return null;
+
+    const canonical = {};
+    if (typeof options?.color === 'string' && options.color.trim()) canonical.color = options.color.trim();
+    if (typeof options?.size === 'string' && options.size.trim()) canonical.size = options.size.trim();
+    if (options?.bundleQty !== null && options?.bundleQty !== undefined && options?.bundleQty !== '') {
+        canonical.bundleQty = Number(options.bundleQty);
+    }
+
+    return hasMeaningfulVariantOptions(canonical) ? canonical : null;
+}
+
+function variantMatchesSelection(variant = {}, selection = {}) {
+    const options = variant?.options || {};
+    const selectedColor = normalizeVariantText(selection?.color);
+    const selectedSize = normalizeVariantText(selection?.size);
+    const variantColor = normalizeVariantText(options?.color);
+    const variantSize = normalizeVariantText(options?.size);
+
+    const colorMatch = selectedColor ? variantColor === selectedColor : true;
+    const sizeMatch = selectedSize ? variantSize === selectedSize : true;
+
+    if (selection?.bundleQty === null || selection?.bundleQty === undefined || selection?.bundleQty === '') {
+        const optionBundleQty = Number(options?.bundleQty);
+        const isBundleVariant = Number.isFinite(optionBundleQty) && optionBundleQty > 1;
+        return colorMatch && sizeMatch && !isBundleVariant;
+    }
+
+    const bundleMatch = Number(options?.bundleQty || 0) === Number(selection?.bundleQty || 0);
+    return colorMatch && sizeMatch && bundleMatch;
+}
+
 async function syncProductStockAggregate(productId) {
     const latest = await Product.findById(productId).select('variants stockQuantity inStock').lean();
     if (!latest) return;
@@ -99,7 +146,27 @@ async function rollbackReservedInventory(reservations = []) {
         const quantity = Number(reservation?.quantity) || 0;
         if (!productId || quantity <= 0) continue;
 
-        if (reservation?.variantOptions) {
+        if (reservation?.variantId) {
+            const updatedById = await Product.findOneAndUpdate(
+                {
+                    _id: productId,
+                    variants: {
+                        $elemMatch: {
+                            _id: reservation.variantId,
+                        },
+                    },
+                },
+                { $inc: { 'variants.$.stock': quantity } },
+                { new: true }
+            );
+
+            if (updatedById) {
+                await syncProductStockAggregate(productId);
+                continue;
+            }
+        }
+
+        if (hasMeaningfulVariantOptions(reservation?.variantOptions)) {
             const variantElemMatch = buildVariantElemMatch(reservation.variantOptions);
             await Product.findOneAndUpdate(
                 {
@@ -126,7 +193,29 @@ async function reserveInventoryForOrderItems(orderItems = []) {
         const quantity = Number(item?.quantity) || 0;
         if (!productId || quantity <= 0) continue;
 
-        if (item?.variantOptions) {
+        if (item?.variantId) {
+            const updatedById = await Product.findOneAndUpdate(
+                {
+                    _id: productId,
+                    variants: {
+                        $elemMatch: {
+                            _id: item.variantId,
+                            stock: { $gte: quantity },
+                        },
+                    },
+                },
+                { $inc: { 'variants.$.stock': -quantity } },
+                { new: true }
+            );
+
+            if (updatedById) {
+                reservations.push({ productId, quantity, variantId: item.variantId, variantOptions: item.variantOptions || null });
+                await syncProductStockAggregate(productId);
+                continue;
+            }
+        }
+
+        if (hasMeaningfulVariantOptions(item?.variantOptions)) {
             const variantElemMatch = buildVariantElemMatch(item.variantOptions, quantity);
             const updated = await Product.findOneAndUpdate(
                 {
@@ -142,7 +231,7 @@ async function reserveInventoryForOrderItems(orderItems = []) {
                 throw new Error('Insufficient stock while reserving selected variant');
             }
 
-            reservations.push({ productId, quantity, variantOptions: item.variantOptions });
+            reservations.push({ productId, quantity, variantId: item.variantId || null, variantOptions: item.variantOptions });
             await syncProductStockAggregate(productId);
             continue;
         }
@@ -378,18 +467,28 @@ export async function POST(request) {
             }
             // If variantOptions provided, validate against matching variant stock; else product stockQuantity
             let availableQty = typeof product.stockQuantity === 'number' ? product.stockQuantity : 0;
-            if (item.variantOptions && Array.isArray(product.variants) && product.variants.length > 0) {
-                const { color, size, bundleQty } = item.variantOptions || {};
-                const match = product.variants.find(v => {
-                    const cOk = v.options?.color ? v.options.color === color : !color;
-                    const sOk = v.options?.size ? v.options.size === size : !size;
-                    const bOk = v.options?.bundleQty ? Number(v.options.bundleQty) === Number(bundleQty) : !bundleQty;
-                    return cOk && sOk && bOk;
-                });
+            if (hasMeaningfulVariantOptions(item.variantOptions) && Array.isArray(product.variants) && product.variants.length > 0) {
+                const requestedOptions = toCanonicalVariantOptions(item.variantOptions);
+                let match = null;
+
+                if (item?.variantId) {
+                    match = product.variants.find((variant) => String(variant?._id || '') === String(item.variantId));
+                }
+
+                if (!match) {
+                    match = product.variants.find((variant) => variantMatchesSelection(variant, requestedOptions || item.variantOptions || {}));
+                }
+
                 if (!match) {
                     return NextResponse.json({ error: 'Selected variant not found', id: item.id, variantOptions: item.variantOptions }, { status: 400 });
                 }
+
+                item.variantOptions = toCanonicalVariantOptions(match?.options || {}) || requestedOptions || item.variantOptions;
+                item.variantId = match?._id ? String(match._id) : item.variantId;
                 availableQty = typeof match.stock === 'number' ? match.stock : availableQty;
+            } else {
+                item.variantOptions = null;
+                delete item.variantId;
             }
             if (availableQty < requestedQty) {
                 return NextResponse.json({ error: 'Insufficient stock', id: item.id, availableQty, requestedQty }, { status: 400 });
@@ -551,7 +650,7 @@ export async function POST(request) {
                     name: item.name || '',
                     quantity: item.quantity,
                     price: item.price,
-                    variantOptions: item.variantOptions || null
+                    variantOptions: hasMeaningfulVariantOptions(item.variantOptions) ? item.variantOptions : null
                 }))
             };
 
@@ -814,6 +913,51 @@ export async function POST(request) {
                 }
             });
             return NextResponse.json({ session });
+        }
+
+        // Send order confirmation emails for successfully created orders (non-blocking)
+        try {
+            if (orderIds.length > 0) {
+                const createdOrders = await Order.find({ _id: { $in: orderIds } })
+                    .populate('orderItems.productId')
+                    .populate('userId')
+                    .lean();
+
+                for (const created of createdOrders) {
+                    const recipientEmail =
+                        created?.guestEmail ||
+                        created?.shippingAddress?.email ||
+                        created?.userId?.email ||
+                        null;
+
+                    if (!recipientEmail) {
+                        console.warn('[orders/create] Skipping confirmation email: missing recipient', created?._id?.toString?.());
+                        continue;
+                    }
+
+                    const recipientName =
+                        created?.guestName ||
+                        created?.shippingAddress?.name ||
+                        created?.userId?.name ||
+                        'there';
+
+                    await sendOrderConfirmationEmail({
+                        email: recipientEmail,
+                        name: recipientName,
+                        orderId: created._id,
+                        shortOrderNumber: created.shortOrderNumber,
+                        total: created.total,
+                        orderItems: created.orderItems || [],
+                        shippingAddress: created.shippingAddress,
+                        createdAt: created.createdAt,
+                        paymentMethod: created.paymentMethod,
+                    });
+
+                    console.log('[orders/create] Confirmation email sent for order', created?._id?.toString?.());
+                }
+            }
+        } catch (emailError) {
+            console.error('[orders/create] Confirmation email failed:', emailError);
         }
 
         // Clear cart for logged-in users
