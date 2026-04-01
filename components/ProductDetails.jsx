@@ -12,6 +12,7 @@ import { addToCart, uploadCart } from "@/lib/features/cart/cartSlice";
 import MobileProductActions from "./MobileProductActions";
 import { useAuth } from '@/lib/useAuth';
 import { trackMetaEvent } from "@/lib/metaPixelClient";
+import { trackCustomerBehaviorEvent } from "@/lib/customerBehaviorTracking";
 
 const PLACEHOLDER_IMAGE = 'https://ik.imagekit.io/jrstupuke/placeholder.png';
 
@@ -58,6 +59,35 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
   const dispatch = useDispatch();
   const cartCount = useSelector((state) => state.cart.total);
   const cartItems = useSelector((state) => state.cart.cartItems);
+  const pageEnterAtRef = useRef(Date.now());
+  const maxScrollDepthRef = useRef(0);
+  const nextActionRef = useRef('viewing');
+  const lastTrackedProductIdRef = useRef('');
+  const exitSentRef = useRef(false);
+
+  const emitBehaviorEvent = (eventType, extra = {}) => {
+    const storeId = String(product?.storeId || '').trim();
+    if (!storeId || !product?._id) return;
+
+    const providerProfile = Array.isArray(user?.providerData) ? user.providerData.find(Boolean) : null;
+    const customerName = String(user?.displayName || providerProfile?.displayName || '').trim();
+    const customerEmail = String(user?.email || providerProfile?.email || '').trim().toLowerCase();
+    const customerPhone = String(user?.phoneNumber || providerProfile?.phoneNumber || '').trim();
+
+    trackCustomerBehaviorEvent({
+      storeId,
+      userId,
+      customerType: userId ? 'logged_in' : 'guest',
+      customerName,
+      customerEmail,
+      customerPhone,
+      eventType,
+      productId: String(product._id),
+      productSlug: String(product.slug || ''),
+      productName: String(product.name || ''),
+      ...extra,
+    });
+  };
 
   const openQuickView = () => {
     setQuickViewZoom(1);
@@ -116,6 +146,54 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
 
     sessionStorage.setItem(eventKey, '1');
   }, [product?._id, product?.name, product?.title, product?.price]);
+
+  useEffect(() => {
+    if (!product?._id || !product?.storeId) return;
+
+    const currentProductId = String(product._id);
+    pageEnterAtRef.current = Date.now();
+    maxScrollDepthRef.current = 0;
+    nextActionRef.current = 'viewing';
+    exitSentRef.current = false;
+
+    if (lastTrackedProductIdRef.current !== currentProductId) {
+      lastTrackedProductIdRef.current = currentProductId;
+      emitBehaviorEvent('product_view', {
+        nextAction: 'viewing',
+      });
+    }
+
+    const handleScroll = () => {
+      const doc = document.documentElement;
+      const total = Math.max((doc.scrollHeight || 0) - window.innerHeight, 1);
+      const current = Math.max(window.scrollY || 0, 0);
+      const depth = Math.min(100, Math.round((current / total) * 100));
+      if (depth > maxScrollDepthRef.current) {
+        maxScrollDepthRef.current = depth;
+      }
+    };
+
+    const sendExit = () => {
+      if (exitSentRef.current) return;
+      exitSentRef.current = true;
+      const durationMs = Math.max(Date.now() - pageEnterAtRef.current, 0);
+      emitBehaviorEvent('product_exit', {
+        durationMs,
+        scrollDepthPercent: maxScrollDepthRef.current,
+        nextAction: nextActionRef.current,
+        useBeacon: true,
+      });
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('pagehide', sendExit);
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('pagehide', sendExit);
+      sendExit();
+    };
+  }, [product?._id, product?.storeId]);
 
   useEffect(() => {
     const fetchReviews = async () => {
@@ -706,6 +784,11 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
   const handleOrderNow = () => {
     if (isOrderingNow || !isSelectionInStock || maxOrderQty <= 0) return;
     setIsOrderingNow(true);
+    nextActionRef.current = 'go_to_checkout';
+    emitBehaviorEvent('go_to_checkout', {
+      nextAction: 'go_to_checkout',
+      scrollDepthPercent: maxScrollDepthRef.current,
+    });
     // Add to cart for both guests and signed-in users
     try {
       let qty = Math.min(quantity, maxOrderQty || 0);
@@ -757,6 +840,11 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
 
   const handleAddToCart = async () => {
     if (!isSelectionInStock || maxOrderQty <= 0) return;
+    nextActionRef.current = 'add_to_cart';
+    emitBehaviorEvent('add_to_cart', {
+      nextAction: 'add_to_cart',
+      scrollDepthPercent: maxScrollDepthRef.current,
+    });
     // Add to cart for both guests and signed-in users
     let qty = Math.min(quantity, maxOrderQty || 0);
     if (!Number.isFinite(qty) || qty <= 0) {
@@ -848,6 +936,13 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
 
   // Add selected bundle items then go directly to checkout
   const handleAddBundleToCart = async () => {
+    nextActionRef.current = 'go_to_checkout';
+    emitBehaviorEvent('go_to_checkout', {
+      nextAction: 'go_to_checkout',
+      scrollDepthPercent: maxScrollDepthRef.current,
+      metadata: { bundle: true },
+    });
+
     // Add main product
     dispatch(addToCart({ productId: product._id, price: effPrice }));
 

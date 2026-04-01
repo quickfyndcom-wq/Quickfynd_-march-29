@@ -242,6 +242,7 @@ const SignInModal = ({ open, onClose, defaultMode = 'login', bonusMessage = '' }
   };
 
   useEffect(() => {
+    if (!open) return;
     if (isRegister || showQuickSignIn || typeof window === 'undefined') return;
     if (auth.currentUser) return;
     if (oneTapAttemptedRef.current) return;
@@ -253,6 +254,14 @@ const SignInModal = ({ open, onClose, defaultMode = 'login', bonusMessage = '' }
     // Format: 861878384152-XXXXXXXX.apps.googleusercontent.com
     const oneTapClientId = process.env.NEXT_PUBLIC_GOOGLE_ONE_TAP_CLIENT_ID || '';
     if (!oneTapClientId) return;
+
+    // Guardrails to avoid noisy FedCM token retrieval errors in unsupported contexts.
+    const isValidClientId = /\.apps\.googleusercontent\.com$/i.test(oneTapClientId);
+    const hostname = String(window.location?.hostname || '').toLowerCase();
+    const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+    const allowLocalOneTap = process.env.NEXT_PUBLIC_ENABLE_ONE_TAP_LOCAL === 'true';
+    if (!isValidClientId) return;
+    if (isLocalhost && !allowLocalOneTap) return;
 
     oneTapAttemptedRef.current = true;
     sessionStorage.setItem(oneTapAttemptKey, 'true');
@@ -266,6 +275,7 @@ const SignInModal = ({ open, onClose, defaultMode = 'login', bonusMessage = '' }
         client_id: oneTapClientId,
         itp_support: true,
         auto_select: true,
+        use_fedcm_for_prompt: false,
         cancel_on_tap_outside: false,
         context: 'signin',
         callback: async (response) => {
@@ -286,7 +296,14 @@ const SignInModal = ({ open, onClose, defaultMode = 'login', bonusMessage = '' }
         }
       });
 
-      window.google.accounts.id.prompt();
+      window.google.accounts.id.prompt((notification) => {
+        // Avoid throwing on browser-managed prompt abort/dismiss states.
+        // These cases are expected when users navigate quickly or close dialogs.
+        if (!notification) return;
+        if (notification.isNotDisplayed && notification.isNotDisplayed()) return;
+        if (notification.isSkippedMoment && notification.isSkippedMoment()) return;
+        if (notification.isDismissedMoment && notification.isDismissedMoment()) return;
+      });
     };
 
     if (window.google?.accounts?.id) {
@@ -312,7 +329,7 @@ const SignInModal = ({ open, onClose, defaultMode = 'login', bonusMessage = '' }
         window.google.accounts.id.cancel();
       }
     };
-  }, [isRegister, showQuickSignIn, handleAuthSuccess]);
+  }, [open, isRegister, showQuickSignIn, handleAuthSuccess]);
 
   if (!open) return null;
 

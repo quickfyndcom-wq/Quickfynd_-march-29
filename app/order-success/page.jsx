@@ -4,6 +4,7 @@ import { Suspense } from 'react';
 import { useEffect, useState } from 'react';
 import Loading from '@/components/Loading';
 import { useAuth } from '@/lib/useAuth';
+import { trackCustomerBehaviorEvent, getOrCreateSessionId, getOrCreateVisitorId, detectTrafficSource } from '@/lib/customerBehaviorTracking';
 
 export default function OrderSuccess() {
   return (
@@ -104,6 +105,54 @@ function OrderSuccessContent() {
       sessionStorage.setItem(purchaseEventKey, '1');
     }
   }, [order, total, currency, params]);
+
+  useEffect(() => {
+    if (!order || typeof window === 'undefined') return;
+
+    const storeId = String(order?.storeId || '').trim();
+    if (!storeId) return;
+
+    const orderEventId = String(order?._id || order?.shortOrderNumber || params.get('orderId') || 'unknown');
+    const trackingKey = `customer_order_tracked_${orderEventId}`;
+    if (sessionStorage.getItem(trackingKey)) return;
+
+    const attribution = detectTrafficSource();
+    const shippingName = String(order?.shippingAddress?.name || order?.guestName || user?.displayName || '').trim();
+    const shippingEmail = String(order?.guestEmail || user?.email || '').trim();
+    const shippingPhone = String(order?.guestPhone || order?.shippingAddress?.phone || user?.phoneNumber || '').trim();
+    const shippingAddress = [
+      order?.shippingAddress?.street,
+      order?.shippingAddress?.city,
+      order?.shippingAddress?.state,
+      order?.shippingAddress?.zip,
+      order?.shippingAddress?.country,
+    ].filter(Boolean).join(', ');
+
+    trackCustomerBehaviorEvent({
+      storeId,
+      userId: user?.uid || null,
+      customerType: user?.uid ? 'logged_in' : 'guest',
+      customerName: shippingName,
+      customerEmail: shippingEmail,
+      customerPhone: shippingPhone,
+      customerAddress: shippingAddress,
+      eventType: 'order_placed',
+      orderId: orderEventId,
+      orderValue: Number(total || 0),
+      nextAction: 'order_placed',
+      source: attribution.source,
+      medium: attribution.medium,
+      campaign: attribution.campaign,
+      referrer: attribution.referrer,
+      sessionId: getOrCreateSessionId(),
+      visitorId: getOrCreateVisitorId(),
+      metadata: {
+        paymentMethod,
+      },
+    });
+
+    sessionStorage.setItem(trackingKey, '1');
+  }, [order, total, paymentMethod, params, user?.uid]);
 
   // Render logic moved inside returned JSX to avoid early returns
   return (

@@ -1,6 +1,6 @@
 "use client"
 import { usePathname } from "next/navigation"
-import { HomeIcon, LayoutListIcon, SquarePenIcon, SquarePlusIcon, StarIcon, FolderIcon, TicketIcon, TruckIcon, RefreshCw, User as UserIcon, Users as UsersIcon, MessageSquare, Sparkles, BellIcon, MailIcon, Image as ImageIcon, ShoppingCart, Wallet, BarChart3, Target, Gift, X } from "lucide-react"
+import { HomeIcon, LayoutListIcon, SquarePenIcon, SquarePlusIcon, StarIcon, FolderIcon, TicketIcon, TruckIcon, RefreshCw, User as UserIcon, Users as UsersIcon, MessageSquare, Sparkles, BellIcon, MailIcon, Image as ImageIcon, ShoppingCart, Wallet, BarChart3, Target, Gift, X, Activity } from "lucide-react"
 import Link from "next/link"
 
 const StoreSidebar = ({ storeInfo, isOpen = false, onClose }) => {
@@ -22,6 +22,7 @@ const StoreSidebar = ({ storeInfo, isOpen = false, onClose }) => {
         { name: 'Promotional Offers', href: '/store/personalized-offers', icon: Gift },
         { name: 'Media', href: '/store/media', icon: ImageIcon },
         { name: 'Abandoned Checkout', href: '/store/abandoned-checkout', icon: ShoppingCart },
+        { name: 'Customer Tracking', href: '/store/customer-tracking', icon: Activity },
         { name: 'Coupons', href: '/store/coupons', icon: TicketIcon },
         { name: 'Shipping', href: '/store/shipping', icon: TruckIcon },
         { name: 'Customers', href: '/store/customers', icon: UsersIcon },
@@ -77,6 +78,7 @@ const StoreSidebar = ({ storeInfo, isOpen = false, onClose }) => {
             links: [
                 '/store/orders',
                 '/store/abandoned-checkout',
+                '/store/customer-tracking',
                 '/store/shipping',
                 '/store/return-requests',
                 '/store/balance',

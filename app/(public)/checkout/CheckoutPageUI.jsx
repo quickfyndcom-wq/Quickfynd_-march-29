@@ -12,6 +12,7 @@ import { fetchProducts } from "@/lib/features/product/productSlice";
 import { fetchShippingSettings, calculateShipping } from "@/lib/shipping";
 import FbqInitiateCheckout from "@/components/FbqInitiateCheckout";
 import { trackMetaEvent } from "@/lib/metaPixelClient";
+import { getTrackedStoreId, setTrackedCustomerIdentity, setTrackedStoreId, trackCustomerBehaviorEvent } from "@/lib/customerBehaviorTracking";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/useAuth";
 import dynamic from "next/dynamic";
@@ -96,6 +97,9 @@ export default function CheckoutPage() {
   const [couponLoading, setCouponLoading] = useState(false);
   const [storeId, setStoreId] = useState(null);
   const [formError, setFormError] = useState("");
+  const checkoutVisitTrackedRef = useRef(false);
+  const identityTrackTimerRef = useRef(null);
+  const lastIdentitySnapshotRef = useRef("");
 
   const cleanDigits = (value) => (value ? String(value).replace(/\D/g, '') : '');
   const sanitizePincode = (value) => cleanDigits(value).trim();
@@ -107,6 +111,83 @@ export default function CheckoutPage() {
       if (normalized && !isZeroOnlyPincode(normalized)) return normalized;
     }
     return '';
+  };
+
+  const buildCheckoutAddress = (currentForm) => {
+    const street = String(currentForm?.street || "").trim();
+    const city = String(currentForm?.city || "").trim();
+    const pincode = String(currentForm?.pincode || "").trim();
+    const hasMeaningfulAddress = Boolean(street || city || pincode);
+    if (!hasMeaningfulAddress) return "";
+
+    const parts = [
+      street,
+      city,
+      currentForm?.district,
+      currentForm?.state,
+      currentForm?.country,
+      pincode,
+    ]
+      .map((item) => String(item || "").trim())
+      .filter(Boolean);
+
+    return parts.join(", ");
+  };
+
+  const buildAddressFromAddressObject = (addressObj) => {
+    if (!addressObj) return "";
+    const street = String(addressObj?.street || "").trim();
+    const city = String(addressObj?.city || "").trim();
+    const pincode = String(addressObj?.pincode || addressObj?.zip || "").trim();
+    const hasMeaningfulAddress = Boolean(street || city || pincode);
+    if (!hasMeaningfulAddress) return "";
+
+    const parts = [
+      street,
+      city,
+      addressObj?.district,
+      addressObj?.state,
+      addressObj?.country,
+      pincode,
+    ]
+      .map((item) => String(item || "").trim())
+      .filter(Boolean);
+
+    return parts.join(", ");
+  };
+
+  const getCheckoutTrackingIdentity = () => {
+    const selectedAddress = form.addressId
+      ? addressList.find((a) => String(a?._id) === String(form.addressId))
+      : null;
+
+    const providerProfile = Array.isArray(user?.providerData) ? user.providerData.find(Boolean) : null;
+    const providerName = String(providerProfile?.displayName || "").trim();
+    const providerEmail = String(providerProfile?.email || "").trim().toLowerCase();
+    const providerPhone = cleanDigits(providerProfile?.phoneNumber || "");
+
+    const customerName = String(form.name || selectedAddress?.name || user?.displayName || providerName || "").trim();
+    const customerEmail = String(form.email || selectedAddress?.email || user?.email || providerEmail || "").trim().toLowerCase();
+    const customerPhone = cleanDigits(form.phone || selectedAddress?.phone || user?.phoneNumber || user?.phone || providerPhone || "");
+    const customerAddress = buildCheckoutAddress(form) || buildAddressFromAddressObject(selectedAddress);
+
+    return {
+      customerName,
+      customerEmail,
+      customerPhone,
+      customerAddress,
+    };
+  };
+
+  const getCartDerivedStoreId = () => {
+    const entries = Object.entries(cartItems || {});
+    for (const [productKey] of entries) {
+      const baseProductId = String(productKey || "").split("_")[0];
+      const product = products.find((p) => String(p?._id) === baseProductId || String(p?._id) === String(productKey));
+      const derived = String(product?.storeId || "").trim();
+      if (derived) return derived;
+    }
+    return "";
   };
 
   const computeLineTotal = (price, quantity, bundleQty) => {
@@ -428,6 +509,7 @@ export default function CheckoutPage() {
         const storeIdValue = storeData.store._id;
         console.log('Store ID found:', storeIdValue);
         setStoreId(storeIdValue);
+        setTrackedStoreId(storeIdValue);
         
         console.log('Fetching coupons for store:', storeIdValue);
         const couponUrl = `/api/coupons?storeId=${storeIdValue}`;
@@ -574,6 +656,99 @@ export default function CheckoutPage() {
       });
     }
   }, [user, addressList, form.addressId]);
+
+  useEffect(() => {
+    const effectiveStoreId = String(storeId || getTrackedStoreId() || getCartDerivedStoreId() || "").trim();
+    if (!effectiveStoreId || checkoutVisitTrackedRef.current) return;
+
+    setTrackedStoreId(effectiveStoreId);
+    const identity = getCheckoutTrackingIdentity();
+
+    checkoutVisitTrackedRef.current = true;
+    trackCustomerBehaviorEvent({
+      storeId: effectiveStoreId,
+      userId: user?.uid || "",
+      customerType: user?.uid ? "logged_in" : "guest",
+      customerName: identity.customerName,
+      customerEmail: identity.customerEmail,
+      customerPhone: identity.customerPhone,
+      customerAddress: identity.customerAddress,
+      eventType: "go_to_checkout",
+      nextAction: "viewing",
+    });
+  }, [storeId, cartItems, products, addressList, form.addressId, user?.uid, user?.displayName, user?.email, user?.phoneNumber]);
+
+  useEffect(() => {
+    const effectiveStoreId = String(storeId || getTrackedStoreId() || getCartDerivedStoreId() || "").trim();
+    if (!effectiveStoreId) return;
+
+    setTrackedStoreId(effectiveStoreId);
+    const identity = getCheckoutTrackingIdentity();
+
+    const snapshot = JSON.stringify({
+      name: identity.customerName,
+      email: identity.customerEmail,
+      phone: identity.customerPhone,
+      address: identity.customerAddress,
+    });
+
+    if (snapshot === lastIdentitySnapshotRef.current) return;
+
+    if (identityTrackTimerRef.current) {
+      clearTimeout(identityTrackTimerRef.current);
+    }
+
+    identityTrackTimerRef.current = setTimeout(() => {
+      lastIdentitySnapshotRef.current = snapshot;
+      const parsed = JSON.parse(snapshot);
+      const hasAddress = String(parsed.address || "").trim().length > 0;
+      if (!hasAddress) return;
+
+      setTrackedCustomerIdentity({
+        customerName: parsed.name,
+        customerEmail: parsed.email,
+        customerPhone: parsed.phone,
+        customerAddress: parsed.address,
+      });
+
+      trackCustomerBehaviorEvent({
+        storeId: effectiveStoreId,
+        userId: user?.uid || "",
+        customerType: user?.uid ? "logged_in" : "guest",
+        customerName: parsed.name,
+        customerEmail: parsed.email,
+        customerPhone: parsed.phone,
+        customerAddress: parsed.address,
+        eventType: "go_to_checkout",
+        nextAction: "address_updated",
+      });
+    }, 5000);
+
+    return () => {
+      if (identityTrackTimerRef.current) {
+        clearTimeout(identityTrackTimerRef.current);
+      }
+    };
+  }, [
+    form.name,
+    form.email,
+    form.phone,
+    form.street,
+    form.city,
+    form.district,
+    form.state,
+    form.country,
+    form.pincode,
+    form.addressId,
+    storeId,
+    cartItems,
+    products,
+    addressList,
+    user?.uid,
+    user?.displayName,
+    user?.email,
+    user?.phoneNumber,
+  ]);
 
   // Auto-open pincode modal for guests without saved addresses or when no address is present
   useEffect(() => {

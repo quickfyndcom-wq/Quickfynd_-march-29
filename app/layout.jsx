@@ -47,6 +47,20 @@ export default function RootLayout({ children }) {
             <link rel="preconnect" href={ikOrigin} crossOrigin="anonymous" />
           </>
         )}
+        {/* Google Analytics (gtag.js) */}
+        <Script
+          src="https://www.googletagmanager.com/gtag/js?id=G-JBWQZM4C36"
+          strategy="afterInteractive"
+        />
+        <Script id="ga4-gtag-init" strategy="afterInteractive">
+          {`
+            window.dataLayer = window.dataLayer || [];
+            function gtag(){dataLayer.push(arguments);}
+            window.gtag = gtag;
+            gtag('js', new Date());
+            gtag('config', 'G-JBWQZM4C36');
+          `}
+        </Script>
         {/* Google Tag Manager - HEAD */}
         <Script id="gtm-head" strategy="afterInteractive">
           {`
