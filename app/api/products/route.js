@@ -127,7 +127,7 @@ export async function GET(request){
         let products = [];
         try {
             products = await Product.find(matchStage)
-                .select('name slug description shortDescription mrp price images category categories sku hasVariants variants attributes fastDelivery stockQuantity imageAspectRatio createdAt')
+                .select('name slug description shortDescription mrp price images category categories tags sku hasVariants variants attributes fastDelivery stockQuantity imageAspectRatio createdAt')
                 .populate('category', 'name slug')
                 .populate('categories', 'name slug')
                 .sort({ createdAt: -1 })
@@ -138,7 +138,7 @@ export async function GET(request){
         } catch (populateError) {
             console.error('Products populate error:', populateError);
             products = await Product.find(matchStage)
-                .select('name slug description shortDescription mrp price images category categories sku hasVariants variants attributes fastDelivery stockQuantity imageAspectRatio createdAt')
+                .select('name slug description shortDescription mrp price images category categories tags sku hasVariants variants attributes fastDelivery stockQuantity imageAspectRatio createdAt')
                 .sort({ createdAt: -1 })
                 .skip(offset)
                 .limit(limit)

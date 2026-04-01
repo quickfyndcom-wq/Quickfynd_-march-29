@@ -1341,6 +1341,27 @@ export default function CheckoutPage() {
           const addressId = form.addressId || (addressList[0] && addressList[0]._id);
           if (addressId) {
             payload.addressId = addressId;
+          } else {
+            // Fallback for logged-in users without a saved address.
+            if (!form.street || !form.city || !form.state || !form.country || !resolvedPincode) {
+              setFormError('Please add a delivery address before paying online.');
+              setPlacingOrder(false);
+              return;
+            }
+            payload.addressData = {
+              name: form.name || user.displayName || '',
+              email: form.email || user.email || '',
+              phone: cleanedPhone || '',
+              phoneCode: form.phoneCode,
+              alternatePhone: cleanedAlternatePhone || '',
+              alternatePhoneCode: form.alternatePhone ? form.alternatePhoneCode || form.phoneCode : '',
+              street: form.street,
+              city: form.city,
+              state: form.state,
+              country: form.country || 'India',
+              zip: resolvedPincode,
+              district: form.district || ''
+            };
           }
           if (safeRedeemCoins > 0) {
             payload.coinsToRedeem = safeRedeemCoins;

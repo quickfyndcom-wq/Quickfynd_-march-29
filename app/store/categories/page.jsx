@@ -18,7 +18,6 @@ export default function StoreCategoryMenu() {
   const [showForm, setShowForm] = useState(false);
   const [editingIdx, setEditingIdx] = useState(null);
   const [uploading, setUploading] = useState(false);
-  const [activeTab, setActiveTab] = useState('my-categories');
   const [searchQuery, setSearchQuery] = useState('');
 
   const [formData, setFormData] = useState({
@@ -29,6 +28,34 @@ export default function StoreCategoryMenu() {
 
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState('');
+  const [imageMode, setImageMode] = useState('upload'); // 'upload' | 'url'
+  const [imageUrlInput, setImageUrlInput] = useState('');
+  const [imageUploading, setImageUploading] = useState(false);
+
+  const normalizeText = (value = '') =>
+    String(value)
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+
+  const normalizeCategoryUrl = (value = '') =>
+    String(value)
+      .trim()
+      .toLowerCase()
+      .replace(/\/+$/, '');
+
+  const isDuplicateCategory = (name, url, excludeIndex = null) => {
+    const normalizedName = normalizeText(name);
+    const normalizedUrl = normalizeCategoryUrl(url);
+
+    return categories.some((category, index) => {
+      if (excludeIndex !== null && index === excludeIndex) return false;
+      return (
+        normalizeText(category?.name) === normalizedName ||
+        normalizeCategoryUrl(category?.url) === normalizedUrl
+      );
+    });
+  };
 
   // Fetch categories from store
   const fetchCategories = async () => {
@@ -63,10 +90,13 @@ export default function StoreCategoryMenu() {
     }
   }, [user]);
 
-  // Handle image selection
+  // Handle image file selection
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (file) {
+      // Reset previously saved URL when a new file is selected.
+      setFormData(prev => ({ ...prev, image: '' }));
+      setImageMode('upload');
       setImageFile(file);
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -76,12 +106,69 @@ export default function StoreCategoryMenu() {
     }
   };
 
+  // Handle image URL paste
+  const handleImageUrlInput = (e) => {
+    const url = e.target.value;
+    setImageUrlInput(url);
+    setImagePreview(url);
+    setFormData(prev => ({ ...prev, image: url }));
+  };
+
+  const extractUploadedImageUrl = (uploadResponse) => {
+    return (
+      uploadResponse?.data?.urls?.[0] ||
+      uploadResponse?.data?.url ||
+      ''
+    );
+  };
+
+  const handleUploadImageOnly = async () => {
+    if (!imageFile) {
+      toast.error('Please select an image first');
+      return;
+    }
+
+    try {
+      setImageUploading(true);
+      const token = await getToken();
+      const uploadFormData = new FormData();
+      uploadFormData.append('files', imageFile);
+
+      const uploadRes = await axios.post('/api/upload', uploadFormData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const uploadedUrl = extractUploadedImageUrl(uploadRes);
+      if (!uploadedUrl) {
+        throw new Error('Image upload failed: server returned no URL');
+      }
+
+      setFormData(prev => ({ ...prev, image: uploadedUrl }));
+      setImagePreview(uploadedUrl);
+      setImageFile(null);
+      toast.success('Image uploaded. Now click Add Category.');
+    } catch (error) {
+      toast.error(error?.response?.data?.error || error?.message || 'Failed to upload image');
+      console.error(error);
+    } finally {
+      setImageUploading(false);
+    }
+  };
+
   // Save category
   const handleSave = async (e) => {
     e.preventDefault();
     
     if (!formData.name || !formData.url) {
       toast.error('Name and URL are required');
+      return;
+    }
+
+    if (isDuplicateCategory(formData.name, formData.url, editingIdx)) {
+      toast.error('This category is already added');
       return;
     }
 
@@ -105,9 +192,9 @@ export default function StoreCategoryMenu() {
             Authorization: `Bearer ${token}`,
           },
         });
-        imageUrl = uploadRes?.data?.urls?.[0] || '';
+        imageUrl = extractUploadedImageUrl(uploadRes);
         if (!imageUrl) {
-          throw new Error('Image upload failed');
+          throw new Error('Image upload failed: server returned no URL');
         }
       }
 
@@ -142,7 +229,7 @@ export default function StoreCategoryMenu() {
       setCategories(updatedCategories);
       handleCancel();
     } catch (error) {
-      toast.error('Failed to save category');
+      toast.error(error?.response?.data?.error || error?.message || 'Failed to save category');
       console.error(error);
     } finally {
       setUploading(false);
@@ -188,6 +275,8 @@ export default function StoreCategoryMenu() {
     setFormData({ name: '', image: '', url: '' });
     setImageFile(null);
     setImagePreview('');
+    setImageUrlInput('');
+    setImageMode('upload');
   };
 
   // Organize categories by parent-child relationships
@@ -212,212 +301,125 @@ export default function StoreCategoryMenu() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 p-4 md:p-6">
       <div className="max-w-6xl mx-auto">
-        {/* Header Section */}
-        <div className="mb-12">
-          <div className="flex items-center gap-4 mb-6">
-            <div className="p-3 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg">
-              <MdCategory className="text-3xl text-white" />
-            </div>
-            <div>
-              <h1 className="text-4xl md:text-5xl font-bold text-slate-900">Store Categories</h1>
-              <p className="text-slate-600 mt-2 text-lg">Organize and customize your store's product categories</p>
-            </div>
+        {/* Header */}
+        <div className="flex items-center gap-4 mb-8">
+          <div className="p-3 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg">
+            <MdCategory className="text-3xl text-white" />
           </div>
-
-          {/* Stats Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-white rounded-2xl shadow-md p-8 border border-slate-100 hover:shadow-lg transition-shadow">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-slate-600 uppercase tracking-wide">Active Categories</p>
-                  <p className="text-4xl font-bold text-blue-600 mt-3">{categories.length}</p>
-                  <p className="text-xs text-slate-500 mt-2">out of {MAX_CATEGORIES} maximum</p>
-                </div>
-                <div className="p-4 bg-blue-100 rounded-xl">
-                  <MdCategory className="text-3xl text-blue-600" />
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-2xl shadow-md p-8 border border-slate-100 hover:shadow-lg transition-shadow">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-slate-600 uppercase tracking-wide">System Categories</p>
-                  <p className="text-4xl font-bold text-emerald-600 mt-3">{existingCategories.length}</p>
-                  <p className="text-xs text-slate-500 mt-2">available to use</p>
-                </div>
-                <div className="p-4 bg-emerald-100 rounded-xl">
-                  <FiCheckCircle className="text-3xl text-emerald-600" />
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-2xl shadow-md p-8 border border-slate-100 hover:shadow-lg transition-shadow">
-              <div className="flex flex-col justify-between h-full">
-                <div>
-                  <p className="text-sm font-semibold text-slate-600 uppercase tracking-wide">Completion</p>
-                  <p className="text-4xl font-bold text-purple-600 mt-3">{Math.round((categories.length / MAX_CATEGORIES) * 100)}%</p>
-                </div>
-                <div className="mt-4 w-full bg-slate-200 rounded-full h-3 overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-purple-500 via-purple-600 to-purple-700 rounded-full transition-all duration-500"
-                    style={{ width: `${(categories.length / MAX_CATEGORIES) * 100}%` }}
-                  />
-                </div>
-              </div>
-            </div>
+          <div>
+            <h1 className="text-3xl md:text-4xl font-bold text-slate-900">Store Categories</h1>
+            <p className="text-slate-500 mt-1">{categories.length}/{MAX_CATEGORIES} active &nbsp;·&nbsp; {existingCategories.length} system categories available</p>
           </div>
         </div>
 
-        {/* Tab Navigation */}
-        <div className="flex gap-2 mb-8 bg-white rounded-xl shadow-sm border border-slate-200 p-2">
-          <button
-            onClick={() => {
-              setActiveTab('my-categories');
-              setShowForm(false);
-            }}
-            className={`flex-1 py-3 px-6 rounded-lg font-semibold transition-all duration-200 flex items-center justify-center gap-2 ${
-              activeTab === 'my-categories'
-                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg'
-                : 'text-slate-700 hover:bg-slate-50'
-            }`}
-          >
-            <MdEdit className="text-xl" />
-            My Categories ({categories.length})
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab('browse');
-              setShowForm(false);
-            }}
-            className={`flex-1 py-3 px-6 rounded-lg font-semibold transition-all duration-200 flex items-center justify-center gap-2 ${
-              activeTab === 'browse'
-                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg'
-                : 'text-slate-700 hover:bg-slate-50'
-            }`}
-          >
-            <FiSearch className="text-xl" />
-            Browse System ({existingCategories.length})
-          </button>
-        </div>
+        {/* Add Category Button */}
+        {categories.length < MAX_CATEGORIES && (
+          <div className="mb-6">
+            <button
+              onClick={() => setShowForm(true)}
+              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:shadow-xl transition-all duration-200 font-semibold"
+            >
+              <FiPlus size={20} />
+              Add New Category
+            </button>
+          </div>
+        )}
 
-        {/* Main Content */}
-        {activeTab === 'my-categories' ? (
-          <>
-            {/* Add Category Button */}
-            {!showForm && categories.length < MAX_CATEGORIES && (
-              <div className="mb-8">
-                <button
-                  onClick={() => setShowForm(true)}
-                  className="w-full md:w-auto flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:shadow-xl transition-all duration-200 font-semibold text-lg"
-                >
-                  <FiPlus size={24} />
-                  Add New Category
+        {/* Form Modal */}
+        {showForm && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="sticky top-0 bg-gradient-to-r from-blue-600 to-blue-700 p-6 flex items-center justify-between">
+                <h2 className="text-2xl font-bold text-white">
+                  {editingIdx !== null ? '✏️ Edit Category' : '➕ Add New Category'}
+                </h2>
+                <button onClick={handleCancel} className="p-2 hover:bg-blue-500 rounded-lg transition text-white">
+                  <FiX size={24} />
                 </button>
               </div>
-            )}
 
-            {/* Form Modal */}
-            {showForm && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-                  <div className="sticky top-0 bg-gradient-to-r from-blue-600 to-blue-700 p-6 flex items-center justify-between">
-                    <h2 className="text-2xl font-bold text-white">
-                      {editingIdx !== null ? '✏️ Edit Category' : '➕ Add New Category'}
-                    </h2>
-                    <button
-                      onClick={handleCancel}
-                      className="p-2 hover:bg-blue-500 rounded-lg transition text-white"
-                    >
-                      <FiX size={24} />
-                    </button>
-                  </div>
+              <form onSubmit={handleSave} className="p-8 space-y-8">
+                {/* Name Field */}
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-3 uppercase tracking-wide">Category Name *</label>
+                  <input
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                    placeholder="e.g., Women's Fashion, Electronics, Home & Garden"
+                    className="w-full px-5 py-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition text-slate-900 placeholder-slate-400"
+                  />
+                </div>
 
-                  <form onSubmit={handleSave} className="p-8 space-y-8">
-                    {/* Name Field */}
-                    <div>
-                      <label className="block text-sm font-bold text-slate-700 mb-3 uppercase tracking-wide">
-                        Category Name *
-                      </label>
-                      <input
-                        type="text"
-                        value={formData.name}
-                        onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                        placeholder="e.g., Women's Fashion, Electronics, Home & Garden"
-                        className="w-full px-5 py-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition text-slate-900 placeholder-slate-400"
-                      />
-                    </div>
+                {/* URL Field */}
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-3 uppercase tracking-wide">Category URL *</label>
+                  <input
+                    type="text"
+                    value={formData.url}
+                    onChange={(e) => setFormData(prev => ({ ...prev, url: e.target.value }))}
+                    placeholder="e.g., /shop?category=women-s-fashion"
+                    className="w-full px-5 py-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition text-slate-900 placeholder-slate-400"
+                  />
+                </div>
 
-                    {/* URL Field */}
-                    <div>
-                      <label className="block text-sm font-bold text-slate-700 mb-3 uppercase tracking-wide">
-                        Category URL *
-                      </label>
-                      <input
-                        type="text"
-                        value={formData.url}
-                        onChange={(e) => setFormData(prev => ({ ...prev, url: e.target.value }))}
-                        placeholder="e.g., /shop?category=women-s-fashion"
-                        className="w-full px-5 py-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition text-slate-900 placeholder-slate-400"
-                      />
-                    </div>
-
-                    {/* Image Upload */}
-                    <div className="border-t-2 border-slate-100 pt-6">
-                      <label className="block text-sm font-bold text-slate-700 mb-4 uppercase tracking-wide">
-                        Category Image *
-                      </label>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="col-span-1">
-                          <div className="relative border-2 border-dashed border-slate-300 rounded-xl p-6 hover:border-blue-500 transition cursor-pointer bg-slate-50">
-                            <input
-                              type="file"
-                              accept="image/*"
-                              onChange={handleImageChange}
-                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                            />
-                            <div className="flex flex-col items-center justify-center text-center">
-                              <FiPlus className="text-3xl text-slate-400 mb-3" />
-                              <p className="text-sm font-semibold text-slate-700">Click to upload</p>
-                              <p className="text-xs text-slate-500 mt-1">or drag and drop</p>
-                              <p className="text-xs text-slate-400 mt-2">PNG, JPG up to 5MB</p>
-                              <p className="text-xs text-slate-400 mt-1">Recommended: 150x150px</p>
-                            </div>
-                          </div>
+                {/* Image Upload */}
+                <div className="border-t-2 border-slate-100 pt-6">
+                  <label className="block text-sm font-bold text-slate-700 mb-4 uppercase tracking-wide">Category Image *</label>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="col-span-1">
+                      <div className="relative border-2 border-dashed border-slate-300 rounded-xl p-6 hover:border-blue-500 transition cursor-pointer bg-slate-50">
+                        <input type="file" accept="image/*" onChange={handleImageChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+                        <div className="flex flex-col items-center justify-center text-center">
+                          <FiPlus className="text-3xl text-slate-400 mb-3" />
+                          <p className="text-sm font-semibold text-slate-700">Click to upload</p>
+                          <p className="text-xs text-slate-500 mt-1">or drag and drop</p>
+                          <p className="text-xs text-slate-400 mt-2">PNG, JPG up to 5MB</p>
                         </div>
-
-                        {/* Image Preview */}
-                        {imagePreview && (
-                          <div className="col-span-1 flex items-center justify-center">
-                            <div className="relative">
-                              <img
-                                src={imagePreview}
-                                alt="Preview"
-                                className="w-40 h-40 object-cover rounded-xl border-2 border-blue-200 shadow-lg"
-                              />
-                              <div className="absolute -top-2 -right-2 bg-emerald-500 rounded-full p-1">
-                                <MdOutlineCheckCircleOutline className="text-white text-xl" />
-                              </div>
-                            </div>
-                          </div>
+                      </div>
+                      <div className="mt-3 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleUploadImageOnly}
+                          disabled={!imageFile || imageUploading}
+                          className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition text-sm font-semibold"
+                        >
+                          {imageUploading ? 'Uploading...' : 'Upload & Save Image'}
+                        </button>
+                        {formData.image && !imageFile && (
+                          <span className="text-xs text-emerald-700 font-semibold bg-emerald-50 px-2 py-1 rounded-full">
+                            Image saved
+                          </span>
                         )}
                       </div>
                     </div>
+                    {imagePreview && (
+                      <div className="col-span-1 flex items-center justify-center">
+                        <div className="relative">
+                          <img src={imagePreview} alt="Preview" className="w-40 h-40 object-cover rounded-xl border-2 border-blue-200 shadow-lg" />
+                          <div className="absolute -top-2 -right-2 bg-emerald-500 rounded-full p-1">
+                            <MdOutlineCheckCircleOutline className="text-white text-xl" />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
 
-                    {/* Form Actions */}
-                    <div className="flex gap-4 pt-6 border-t-2 border-slate-100">
-                      <button
-                        type="submit"
-                        disabled={uploading}
-                        className="flex-1 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition font-semibold"
-                      >
-                        {uploading ? '⏳ Saving...' : editingIdx !== null ? '💾 Update Category' : '✨ Add Category'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleCancel}
-                        className="flex-1 py-3 bg-slate-200 text-slate-700 rounded-xl hover:bg-slate-300 transition font-semibold"
-                      >
+                {/* Form Actions */}
+                <div className="flex gap-4 pt-6 border-t-2 border-slate-100">
+                  <button
+                    type="submit"
+                    disabled={uploading}
+                    className="flex-1 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition font-semibold"
+                  >
+                    {uploading ? '⏳ Saving...' : editingIdx !== null ? '💾 Update Category' : '✨ Add Category'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCancel}
+                    className="flex-1 py-3 bg-slate-200 text-slate-700 rounded-xl hover:bg-slate-300 transition font-semibold"
+                  >
                         Cancel
                       </button>
                     </div>
@@ -426,218 +428,151 @@ export default function StoreCategoryMenu() {
               </div>
             )}
 
-            {/* Categories Grid */}
-            {categories.length === 0 ? (
-              <div className="bg-white rounded-2xl border-2 border-dashed border-slate-300 p-12 text-center">
-                <div className="flex justify-center mb-4">
-                  <div className="p-4 bg-slate-100 rounded-full">
-                    <MdCategory className="text-4xl text-slate-400" />
-                  </div>
-                </div>
-                <p className="text-2xl font-bold text-slate-700 mb-2">No Custom Categories Yet</p>
-                <p className="text-slate-600 mb-6">Create your first category to display on your store navigation</p>
-                <button
-                  onClick={() => setShowForm(true)}
-                  className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition font-semibold"
-                >
-                  <FiPlus /> Create First Category
-                </button>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {categories.map((cat, idx) => (
-                  <div key={idx} className="group bg-white rounded-2xl shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden border border-slate-100">
-                    {/* Image */}
-                    <div className="relative h-48 overflow-hidden bg-slate-100">
-                      <img
-                        src={cat.image}
-                        alt={cat.name}
-                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
-                      />
-                      <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition duration-300" />
-                    </div>
-
-                    {/* Content */}
-                    <div className="p-6">
-                      <h3 className="font-bold text-lg text-slate-900 mb-2 line-clamp-1">{cat.name}</h3>
-                      <p className="text-xs text-blue-600 mb-4 line-clamp-1 font-mono bg-blue-50 p-2 rounded-lg">{cat.url}</p>
-
-                      {/* Actions */}
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleEdit(idx)}
-                          className="flex-1 flex items-center justify-center gap-2 py-2.5 text-blue-600 font-semibold hover:bg-blue-50 rounded-lg transition text-sm"
-                        >
-                          <FiEdit2 size={16} /> Edit
-                        </button>
-                        <button
-                          onClick={() => handleDelete(idx)}
-                          className="flex-1 flex items-center justify-center gap-2 py-2.5 text-red-600 font-semibold hover:bg-red-50 rounded-lg transition text-sm"
-                        >
-                          <FiTrash2 size={16} /> Remove
-                        </button>
+            {/* My Categories Grid */}
+            {categories.length > 0 && (
+              <div className="mb-10">
+                <h2 className="text-lg font-bold text-slate-700 mb-4">My Store Navigation Categories</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {categories.map((cat, idx) => (
+                    <div key={idx} className="group bg-white rounded-2xl shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden border border-slate-100">
+                      <div className="relative h-48 overflow-hidden bg-slate-100">
+                        <img src={cat.image} alt={cat.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" />
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition duration-300" />
+                      </div>
+                      <div className="p-5">
+                        <h3 className="font-bold text-slate-900 mb-1 line-clamp-1">{cat.name}</h3>
+                        <p className="text-xs text-blue-600 mb-4 line-clamp-1 font-mono bg-blue-50 p-2 rounded-lg">{cat.url}</p>
+                        <div className="flex gap-2">
+                          <button onClick={() => handleEdit(idx)} className="flex-1 flex items-center justify-center gap-2 py-2 text-blue-600 font-semibold hover:bg-blue-50 rounded-lg transition text-sm">
+                            <FiEdit2 size={14} /> Edit
+                          </button>
+                          <button onClick={() => handleDelete(idx)} className="flex-1 flex items-center justify-center gap-2 py-2 text-red-600 font-semibold hover:bg-red-50 rounded-lg transition text-sm">
+                            <FiTrash2 size={14} /> Remove
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             )}
-          </>
-        ) : (
-          <>
-            {/* Search Bar */}
-            <div className="mb-8">
-              <div className="relative">
-                <FiSearch className="absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400 text-xl" />
+
+            {/* Browse System Categories */}
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-bold text-slate-700">Browse System Categories</h2>
+                <span className="text-sm text-slate-500">{existingCategories.length} available</span>
+              </div>
+
+              {/* Search */}
+              <div className="relative mb-6">
+                <FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   type="text"
-                  placeholder="Search categories by name or slug..."
+                  placeholder="Search by name or slug..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-12 pr-6 py-4 border-2 border-slate-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none text-slate-900 placeholder-slate-400"
+                  className="w-full pl-11 pr-4 py-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none text-slate-900 placeholder-slate-400"
                 />
               </div>
-            </div>
 
-            {/* System Categories Grid - Hierarchical */}
-            {hierarchicalCategories.length === 0 ? (
-              <div className="bg-white rounded-2xl border-2 border-dashed border-slate-300 p-12 text-center">
-                <p className="text-xl font-bold text-slate-700">No Categories Found</p>
-                <p className="text-slate-600 mt-2">Try adjusting your search terms</p>
-              </div>
-            ) : (
-              <div className="space-y-8">
-                {hierarchicalCategories.map((parent, parentIdx) => (
-                  <div key={parentIdx} className="bg-white rounded-2xl shadow-lg border border-emerald-100 overflow-hidden">
-                    {/* Parent Category */}
-                    <div className="bg-gradient-to-r from-emerald-50 to-emerald-100 border-b border-emerald-200">
-                      <div className="p-6">
-                        <div className="flex items-start gap-6">
-                          {/* Parent Image */}
-                          <div className="relative w-24 h-24 flex-shrink-0 overflow-hidden rounded-xl border-2 border-emerald-300 shadow-md">
-                            {parent.image && (
-                              <img
-                                src={parent.image}
-                                alt={parent.name}
-                                className="w-full h-full object-cover"
-                              />
+              {hierarchicalCategories.length === 0 ? (
+                <div className="bg-white rounded-2xl border-2 border-dashed border-slate-300 p-12 text-center">
+                  <p className="text-xl font-bold text-slate-700">No Categories Found</p>
+                  <p className="text-slate-500 mt-2">Try adjusting your search terms</p>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {hierarchicalCategories.map((parent, parentIdx) => {
+                    const parentUrl = `/shop?category=${parent.slug}`;
+                    const parentAlreadyAdded = isDuplicateCategory(parent.name, parentUrl);
+
+                    return (
+                      <div key={parentIdx} className="bg-white rounded-2xl shadow-md border border-slate-100 overflow-hidden">
+                        <div className="flex items-center gap-4 p-4 bg-gradient-to-r from-slate-50 to-white border-b border-slate-100">
+                          <div className="w-14 h-14 flex-shrink-0 rounded-xl overflow-hidden border border-slate-200 bg-gradient-to-br from-emerald-100 to-teal-100 flex items-center justify-center">
+                            {parent.image ? (
+                              <img src={parent.image} alt={parent.name} className="w-full h-full object-cover" />
+                            ) : (
+                              <span className="text-2xl font-bold text-emerald-600">{parent.name?.charAt(0)}</span>
                             )}
-                            <div className="absolute top-1 right-1 bg-emerald-600 text-white px-2 py-0.5 rounded-full text-xs font-bold">
-                              Parent
-                            </div>
                           </div>
-
-                          {/* Parent Info */}
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="flex-1">
-                                <h3 className="text-2xl font-bold text-slate-900 mb-2">{parent.name}</h3>
-                                {parent.slug && (
-                                  <p className="text-sm text-slate-700 font-mono bg-white px-3 py-1 rounded-lg inline-block mb-2">
-                                    Slug: {parent.slug}
-                                  </p>
-                                )}
-                                {parent.description && (
-                                  <p className="text-sm text-slate-700 mt-2">{parent.description}</p>
-                                )}
-                                {parent.children && parent.children.length > 0 && (
-                                  <p className="text-xs text-emerald-700 font-semibold mt-3 flex items-center gap-2">
-                                    <span className="bg-emerald-200 px-2 py-1 rounded-full">{parent.children.length} subcategories</span>
-                                  </p>
-                                )}
-                              </div>
+                            <p className="font-bold text-slate-900 truncate">{parent.name}</p>
+                            {parent.slug && <p className="text-xs text-slate-500 font-mono">{parent.slug}</p>}
+                            {parent.children?.length > 0 && (
+                              <span className="text-xs text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full">{parent.children.length} subcategories</span>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => {
+                              if (parentAlreadyAdded) return;
+                              setFormData({ name: parent.name, image: parent.image || '', url: parentUrl });
+                              setImagePreview(parent.image || '');
+                              setShowForm(true);
+                            }}
+                            disabled={parentAlreadyAdded}
+                            className={`px-4 py-2 rounded-lg transition font-semibold text-sm flex items-center gap-2 whitespace-nowrap ${
+                              parentAlreadyAdded
+                                ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                                : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                            }`}
+                          >
+                            <FiCheckCircle size={14} /> {parentAlreadyAdded ? 'Added' : 'Use'}
+                          </button>
+                        </div>
 
-                              {/* Use Parent Button */}
-                              <button
-                                onClick={() => {
-                                  setFormData({
-                                    name: parent.name,
-                                    image: parent.image || '',
-                                    url: `/shop?category=${parent.slug}`,
-                                  });
-                                  setImagePreview(parent.image || '');
-                                  setShowForm(true);
-                                  setActiveTab('my-categories');
-                                }}
-                                className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition font-semibold text-sm whitespace-nowrap flex items-center gap-2"
-                              >
-                                <FiCheckCircle /> Use
-                              </button>
+                        {parent.children?.length > 0 && (
+                          <div className="p-4">
+                            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Subcategories</p>
+                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                              {parent.children.map((child, childIdx) => {
+                                const childUrl = `/shop?category=${child.slug}`;
+                                const childAlreadyAdded = isDuplicateCategory(child.name, childUrl);
+
+                                return (
+                                  <div key={childIdx} className="group bg-slate-50 rounded-xl border border-slate-200 hover:border-blue-300 hover:shadow-sm transition-all overflow-hidden">
+                                    <div className="relative h-24 overflow-hidden bg-gradient-to-br from-blue-50 to-slate-100 flex items-center justify-center">
+                                      {child.image ? (
+                                        <img src={child.image} alt={child.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                                      ) : (
+                                        <span className="text-3xl font-bold text-blue-300">{child.name?.charAt(0)}</span>
+                                      )}
+                                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition duration-300" />
+                                      <span className="absolute top-1.5 right-1.5 bg-blue-500 text-white px-1.5 py-0.5 rounded-full text-[10px] font-bold">Child</span>
+                                    </div>
+                                    <div className="p-2.5">
+                                      <p className="font-semibold text-slate-800 text-xs line-clamp-1 mb-1">{child.name}</p>
+                                      {child.slug && <p className="text-[10px] text-slate-400 font-mono truncate mb-2">{child.slug}</p>}
+                                      <button
+                                        onClick={() => {
+                                          if (childAlreadyAdded) return;
+                                          setFormData({ name: child.name, image: child.image || '', url: childUrl });
+                                          setImagePreview(child.image || '');
+                                          setShowForm(true);
+                                        }}
+                                        disabled={childAlreadyAdded}
+                                        className={`w-full py-1.5 font-semibold rounded-lg transition text-xs flex items-center justify-center gap-1 ${
+                                          childAlreadyAdded
+                                            ? 'text-slate-500 bg-slate-200 cursor-not-allowed'
+                                            : 'text-blue-600 hover:bg-blue-50'
+                                        }`}
+                                      >
+                                        <FiCheckCircle size={11} /> {childAlreadyAdded ? 'Added' : 'Use This'}
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
                             </div>
                           </div>
-                        </div>
+                        )}
                       </div>
-                    </div>
-
-                    {/* Child Categories */}
-                    {parent.children && parent.children.length > 0 && (
-                      <div className="p-6 bg-white">
-                        <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Subcategories:</p>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                          {parent.children.map((child, childIdx) => (
-                            <div key={childIdx} className="group bg-slate-50 rounded-xl border border-slate-200 hover:border-emerald-300 hover:shadow-md transition-all duration-300 overflow-hidden">
-                              {/* Child Image */}
-                              <div className="relative h-32 overflow-hidden bg-slate-100">
-                                {child.image && (
-                                  <img
-                                    src={child.image}
-                                    alt={child.name}
-                                    className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
-                                  />
-                                )}
-                                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 transition duration-300" />
-                                <div className="absolute top-2 right-2 bg-blue-500 text-white px-2 py-0.5 rounded-full text-xs font-bold">
-                                  Child
-                                </div>
-                              </div>
-
-                              {/* Child Content */}
-                              <div className="p-4">
-                                <h4 className="font-bold text-slate-900 mb-2 line-clamp-1 text-sm">{child.name}</h4>
-                                {child.slug && (
-                                  <p className="text-xs text-slate-600 mb-3 font-mono bg-white p-1.5 rounded">
-                                    {child.slug}
-                                  </p>
-                                )}
-                                {child.description && (
-                                  <p className="text-xs text-slate-600 mb-3 line-clamp-2">{child.description}</p>
-                                )}
-
-                                {/* Use Child Button */}
-                                <button
-                                  onClick={() => {
-                                    setFormData({
-                                      name: child.name,
-                                      image: child.image || '',
-                                      url: `/shop?category=${child.slug}`,
-                                    });
-                                    setImagePreview(child.image || '');
-                                    setShowForm(true);
-                                    setActiveTab('my-categories');
-                                  }}
-                                  className="w-full py-2 text-blue-600 font-semibold hover:bg-blue-50 rounded-lg transition text-xs flex items-center justify-center gap-1"
-                                >
-                                  <FiCheckCircle size={14} /> Use This
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* No Children Message */}
-                    {(!parent.children || parent.children.length === 0) && (
-                      <div className="p-6 bg-slate-50 border-t border-slate-200">
-                        <p className="text-sm text-slate-500 italic text-center">No subcategories</p>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </>
-        )}
+                    );
+                  })}
+                </div>
+              )}
+            </div>
       </div>
     </div>
   );

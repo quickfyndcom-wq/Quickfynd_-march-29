@@ -12,7 +12,7 @@ import { Resend } from 'resend';
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const EMAIL_FROM = process.env.EMAIL_FROM;
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-const EMAIL_LOGO_URL = `${process.env.NEXT_PUBLIC_BASE_URL || 'https://quickfynd.com'}/assets/logo/logo3.png`;
+const EMAIL_LOGO_URL = `${process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL || 'https://www.quickfynd.com'}/assets/logo/logo3.png`;
 
 export async function POST(request) {
   try {

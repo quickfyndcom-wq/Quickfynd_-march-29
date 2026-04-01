@@ -85,6 +85,10 @@ function normalizeVariantText(value) {
     return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
 
+function normalizePhoneDigits(value) {
+    return String(value || '').replace(/\D/g, '');
+}
+
 function toCanonicalVariantOptions(options = {}) {
     if (!options || typeof options !== 'object') return null;
 
@@ -537,7 +541,10 @@ export async function POST(request) {
                 }
             }
             
-            const storeId = product.storeId;
+            const storeId = String(product.storeId || '').trim();
+            if (!storeId) {
+                return NextResponse.json({ error: `Product store not found for product: ${item.id}` }, { status: 400 });
+            }
             if (!ordersByStore.has(storeId)) ordersByStore.set(storeId, []);
             ordersByStore.get(storeId).push({ 
                 ...item, 
@@ -1032,11 +1039,15 @@ export async function GET(request) {
         // For listing orders (no orderId), require authentication
         const authHeader = request.headers.get('authorization');
         let userId = null;
+        let tokenEmail = '';
+        let tokenPhone = '';
         if (authHeader && authHeader.startsWith('Bearer ')) {
             const idToken = authHeader.split('Bearer ')[1];
             try {
                 const decodedToken = await getAuth().verifyIdToken(idToken);
                 userId = decodedToken.uid;
+                tokenEmail = String(decodedToken.email || '').trim().toLowerCase();
+                tokenPhone = normalizePhoneDigits(decodedToken.phone_number || '');
             } catch (e) {
                 // Not signed in, userId remains null
             }
@@ -1067,7 +1078,28 @@ export async function GET(request) {
             'netbanking',
         ];
 
-        const orders = await Order.find({ userId })
+        const orderQuery = [{ userId }];
+        const guestIdentityQuery = [];
+
+        if (tokenEmail) {
+            guestIdentityQuery.push({ guestEmail: { $regex: `^${tokenEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' } });
+            guestIdentityQuery.push({ 'shippingAddress.email': { $regex: `^${tokenEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' } });
+        }
+        if (tokenPhone) {
+            guestIdentityQuery.push({ guestPhone: tokenPhone });
+            guestIdentityQuery.push({ guestPhone: `+${tokenPhone}` });
+            guestIdentityQuery.push({ 'shippingAddress.phone': tokenPhone });
+            guestIdentityQuery.push({ 'shippingAddress.phone': `+${tokenPhone}` });
+        }
+
+        if (guestIdentityQuery.length > 0) {
+            orderQuery.push({
+                isGuest: true,
+                $or: guestIdentityQuery,
+            });
+        }
+
+        const orders = await Order.find(orderQuery.length === 1 ? orderQuery[0] : { $or: orderQuery })
         .populate({
             path: 'orderItems.productId',
             model: 'Product'

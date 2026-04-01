@@ -30,6 +30,13 @@ export default function StoreManageProducts() {
     const [categoryMap, setCategoryMap] = useState({}) // Map of category ID to name
     const [searchQuery, setSearchQuery] = useState('')
     const [selectedCategory, setSelectedCategory] = useState('') // Category filter
+    const [showFbtModal, setShowFbtModal] = useState(false)
+    const [fbtBaseProduct, setFbtBaseProduct] = useState(null)
+    const [fbtEnabled, setFbtEnabled] = useState(false)
+    const [selectedFbtIds, setSelectedFbtIds] = useState([])
+    const [fbtSearchQuery, setFbtSearchQuery] = useState('')
+    const [fbtDiscountPercent, setFbtDiscountPercent] = useState('')
+    const [savingFbt, setSavingFbt] = useState(false)
 
     const getImageSrc = (image) => {
         if (typeof image === 'string' && image.trim()) return image
@@ -132,6 +139,77 @@ export default function StoreManageProducts() {
         dispatch(fetchProductsAction({}));
     }
 
+    const openFbtModal = async (product) => {
+        setFbtBaseProduct(product)
+        setFbtSearchQuery('')
+        setSavingFbt(false)
+        try {
+            const { data } = await axios.get(`/api/products/${product._id}/fbt`)
+            setFbtEnabled(Boolean(data?.enableFBT))
+            setSelectedFbtIds(Array.isArray(data?.products) ? data.products.map(p => String(p._id)) : [])
+            setFbtDiscountPercent(data?.bundleDiscount !== null && data?.bundleDiscount !== undefined ? String(data.bundleDiscount) : '')
+        } catch {
+            setFbtEnabled(false)
+            setSelectedFbtIds([])
+            setFbtDiscountPercent('')
+        }
+        setShowFbtModal(true)
+    }
+
+    const closeFbtModal = () => {
+        setShowFbtModal(false)
+        setFbtBaseProduct(null)
+        setSelectedFbtIds([])
+        setFbtEnabled(false)
+        setFbtSearchQuery('')
+        setFbtDiscountPercent('')
+        setSavingFbt(false)
+    }
+
+    const toggleFbtSelection = (productId) => {
+        setSelectedFbtIds(prev => prev.includes(productId) ? prev.filter(id => id !== productId) : [...prev, productId])
+    }
+
+    const saveFbtConfig = async () => {
+        if (!fbtBaseProduct?._id) return
+        if (fbtEnabled && selectedFbtIds.length === 0) {
+            toast.error('Select at least one product when FBT is enabled')
+            return
+        }
+
+        const discountValue = Number(fbtDiscountPercent || 0)
+        if (fbtEnabled && fbtDiscountPercent !== '' && (Number.isNaN(discountValue) || discountValue < 0 || discountValue > 100)) {
+            toast.error('Discount must be between 0 and 100')
+            return
+        }
+
+        try {
+            setSavingFbt(true)
+            await axios.patch(`/api/products/${fbtBaseProduct._id}/fbt`, {
+                enableFBT: fbtEnabled,
+                fbtProductIds: fbtEnabled ? selectedFbtIds : [],
+                fbtBundlePrice: null,
+                fbtBundleDiscount: fbtEnabled && fbtDiscountPercent !== '' ? discountValue : null,
+            })
+
+            setProducts(prev => prev.map((p) => p._id === fbtBaseProduct._id
+                ? {
+                    ...p,
+                    enableFBT: fbtEnabled,
+                    fbtProductIds: fbtEnabled ? selectedFbtIds : [],
+                    fbtBundleDiscount: fbtEnabled && fbtDiscountPercent !== '' ? discountValue : null,
+                }
+                : p))
+
+            toast.success('Frequently bought together saved')
+            closeFbtModal()
+        } catch (error) {
+            toast.error(error?.response?.data?.error || 'Failed to save FBT config')
+        } finally {
+            setSavingFbt(false)
+        }
+    }
+
     useEffect(() => {
         if(user){
             fetchStoreProducts()
@@ -153,28 +231,51 @@ export default function StoreManageProducts() {
         if (!searchQuery) return true;
         
         const query = searchQuery.toLowerCase().trim();
-        // Escape special regex characters and create word boundary regex
-        const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const wordBoundaryRegex = new RegExp(`\\b${escapedQuery}\\b`, 'i');
-        
-        // Search in product name
-        if (wordBoundaryRegex.test(product.name?.toLowerCase() || '')) return true;
-        
-        // Search in SKU
-        if (wordBoundaryRegex.test(product.sku?.toLowerCase() || '')) return true;
-        
-        // Search in categories
-        if (product.categories?.some(catId => wordBoundaryRegex.test(categoryMap[catId]?.toLowerCase() || ''))) return true;
-        if (product.category && wordBoundaryRegex.test(categoryMap[product.category]?.toLowerCase() || '')) return true;
-        
-        // Search in tags
-        if (product.tags?.some(tag => wordBoundaryRegex.test(tag.toLowerCase() || ''))) return true;
-        
-        // Search in description
-        if (wordBoundaryRegex.test(product.description?.toLowerCase() || '')) return true;
+
+        // Search in product name (partial match)
+        if ((product.name || '').toLowerCase().includes(query)) return true;
+
+        // Search in SKU (partial match)
+        if ((product.sku || '').toLowerCase().includes(query)) return true;
+
+        // Search in categories (partial match)
+        if (product.categories?.some(catId => (categoryMap[catId] || '').toLowerCase().includes(query))) return true;
+        if ((categoryMap[product.category] || '').toLowerCase().includes(query)) return true;
+
+        // Search in tags (partial match)
+        if (product.tags?.some(tag => (tag || '').toLowerCase().includes(query))) return true;
+
+        // Search in description (partial match)
+        if ((product.description || '').toLowerCase().includes(query)) return true;
         
         return false;
     });
+
+    const fbtCandidates = (() => {
+        if (!fbtBaseProduct?._id) return []
+        const baseTags = Array.isArray(fbtBaseProduct.tags)
+            ? fbtBaseProduct.tags.map(t => String(t || '').toLowerCase().trim()).filter(Boolean)
+            : []
+        const query = fbtSearchQuery.toLowerCase().trim()
+
+        return products
+            .filter(p => p._id !== fbtBaseProduct._id)
+            .map((p) => {
+                const tags = Array.isArray(p.tags) ? p.tags.map(t => String(t || '').toLowerCase().trim()).filter(Boolean) : []
+                const matchingTagCount = baseTags.length > 0 ? tags.filter(t => baseTags.includes(t)).length : 0
+                return { ...p, matchingTagCount }
+            })
+            .filter((p) => {
+                if (!query) return true
+                return (p.name || '').toLowerCase().includes(query)
+                    || (p.sku || '').toLowerCase().includes(query)
+                    || (Array.isArray(p.tags) && p.tags.some(tag => String(tag || '').toLowerCase().includes(query)))
+            })
+            .sort((a, b) => {
+                if (b.matchingTagCount !== a.matchingTagCount) return b.matchingTagCount - a.matchingTagCount
+                return (b.createdAt ? new Date(b.createdAt).getTime() : 0) - (a.createdAt ? new Date(a.createdAt).getTime() : 0)
+            })
+    })()
 
     return (
         <>
@@ -284,6 +385,7 @@ export default function StoreManageProducts() {
                         <th className="px-4 py-3 hidden md:table-cell">MRP</th>
                         <th className="px-4 py-3">Price</th>
                         <th className="px-4 py-3 hidden sm:table-cell">Fast Delivery</th>
+                        <th className="px-4 py-3 hidden lg:table-cell">Frequently</th>
                         <th className="px-4 py-3">Stock</th>
                         <th className="px-4 py-3">Actions</th>
                     </tr>
@@ -345,6 +447,17 @@ export default function StoreManageProducts() {
                                     <span className="dot absolute left-1 top-1 w-3 h-3 bg-white rounded-full transition-transform duration-200 ease-in-out peer-checked:translate-x-4"></span>
                                 </label>
                             </td>
+                            <td className="px-4 py-3 hidden lg:table-cell">
+                                {product.enableFBT ? (
+                                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700">
+                                        Enabled
+                                    </span>
+                                ) : (
+                                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-600">
+                                        Disabled
+                                    </span>
+                                )}
+                            </td>
                             <td className="px-4 py-3">
                                 <label className="relative inline-flex items-center cursor-pointer">
                                     <input type="checkbox" className="sr-only peer" onChange={() => toast.promise(toggleStock(product._id), { loading: "Updating..." })} checked={product.inStock} />
@@ -366,6 +479,12 @@ export default function StoreManageProducts() {
                                     >
                                         Delete
                                     </button>
+                                    <button
+                                        onClick={() => openFbtModal(product)}
+                                        className="px-3 py-1 bg-emerald-600 text-white text-xs rounded hover:bg-emerald-700 transition"
+                                    >
+                                        FBT
+                                    </button>
                                 </div>
                             </td>
                         </tr>
@@ -383,6 +502,111 @@ export default function StoreManageProducts() {
                     }}
                     onSubmitSuccess={handleUpdateSuccess}
                 />
+            )}
+
+            {showFbtModal && fbtBaseProduct && (
+                <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-5">
+                        <div className="flex items-start justify-between gap-4 mb-4">
+                            <div>
+                                <h2 className="text-lg font-semibold text-slate-800">Frequently Bought Together</h2>
+                                <p className="text-sm text-slate-500">Base product: {fbtBaseProduct.name}</p>
+                            </div>
+                            <button onClick={closeFbtModal} className="text-slate-500 hover:text-slate-700 text-sm">Close</button>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3 mb-4 p-3 rounded-lg bg-slate-50 border border-slate-200">
+                            <label className="text-sm font-medium text-slate-700">Enable frequently bought together</label>
+                            <label className="relative inline-flex items-center cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    className="sr-only peer"
+                                    checked={fbtEnabled}
+                                    onChange={(e) => setFbtEnabled(e.target.checked)}
+                                />
+                                <div className="w-10 h-5 bg-slate-300 rounded-full peer peer-checked:bg-emerald-600 transition-colors duration-200"></div>
+                                <span className="absolute left-1 top-1 w-3 h-3 bg-white rounded-full transition-transform duration-200 ease-in-out peer-checked:translate-x-5"></span>
+                            </label>
+                        </div>
+
+                        <div className="mb-3">
+                            <input
+                                type="text"
+                                value={fbtSearchQuery}
+                                onChange={(e) => setFbtSearchQuery(e.target.value)}
+                                placeholder="Search products by name, SKU or tags..."
+                                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                            />
+                        </div>
+
+                        <div className="mb-4">
+                            <label className="block text-sm font-medium text-slate-700 mb-2">FBT Discount (%)</label>
+                            <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="0.01"
+                                value={fbtDiscountPercent}
+                                disabled={!fbtEnabled}
+                                onChange={(e) => setFbtDiscountPercent(e.target.value)}
+                                placeholder="e.g. 10"
+                                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm disabled:bg-slate-100 disabled:text-slate-500"
+                            />
+                            <p className="text-xs text-slate-500 mt-1">Leave empty for no discount. This % applies to the whole frequent bundle.</p>
+                        </div>
+
+                        <p className="text-xs text-slate-500 mb-3">Products are sorted by matching tags first.</p>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[50vh] overflow-y-auto pr-1">
+                            {fbtCandidates.map((candidate) => {
+                                const isSelected = selectedFbtIds.includes(candidate._id)
+                                return (
+                                    <button
+                                        key={candidate._id}
+                                        type="button"
+                                        disabled={!fbtEnabled}
+                                        onClick={() => toggleFbtSelection(candidate._id)}
+                                        className={`text-left border rounded-lg p-3 transition ${
+                                            isSelected ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'
+                                        } ${!fbtEnabled ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                    >
+                                        <div className="flex items-start gap-2">
+                                            <Image width={38} height={38} unoptimized src={getImageSrc(candidate.images?.[0] || candidate.image)} alt="" className="rounded border" />
+                                            <div className="min-w-0">
+                                                <p className="text-sm font-medium text-slate-800 truncate">{candidate.name}</p>
+                                                <p className="text-xs text-slate-500">{currency} {Number(candidate.price || 0).toLocaleString()}</p>
+                                                {candidate.matchingTagCount > 0 && (
+                                                    <p className="text-[11px] text-emerald-700 font-semibold mt-1">{candidate.matchingTagCount} matching tag(s)</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </button>
+                                )
+                            })}
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3 mt-5 pt-4 border-t border-slate-200">
+                            <p className="text-sm text-slate-600">Selected: <span className="font-semibold">{selectedFbtIds.length}</span></p>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={closeFbtModal}
+                                    className="px-4 py-2 text-sm rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={saveFbtConfig}
+                                    disabled={savingFbt}
+                                    className="px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60"
+                                >
+                                    {savingFbt ? 'Saving...' : 'Save FBT'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             )}
         </>
     )

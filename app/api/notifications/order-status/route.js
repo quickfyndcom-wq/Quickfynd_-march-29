@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { sendMail } from "@/lib/email";
 
-const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://quickfynd.com';
+const BASE_URL = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL || 'https://www.quickfynd.com';
 const EMAIL_LOGO_URL = `${BASE_URL}/assets/logo/logo3.png`;
 
 // Email notification for order status updates

@@ -67,7 +67,11 @@ export default function Dashboard() {
         startOfDay.setHours(0, 0, 0, 0)
         return formatDateTimeLocalValue(startOfDay)
     })
-    const [rangeTo, setRangeTo] = useState(() => formatDateTimeLocalValue(new Date()))
+    const [rangeTo, setRangeTo] = useState(() => {
+        const endOfDay = new Date()
+        endOfDay.setHours(23, 59, 59, 999)
+        return formatDateTimeLocalValue(endOfDay)
+    })
     
     // Invitation states
     const [inviteEmail, setInviteEmail] = useState('')

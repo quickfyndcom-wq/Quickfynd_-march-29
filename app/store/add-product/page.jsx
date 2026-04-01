@@ -295,6 +295,7 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                 allowReturn: product.allowReturn !== undefined ? product.allowReturn : true,
                 allowReplacement: product.allowReplacement !== undefined ? product.allowReplacement : true,
                 reviews: product.reviews || [],
+                tags: Array.isArray(product.tags) ? product.tags : [],
                 badges: product.attributes?.badges || [],
                 imageAspectRatio: product.imageAspectRatio || '1:1',
                 deliveredBy: product.attributes?.deliveredBy || '',
@@ -389,6 +390,25 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
         } else {
             setProductInfo(prev => ({ ...prev, [name]: value }))
         }
+    }
+
+    const addTag = () => {
+        const trimmedTag = tagInput.trim();
+        if (!trimmedTag) return;
+
+        setProductInfo((prev) => {
+            const currentTags = Array.isArray(prev.tags) ? prev.tags : [];
+            if (currentTags.includes(trimmedTag)) return prev;
+            return { ...prev, tags: [...currentTags, trimmedTag] };
+        });
+        setTagInput('');
+    }
+
+    const removeTag = (index) => {
+        setProductInfo((prev) => {
+            const currentTags = Array.isArray(prev.tags) ? prev.tags : [];
+            return { ...prev, tags: currentTags.filter((_, i) => i !== index) };
+        });
     }
 
     const handleImageUpload = async (key, file) => {
@@ -860,11 +880,7 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter') {
                                     e.preventDefault();
-                                    const trimmedTag = tagInput.trim();
-                                    if (trimmedTag && !productInfo.tags.includes(trimmedTag)) {
-                                        setProductInfo(prev => ({ ...prev, tags: [...prev.tags, trimmedTag] }));
-                                        setTagInput('');
-                                    }
+                                    addTag();
                                 }
                             }}
                             className="flex-1 border rounded px-3 py-2"
@@ -872,13 +888,7 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                         />
                         <button
                             type="button"
-                            onClick={() => {
-                                const trimmedTag = tagInput.trim();
-                                if (trimmedTag && !productInfo.tags.includes(trimmedTag)) {
-                                    setProductInfo(prev => ({ ...prev, tags: [...prev.tags, trimmedTag] }));
-                                    setTagInput('');
-                                }
-                            }}
+                            onClick={addTag}
                             className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition"
                         >
                             Add Tag
@@ -894,7 +904,7 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                                     {tag}
                                     <button
                                         type="button"
-                                        onClick={() => setProductInfo(prev => ({ ...prev, tags: prev.tags.filter((_, i) => i !== idx) }))}
+                                        onClick={() => removeTag(idx)}
                                         className="ml-1 text-green-600 hover:text-green-900 font-bold"
                                     >
                                         ×

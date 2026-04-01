@@ -80,6 +80,8 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
   // Review state and fetching logic
   const [fetchedReviews, setFetchedReviews] = useState([]);
   const [loadingReviews, setLoadingReviews] = useState(false);
+  const [sameTagProducts, setSameTagProducts] = useState([]);
+  const [loadingSameTagProducts, setLoadingSameTagProducts] = useState(false);
 
   // Use fetched reviews if available, else prop
   const reviewsToUse = fetchedReviews.length > 0 ? fetchedReviews : reviews;
@@ -90,6 +92,12 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
   const reviewCount = reviewsToUse.length > 0
     ? reviewsToUse.length
     : (typeof product.ratingCount === 'number' ? product.ratingCount : 0);
+
+  const normalizedCurrentTags = Array.isArray(product?.tags)
+    ? [...new Set(product.tags
+        .map((tag) => String(tag || '').trim().toLowerCase())
+        .filter(Boolean))].slice(0, 3)
+    : [];
 
   useEffect(() => {
     if (!product?._id) return;
@@ -123,6 +131,46 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
     };
     fetchReviews();
   }, [product._id]);
+
+  useEffect(() => {
+    const fetchSameTagProducts = async () => {
+      if (!product?._id || normalizedCurrentTags.length === 0) {
+        setSameTagProducts([]);
+        return;
+      }
+
+      try {
+        setLoadingSameTagProducts(true);
+        const { data } = await axios.get('/api/products?limit=120&includeOutOfStock=true');
+        const productsList = Array.isArray(data?.products) ? data.products : [];
+
+        const related = productsList
+          .filter((item) => String(item?._id) !== String(product._id))
+          .map((item) => {
+            const itemTags = Array.isArray(item?.tags)
+              ? item.tags.map((tag) => String(tag || '').trim().toLowerCase()).filter(Boolean)
+              : [];
+            const matchingCount = itemTags.filter((tag) => normalizedCurrentTags.includes(tag)).length;
+            return { ...item, matchingCount };
+          })
+          .filter((item) => item.matchingCount > 0)
+          .sort((a, b) => {
+            if (b.matchingCount !== a.matchingCount) return b.matchingCount - a.matchingCount;
+            return Number(b.createdAt ? new Date(b.createdAt).getTime() : 0) - Number(a.createdAt ? new Date(a.createdAt).getTime() : 0);
+          })
+          .slice(0, 6);
+
+        setSameTagProducts(related);
+      } catch (error) {
+        console.error('Failed to fetch same-tag products:', error);
+        setSameTagProducts([]);
+      } finally {
+        setLoadingSameTagProducts(false);
+      }
+    };
+
+    fetchSameTagProducts();
+  }, [product?._id, normalizedCurrentTags.join('|')]);
 
   useEffect(() => {
     let isMounted = true;
@@ -769,6 +817,16 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
     }));
   };
 
+  const fbtCarouselRef = useRef(null);
+
+  const scrollFbtCarousel = (direction) => {
+    if (!fbtCarouselRef.current) return;
+    fbtCarouselRef.current.scrollBy({
+      left: direction * 280,
+      behavior: 'smooth',
+    });
+  };
+
   // Calculate FBT bundle total
   const calculateFbtTotal = () => {
     const mainProductPrice = effPrice;
@@ -788,19 +846,19 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
     return bundleTotal;
   };
 
-  // Add all selected FBT products to cart
+  // Add selected bundle items then go directly to checkout
   const handleAddBundleToCart = async () => {
     // Add main product
     dispatch(addToCart({ productId: product._id, price: effPrice }));
-    
+
     // Add selected FBT products
-    fbtProducts.forEach(p => {
+    fbtProducts.forEach((p) => {
       if (selectedFbtProducts[p._id]) {
         dispatch(addToCart({ productId: p._id, price: p.price }));
       }
     });
-    
-    // Upload to server if signed in
+
+    // Sync cart for signed-in users before checkout navigation
     if (isSignedIn) {
       try {
         await dispatch(uploadCart()).unwrap();
@@ -808,10 +866,8 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
         console.error('Error uploading cart:', error);
       }
     }
-    
-    // Show cart toast
-    setShowCartToast(true);
-    setTimeout(() => setShowCartToast(false), 3000);
+
+    router.push('/checkout');
   };
 
   const selectedAddonProducts = fbtProducts.filter(p => selectedFbtProducts[p._id]);
@@ -1734,6 +1790,51 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
               )}
             </div>
 
+            {/* Same Tag Products */}
+            {normalizedCurrentTags.length > 0 && (
+              <div className="pt-4 border-t border-gray-200 mt-4">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-sm font-semibold text-gray-900">Products with similar tags</p>
+                  <div className="flex flex-wrap gap-1.5 justify-end">
+                    {normalizedCurrentTags.map((tag) => (
+                      <span key={tag} className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
+                        #{tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {loadingSameTagProducts ? (
+                  <p className="text-xs text-gray-500">Finding products...</p>
+                ) : sameTagProducts.length > 0 ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    {sameTagProducts.slice(0, 4).map((item) => (
+                      <button
+                        key={item._id}
+                        type="button"
+                        onClick={() => router.push(`/product/${item.slug || item._id}`)}
+                        className="text-left border border-gray-200 rounded-lg p-2 hover:border-blue-300 hover:shadow-sm transition bg-white"
+                      >
+                        <div className="w-full h-20 relative rounded overflow-hidden bg-gray-50 mb-2">
+                          <Image
+                            src={item.images?.[0] || PLACEHOLDER_IMAGE}
+                            alt={item.name || 'Product'}
+                            fill
+                            unoptimized
+                            className="object-cover"
+                          />
+                        </div>
+                        <p className="text-xs font-semibold text-gray-800 line-clamp-2 min-h-[2rem]">{item.name}</p>
+                        <p className="text-sm font-bold text-red-600 mt-1">{currency}{Number(item.price || 0).toLocaleString('en-IN')}</p>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-500">No similar-tag products found right now.</p>
+                )}
+              </div>
+            )}
+
             {/* Features Grid */}
             <div className="grid grid-cols-2 gap-3">
               {/* 1 Year Warranty */}
@@ -1859,62 +1960,107 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
               <span className="text-xl font-semibold text-green-700">{currency}{bundleTotal.toFixed(2)}</span>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
-              {/* Products Row */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              {/* Products carousel */}
               <div className="lg:col-span-9">
-                <div className="flex flex-wrap items-center gap-4">
-                  {/* Main Product */}
-                  <div className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 bg-gray-50">
-                    <input
-                      type="checkbox"
-                      checked
-                      readOnly
-                      className="w-5 h-5 text-green-600 border-gray-300 rounded"
-                    />
-                    <div className="w-20 h-20 relative border border-gray-200 rounded overflow-hidden flex-shrink-0">
-                      <Image
-                        src={product.images?.[0] || 'https://ik.imagekit.io/jrstupuke/placeholder.png'}
-                        alt={product.name}
-                        fill
-                        unoptimized
-                        className="object-cover"
-                      />
-                    </div>
-                    <div className="min-w-[180px]">
-                      <p className="text-sm font-semibold text-gray-900 line-clamp-2">Main product</p>
-                      <p className="text-base text-green-700 font-bold">{currency}{effPrice}</p>
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => scrollFbtCarousel(-1)}
+                    className="hidden md:flex absolute left-0 top-1/2 -translate-y-1/2 z-10 w-8 h-8 items-center justify-center rounded-full bg-white border border-gray-300 text-gray-700 shadow"
+                    aria-label="Scroll left"
+                  >
+                    ‹
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollFbtCarousel(1)}
+                    className="hidden md:flex absolute right-0 top-1/2 -translate-y-1/2 z-10 w-8 h-8 items-center justify-center rounded-full bg-white border border-gray-300 text-gray-700 shadow"
+                    aria-label="Scroll right"
+                  >
+                    ›
+                  </button>
+
+                  <div
+                    ref={fbtCarouselRef}
+                    className="overflow-x-auto pb-2 scrollbar-thin"
+                  >
+                    <div className="flex items-stretch gap-2 min-w-max pr-2">
+                      {[{
+                        _id: '__main__',
+                        name: 'Main product',
+                        image: product.images?.[0] || 'https://ik.imagekit.io/jrstupuke/placeholder.png',
+                        price: Number(effPrice || 0),
+                        isMain: true,
+                      }, ...fbtProducts.map((item) => ({
+                        _id: item._id,
+                        name: item.name,
+                        image: item.images?.[0] || 'https://ik.imagekit.io/jrstupuke/placeholder.png',
+                        price: Number(item.price || 0),
+                        isMain: false,
+                      }))].map((item, index, array) => (
+                        <div key={item._id} className="flex items-center gap-2 shrink-0">
+                          {item.isMain ? (
+                            <div className="w-[190px] p-3 rounded-xl border border-gray-200 bg-gray-50 shadow-sm">
+                              <div className="mb-2">
+                                <input
+                                  type="checkbox"
+                                  checked
+                                  readOnly
+                                  className="w-5 h-5 accent-purple-600 border-gray-300 rounded"
+                                />
+                              </div>
+                              <div className="w-full h-24 relative border border-gray-200 rounded-lg overflow-hidden bg-white mb-2">
+                                <Image
+                                  src={item.image}
+                                  alt={item.name}
+                                  fill
+                                  unoptimized
+                                  className="object-cover"
+                                />
+                              </div>
+                              <p className="text-sm font-semibold text-gray-900 line-clamp-1">{item.name}</p>
+                              <p className="text-emerald-700 font-bold">{currency}{item.price.toFixed(0)}</p>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => toggleFbtProduct(item._id)}
+                              className={`w-[190px] p-3 text-left rounded-xl border shadow-sm transition ${
+                                selectedFbtProducts[item._id]
+                                  ? 'border-emerald-300 bg-emerald-50/30'
+                                  : 'border-gray-200 bg-white hover:border-gray-300'
+                              }`}
+                            >
+                              <div className="mb-2">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedFbtProducts[item._id] || false}
+                                  onChange={() => toggleFbtProduct(item._id)}
+                                  className="w-5 h-5 accent-purple-600 border-gray-300 rounded cursor-pointer"
+                                />
+                              </div>
+                              <div className="w-full h-24 relative border border-gray-200 rounded-lg overflow-hidden bg-white mb-2">
+                                <Image
+                                  src={item.image}
+                                  alt={item.name}
+                                  fill
+                                  unoptimized
+                                  className="object-cover"
+                                />
+                              </div>
+                              <p className="text-sm font-semibold text-gray-900 line-clamp-2">{item.name}</p>
+                              <p className="text-emerald-700 font-bold">{currency}{item.price.toFixed(0)}</p>
+                            </button>
+                          )}
+
+                          {index < array.length - 1 && (
+                            <span className="text-xl font-bold text-gray-400 select-none">+</span>
+                          )}
+                        </div>
+                      ))}
                     </div>
                   </div>
-
-                  <PlusIcon size={20} className="text-gray-400" />
-
-                  {/* Addon products */}
-                  {fbtProducts.map((fbtProduct, index) => (
-                    <div key={fbtProduct._id} className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 bg-white">
-                      <input
-                        type="checkbox"
-                        checked={selectedFbtProducts[fbtProduct._id] || false}
-                        onChange={() => toggleFbtProduct(fbtProduct._id)}
-                        className="w-5 h-5 text-green-600 border-gray-300 rounded cursor-pointer"
-                      />
-                      <div className="w-20 h-20 relative border border-gray-200 rounded overflow-hidden flex-shrink-0">
-                        <Image
-                          src={fbtProduct.images?.[0] || 'https://ik.imagekit.io/jrstupuke/placeholder.png'}
-                          alt={fbtProduct.name}
-                          fill
-                          unoptimized
-                          className="object-cover"
-                        />
-                      </div>
-                      <div className="min-w-[220px]">
-                        <p className="text-sm font-semibold text-gray-900 line-clamp-2">{fbtProduct.name}</p>
-                        <p className="text-base text-green-700 font-bold">{currency}{fbtProduct.price}</p>
-                      </div>
-                      {index < fbtProducts.length - 1 && (
-                        <PlusIcon size={18} className="text-gray-300" />
-                      )}
-                    </div>
-                  ))}
                 </div>
               </div>
 
@@ -1940,7 +2086,7 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
                     disabled={selectedAddonProducts.length === 0}
                     className="w-full bg-orange-500 hover:bg-orange-600 text-white py-3 px-4 rounded-lg font-semibold text-base transition disabled:bg-gray-300 disabled:cursor-not-allowed"
                   >
-                    Add bundle
+                    BUY {totalBundleItems} TOGETHER FOR {currency}{bundleTotal.toFixed(2)}
                   </button>
                   <p className="text-xs text-gray-500 text-center">Select addons you want to include</p>
                 </div>

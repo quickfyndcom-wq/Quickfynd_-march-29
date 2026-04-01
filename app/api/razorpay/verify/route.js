@@ -86,6 +86,7 @@ export async function POST(request) {
         items: paymentPayload.items,
         paymentMethod: 'CARD',
         shippingFee: paymentPayload.shippingFee || 0,
+        shippingMethod: paymentPayload.shippingMethod,
         razorpayPaymentId: razorpay_payment_id,
         razorpayOrderId: razorpay_order_id,
       };
@@ -101,10 +102,17 @@ export async function POST(request) {
         if (auth?.userId && paymentPayload.addressId) {
           orderPayload.addressId = paymentPayload.addressId;
         }
+        if (auth?.userId && paymentPayload.addressData?.street) {
+          orderPayload.addressData = paymentPayload.addressData;
+        }
       } else if (paymentPayload.isGuest && paymentPayload.guestInfo) {
         // Guest user
         orderPayload.isGuest = true;
         orderPayload.guestInfo = paymentPayload.guestInfo;
+      }
+
+      if (paymentPayload.coupon) {
+        orderPayload.coupon = paymentPayload.coupon;
       }
 
       // Call the main orders API internally
