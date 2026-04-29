@@ -8,7 +8,7 @@ import Link from 'next/link'
 import axios from 'axios'
 import toast from 'react-hot-toast'
 import DashboardSidebar from '@/components/DashboardSidebar'
-import { downloadInvoice } from '@/lib/generateInvoice'
+import { downloadInvoice, downloadAwb } from '@/lib/generateInvoice'
 import ReviewForm from '@/components/ReviewForm'
 import { useSearchParams } from 'next/navigation'
 
@@ -30,6 +30,10 @@ export default function DashboardOrdersPage() {
   const [returnFiles, setReturnFiles] = useState([])
   const [uploadError, setUploadError] = useState('')
   const [refreshingTracking, setRefreshingTracking] = useState(false)
+  const [storeContracts, setStoreContracts] = useState([])
+  const [selectedContract, setSelectedContract] = useState(null)
+  const [selectedPaymentType, setSelectedPaymentType] = useState('')
+  const [loadingStoreContracts, setLoadingStoreContracts] = useState(false)
   const [cancellingOrderId, setCancellingOrderId] = useState(null)
   const [showCancelModal, setShowCancelModal] = useState(false)
   const [cancelOrderTarget, setCancelOrderTarget] = useState(null)
@@ -89,6 +93,11 @@ export default function DashboardOrdersPage() {
     if (paymentMethod) return true;
 
     return !!order?.isPaid;
+  }
+
+  const getDisplayOrderNumber = (order) => {
+    if (order?.shortOrderNumber) return String(order.shortOrderNumber).padStart(5, '0')
+    return String(order?._id || order?.id || '').slice(0, 8).toUpperCase()
   }
 
   const canCancelOrder = (order) => {
@@ -177,7 +186,7 @@ export default function DashboardOrdersPage() {
 
       const token = await auth.currentUser.getIdToken(true)
       const itemName = item?.name || item?.productId?.name || 'Order item'
-      const orderNo = order?.shortOrderNumber || String(orderId).slice(0, 8).toUpperCase()
+      const orderNo = getDisplayOrderNumber(order)
 
       const { data } = await axios.post('/api/tickets', {
         subject: `Order Support - #${orderNo}`,
@@ -241,7 +250,7 @@ export default function DashboardOrdersPage() {
         amount: orderResponse.data.amount,
         currency: orderResponse.data.currency || 'INR',
         name: 'QuickFynd',
-        description: `Pay for Order #${order.shortOrderNumber || String(orderId).slice(-6).toUpperCase()}`,
+        description: `Pay for Order #${getDisplayOrderNumber(order)}`,
         image: '/logo.png',
         prefill: {
           name: user?.displayName || '',
@@ -547,6 +556,33 @@ export default function DashboardOrdersPage() {
     // Cleanup interval when order is collapsed or component unmounts
     return () => clearInterval(interval);
   }, [expandedOrder, orders.find(o => (o._id || o.id) === expandedOrder)?.trackingId]);
+
+  // Fetch seller store contracts when an order is expanded
+  useEffect(() => {
+    const fetchStoreContracts = async () => {
+      try {
+        setLoadingStoreContracts(true)
+        setStoreContracts([])
+        setSelectedContract(null)
+        if (!expandedOrder) return
+        const orderData = orders.find(o => (o._id || o.id) === expandedOrder)
+        if (!orderData) return
+        const storeId = orderData.storeId || orderData.store || orderData.sellerId || (orderData.store && orderData.store._id)
+        if (!storeId) return
+        const { data } = await axios.get(`/api/store/${storeId}`)
+        const contracts = data?.store?.contractIds || []
+        setStoreContracts(contracts)
+        // default payment type based on order paymentMethod
+        const pt = (String(orderData?.paymentMethod || '').toLowerCase() === 'cod') ? 'COD' : 'Prepaid'
+        setSelectedPaymentType(pt)
+      } catch (err) {
+        console.error('Failed to fetch store contracts', err)
+      } finally {
+        setLoadingStoreContracts(false)
+      }
+    }
+    fetchStoreContracts()
+  }, [expandedOrder, orders])
 
   const handleDeliveryReview = async () => {
     if (!selectedOrderForReview) return
@@ -855,7 +891,7 @@ export default function DashboardOrdersPage() {
                         <div>
                           <p className="text-[11px] text-slate-500">Order #</p>
                           <div className="flex items-center gap-2 mt-0.5">
-                            <p className="font-semibold text-slate-800">{order.shortOrderNumber || orderId.substring(0, 8).toUpperCase()}</p>
+                            <p className="font-semibold text-slate-800">{getDisplayOrderNumber(order)}</p>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation()
@@ -933,7 +969,7 @@ export default function DashboardOrdersPage() {
                           <div>
                             <p className="text-xs text-slate-500">Order #</p>
                             <div className="flex items-center gap-2">
-                              <p className="font-semibold text-slate-800">{order.shortOrderNumber || orderId.substring(0, 8).toUpperCase()}</p>
+                              <p className="font-semibold text-slate-800">{getDisplayOrderNumber(order)}</p>
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation()
@@ -1277,6 +1313,56 @@ export default function DashboardOrdersPage() {
                                   <line x1="12" y1="15" x2="12" y2="3"></line>
                                 </svg>
                                 Download Invoice
+                              </button>
+                              {/* Contract selection (if seller has contractIds) */}
+                              {loadingStoreContracts ? (
+                                <div className="flex items-center px-4 py-2 text-sm text-slate-600">Loading contracts...</div>
+                              ) : (storeContracts && storeContracts.length > 0) ? (
+                                <div className="flex items-center gap-2">
+                                  <label className="text-sm text-slate-600 mr-2">Contract:</label>
+                                  <select
+                                    value={selectedContract?.key || ''}
+                                    onChange={(e) => {
+                                      const key = e.target.value
+                                      const c = storeContracts.find(s => s.key === key) || null
+                                      setSelectedContract(c)
+                                    }}
+                                    className="px-2 py-1 border rounded"
+                                  >
+                                    <option value="">Select contract</option>
+                                    {storeContracts.map((c) => (
+                                      <option key={c.key} value={c.key}>{c.label || c.key}</option>
+                                    ))}
+                                  </select>
+                                  <label className="text-sm text-slate-600 ml-3 mr-1">Payment:</label>
+                                  <select
+                                    value={selectedPaymentType}
+                                    onChange={(e) => setSelectedPaymentType(e.target.value)}
+                                    className="px-2 py-1 border rounded"
+                                  >
+                                    <option value="COD">COD</option>
+                                    <option value="Prepaid">Prepaid</option>
+                                  </select>
+                                </div>
+                              ) : null}
+
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  if (storeContracts && storeContracts.length > 0 && !selectedContract) {
+                                    toast.error('Please select a contract before downloading AWB')
+                                    return
+                                  }
+                                  const opts = selectedContract ? { contractId: selectedContract.id, contractLabel: selectedContract.label, contract: selectedContract, paymentType: selectedPaymentType } : {}
+                                  downloadAwb(order, opts)
+                                }}
+                                className="px-4 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-sm font-medium flex items-center gap-2"
+                              >
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                                  <path d="M3 9h18M9 21V9" />
+                                </svg>
+                                Download AWB
                               </button>
                               {!order.deliveryReview?.reviewed && (
                                 <button
@@ -1904,7 +1990,7 @@ export default function DashboardOrdersPage() {
                 </div>
 
                 <div className="mb-4 text-sm text-slate-600">
-                  You are cancelling order <span className="font-semibold text-slate-800">#{cancelOrderTarget.shortOrderNumber || (cancelOrderTarget._id || cancelOrderTarget.id || '').toString().slice(0, 8).toUpperCase()}</span>.
+                  You are cancelling order <span className="font-semibold text-slate-800">#{getDisplayOrderNumber(cancelOrderTarget)}</span>.
                 </div>
 
                 <div className="mb-5">
@@ -1960,7 +2046,7 @@ export default function DashboardOrdersPage() {
               <div className="mb-6">
                 <h3 className="text-xl font-bold text-slate-800 mb-2">Rate Your Delivery Experience</h3>
                 <p className="text-sm text-slate-600">
-                  Help us improve! How was your delivery experience for order #{selectedOrderForReview.shortOrderNumber || selectedOrderForReview._id?.substring(0, 8).toUpperCase()}?
+                  Help us improve! How was your delivery experience for order #{getDisplayOrderNumber(selectedOrderForReview)}?
                 </p>
               </div>
 

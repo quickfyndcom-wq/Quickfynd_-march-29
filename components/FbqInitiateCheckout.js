@@ -9,8 +9,8 @@ export default function FbqInitiateCheckout({ value = 0, currency = 'INR', conte
     const ids = Array.isArray(contentIds) ? contentIds.filter(Boolean).map(String) : [];
     if (ids.length === 0) return;
 
-    const eventSignature = `${ids.join(',')}_${Number(value || 0)}_${Number(numItems || 0)}`;
-    const eventKey = `meta_initiate_checkout_${eventSignature}`;
+    // Fire once per checkout page session; do not retrigger on quantity changes.
+    const eventKey = 'meta_initiate_checkout_sent';
     if (sessionStorage.getItem(eventKey)) return;
 
     trackMetaEvent('InitiateCheckout', {
@@ -19,6 +19,8 @@ export default function FbqInitiateCheckout({ value = 0, currency = 'INR', conte
       content_type: 'product',
       content_ids: ids,
       num_items: Number(numItems || 0),
+    }, {
+      dedupeKey: 'meta_initiate_checkout_once',
     });
 
     sessionStorage.setItem(eventKey, '1');

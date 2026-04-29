@@ -6,6 +6,7 @@ import { onAuthStateChanged } from "firebase/auth";
 
 export default function MetaPixel() {
   const pixelId = process.env.NEXT_PUBLIC_META_PIXEL_ID;
+  const gtmId = "GTM-5QLZ2255";
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -39,8 +40,35 @@ export default function MetaPixel() {
     return advancedMatching;
   };
 
+  const isPixelAlreadyInitialized = () => {
+    try {
+      if (!window.fbq || typeof window.fbq.getState !== "function") return false;
+      const state = window.fbq.getState();
+      const pixels = Array.isArray(state?.pixels) ? state.pixels : [];
+      return pixels.some((p) => String(p?.id || "") === String(pixelId));
+    } catch {
+      return false;
+    }
+  };
+
+  const isGtmPresent = () => {
+    try {
+      if (window.google_tag_manager && window.google_tag_manager[gtmId]) return true;
+      const scripts = Array.from(document.getElementsByTagName("script"));
+      return scripts.some((s) => String(s.src || "").includes(`gtm.js?id=${gtmId}`));
+    } catch {
+      return false;
+    }
+  };
+
   useEffect(() => {
     if (typeof window === "undefined") return;
+
+    // Single-owner strategy: if GTM is present, it should own Meta Pixel init.
+    // This prevents duplicate pixel initialization from app code + GTM tag.
+    if (isGtmPresent()) {
+      return;
+    }
 
     !(function(f, b, e, v, n, t, s) {
       if (f.fbq) return;
@@ -59,9 +87,11 @@ export default function MetaPixel() {
       s.parentNode.insertBefore(t, s);
     })(window, document, "script", "https://connect.facebook.net/en_US/fbevents.js");
 
-    if (!window.__metaPixelInitialized) {
+    if (!window.__metaPixelInitialized && !isPixelAlreadyInitialized()) {
       const advancedMatching = getAdvancedMatching(auth?.currentUser);
       window.fbq && window.fbq("init", pixelId, advancedMatching);
+      window.__metaPixelInitialized = true;
+    } else if (isPixelAlreadyInitialized()) {
       window.__metaPixelInitialized = true;
     }
   }, [pixelId]);
@@ -70,16 +100,9 @@ export default function MetaPixel() {
     if (typeof window === "undefined" || !pixelId) return;
 
     const unsub = onAuthStateChanged(auth, (user) => {
-      if (!window.fbq) return;
-
-      const advancedMatching = getAdvancedMatching(user);
-      if (!advancedMatching?.em && !advancedMatching?.ph) return;
-
-      const currentKey = `${advancedMatching.em || ""}|${advancedMatching.ph || ""}`;
-      if (window.__metaAdvancedMatchingKey === currentKey) return;
-
-      window.fbq("init", pixelId, advancedMatching);
-      window.__metaAdvancedMatchingKey = currentKey;
+      // Keep auth listener for future extension, but never re-init fbq.
+      // Re-initializing the same pixel ID can duplicate subscriptions.
+      if (!window.fbq || !user) return;
     });
 
     return () => unsub();

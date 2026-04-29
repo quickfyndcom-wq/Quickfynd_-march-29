@@ -14,11 +14,21 @@ const resolveImageUrl = (image) => {
     return 'https://ik.imagekit.io/jrstupuke/placeholder.png';
 };
 
+const parseMobileSpecs = (rawValue) => {
+    if (!Array.isArray(rawValue)) return [];
+    return rawValue
+        .map((spec) => ({
+            label: String(spec?.label || '').trim(),
+            value: String(spec?.value || '').trim(),
+        }))
+        .filter((spec) => spec.label && spec.value);
+};
+
 export async function POST(request) {
     try {
         await dbConnect();
         const body = await request.json();
-        const { name, description, shortDescription, mrp, price, images, category, sku, inStock, hasVariants, variants, attributes, hasBulkPricing, bulkPricing, fastDelivery, allowReturn, allowReplacement, storeId, slug, imageAspectRatio = '1:1' } = body;
+        const { name, description, shortDescription, mrp, price, images, category, sku, inStock, hasVariants, variants, attributes, hasBulkPricing, bulkPricing, fastDelivery, allowReturn, allowReplacement, mobileSpecsEnabled, mobileSpecs, storeId, slug, imageAspectRatio = '1:1' } = body;
 
         // Generate slug from name if not provided
         const productSlug = slug || name
@@ -51,6 +61,8 @@ export async function POST(request) {
             fastDelivery,
             allowReturn,
             allowReplacement,
+            mobileSpecsEnabled: Boolean(mobileSpecsEnabled),
+            mobileSpecs: parseMobileSpecs(mobileSpecs),
             storeId,
             imageAspectRatio,
         });
@@ -127,7 +139,7 @@ export async function GET(request){
         let products = [];
         try {
             products = await Product.find(matchStage)
-                .select('name slug description shortDescription mrp price images category categories tags sku hasVariants variants attributes fastDelivery stockQuantity imageAspectRatio createdAt')
+                .select('name slug description shortDescription mrp price images category categories tags sku hasVariants variants attributes fastDelivery stockQuantity mobileSpecsEnabled mobileSpecs imageAspectRatio createdAt')
                 .populate('category', 'name slug')
                 .populate('categories', 'name slug')
                 .sort({ createdAt: -1 })
@@ -138,7 +150,7 @@ export async function GET(request){
         } catch (populateError) {
             console.error('Products populate error:', populateError);
             products = await Product.find(matchStage)
-                .select('name slug description shortDescription mrp price images category categories tags sku hasVariants variants attributes fastDelivery stockQuantity imageAspectRatio createdAt')
+                .select('name slug description shortDescription mrp price images category categories tags sku hasVariants variants attributes fastDelivery stockQuantity mobileSpecsEnabled mobileSpecs imageAspectRatio createdAt')
                 .sort({ createdAt: -1 })
                 .skip(offset)
                 .limit(limit)

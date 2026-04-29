@@ -1,6 +1,6 @@
 "use client"
 import { usePathname } from "next/navigation"
-import { HomeIcon, LayoutListIcon, SquarePenIcon, SquarePlusIcon, StarIcon, FolderIcon, TicketIcon, TruckIcon, RefreshCw, User as UserIcon, Users as UsersIcon, MessageSquare, Sparkles, BellIcon, MailIcon, Image as ImageIcon, ShoppingCart, Wallet, BarChart3, Target, Gift, X, Activity } from "lucide-react"
+import { HomeIcon, LayoutListIcon, SquarePenIcon, SquarePlusIcon, StarIcon, FolderIcon, TicketIcon, TruckIcon, RefreshCw, User as UserIcon, Users as UsersIcon, MessageSquare, Sparkles, BellIcon, MailIcon, Image as ImageIcon, ShoppingCart, Wallet, BarChart3, Target, Gift, X, Activity, Smartphone } from "lucide-react"
 import Link from "next/link"
 
 const StoreSidebar = ({ storeInfo, isOpen = false, onClose }) => {
@@ -21,6 +21,7 @@ const StoreSidebar = ({ storeInfo, isOpen = false, onClose }) => {
         { name: 'Deals of the Day', href: '/store/storefront/deals', icon: StarIcon },
         { name: 'Promotional Offers', href: '/store/personalized-offers', icon: Gift },
         { name: 'Media', href: '/store/media', icon: ImageIcon },
+        { name: 'Mobile Features', href: '/store/mobile-features', icon: Smartphone },
         { name: 'Abandoned Checkout', href: '/store/abandoned-checkout', icon: ShoppingCart },
         { name: 'Customer Tracking', href: '/store/customer-tracking', icon: Activity },
         { name: 'Coupons', href: '/store/coupons', icon: TicketIcon },
@@ -61,6 +62,7 @@ const StoreSidebar = ({ storeInfo, isOpen = false, onClose }) => {
                 '/store/storefront/carousel-slider',
                 '/store/storefront/deals',
                 '/store/media',
+                '/store/mobile-features',
             ]
         },
         {

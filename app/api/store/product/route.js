@@ -26,6 +26,22 @@ const resolveImageUrl = (image) => {
     return '';
 };
 
+const parseMobileSpecs = (rawValue) => {
+    if (!rawValue) return [];
+    try {
+        const parsed = JSON.parse(rawValue);
+        if (!Array.isArray(parsed)) return [];
+        return parsed
+            .map((spec) => ({
+                label: String(spec?.label || '').trim(),
+                value: String(spec?.value || '').trim(),
+            }))
+            .filter((spec) => spec.label && spec.value);
+    } catch {
+        return [];
+    }
+};
+
 // Helper: Upload images to ImageKit
 const uploadImages = async (images) => {
     return Promise.all(
@@ -126,6 +142,8 @@ export async function POST(request) {
         const attributesRaw = formData.get("attributes"); // optional JSON of attribute definitions
         // Fast delivery toggle
         const fastDelivery = String(formData.get("fastDelivery") || "false").toLowerCase() === "true";
+        const mobileSpecsEnabled = String(formData.get("mobileSpecsEnabled") || "false").toLowerCase() === "true";
+        const mobileSpecs = parseMobileSpecs(formData.get("mobileSpecs"));
         const imageAspectRatio = formData.get("imageAspectRatio") || "1:1";
 
         // Base pricing (used when no variants)
@@ -264,10 +282,25 @@ export async function POST(request) {
             attributes,
             inStock,
             fastDelivery,
+            mobileSpecsEnabled,
+            mobileSpecs,
             imageAspectRatio,
             stockQuantity,
             storeId,
         });
+
+        // Safety write: ensure new mobile specs fields persist even if a stale model cache strips unknown keys.
+        await Product.collection.updateOne(
+            { _id: product._id },
+            {
+                $set: {
+                    mobileSpecsEnabled,
+                    mobileSpecs,
+                },
+            }
+        );
+
+        const createdProduct = await Product.findById(product._id).lean();
 
         console.log('DEBUG: Product created, checking saved data:');
         console.log('  - product.category:', product.category);
@@ -283,7 +316,7 @@ export async function POST(request) {
         
         console.log('POST: Product created with categories:', product.categories);
 
-        return NextResponse.json({ message: "Product added successfully", product });
+        return NextResponse.json({ message: "Product added successfully", product: createdProduct || product });
     } catch (error) {
         console.error('========== ERROR IN POST /api/store/product ==========');
         console.error('Error name:', error.name);
@@ -420,6 +453,8 @@ export async function PUT(request) {
         const mrp = formData.get("mrp") ? Number(formData.get("mrp")) : undefined;
         const price = formData.get("price") ? Number(formData.get("price")) : undefined;
         const fastDelivery = String(formData.get("fastDelivery") || "").toLowerCase() === "true";
+        const mobileSpecsEnabledRaw = formData.get("mobileSpecsEnabled");
+        const mobileSpecsRaw = formData.get("mobileSpecs");
         const imageAspectRatioRaw = formData.get("imageAspectRatio");
         let slug = formData.get("slug")?.toString().trim() || "";
         if (slug) {
@@ -491,6 +526,12 @@ export async function PUT(request) {
         }
 
         const imageAspectRatio = imageAspectRatioRaw || product.imageAspectRatio || "1:1";
+        const mobileSpecsEnabled = mobileSpecsEnabledRaw !== null
+            ? String(mobileSpecsEnabledRaw).toLowerCase() === "true"
+            : Boolean(product.mobileSpecsEnabled);
+        const mobileSpecs = mobileSpecsRaw !== null
+            ? parseMobileSpecs(mobileSpecsRaw)
+            : (Array.isArray(product.mobileSpecs) ? product.mobileSpecs : []);
 
         // Parse categories - support both single category (backward compat) and multiple
         let categories = product.categories || [];
@@ -536,6 +577,8 @@ export async function PUT(request) {
             attributes,
             inStock,
             fastDelivery,
+            mobileSpecsEnabled,
+            mobileSpecs,
             imageAspectRatio,
         };
 
@@ -557,6 +600,19 @@ export async function PUT(request) {
             updateData,
             { new: true }
         ).lean();
+
+        // Safety write: persist mobile specs fields explicitly at collection level.
+        await Product.collection.updateOne(
+            { _id: product._id },
+            {
+                $set: {
+                    mobileSpecsEnabled,
+                    mobileSpecs,
+                },
+            }
+        );
+
+        product = await Product.findById(product._id).lean();
         
         console.log('PUT: Product updated with categories:', product.categories);
         

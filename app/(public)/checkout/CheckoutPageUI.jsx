@@ -10,7 +10,6 @@ import { fetchAddress } from "@/lib/features/address/addressSlice";
 import { clearCart, addToCart, removeFromCart, deleteItemFromCart } from "@/lib/features/cart/cartSlice";
 import { fetchProducts } from "@/lib/features/product/productSlice";
 import { fetchShippingSettings, calculateShipping } from "@/lib/shipping";
-import FbqInitiateCheckout from "@/components/FbqInitiateCheckout";
 import { trackMetaEvent } from "@/lib/metaPixelClient";
 import { getTrackedStoreId, setTrackedCustomerIdentity, setTrackedStoreId, trackCustomerBehaviorEvent } from "@/lib/customerBehaviorTracking";
 import { useRouter } from "next/navigation";
@@ -763,14 +762,14 @@ export default function CheckoutPage() {
   const handlePincodeSubmit = (pincodeData) => {
     setForm(f => ({
       ...f,
-      pincode: pincodeData.pincode,
-      city: pincodeData.city,
-      district: pincodeData.district,
-      state: pincodeData.state,
-      country: pincodeData.country
+      pincode: sanitizePincode(pincodeData?.pincode || f.pincode),
+      city: pincodeData?.city || f.city,
+      district: pincodeData?.district || f.district,
+      state: pincodeData?.state || f.state,
+      country: pincodeData?.country || f.country || 'India'
     }));
     // Update districts for the selected state
-    const stateObj = indiaStatesAndDistricts.find(s => s.state === pincodeData.state);
+    const stateObj = indiaStatesAndDistricts.find(s => s.state === pincodeData?.state);
     if (stateObj) {
       setDistricts(stateObj.districts);
     }
@@ -781,27 +780,34 @@ export default function CheckoutPage() {
     // If pincode is already filled and valid, fetch directly
     if (pincode && pincode.length === 6 && /^\d{6}$/.test(pincode)) {
       try {
-        // 1. Check Delhivery serviceability
-        const delhiveryRes = await fetch(`/api/delhivery/pincode-serviceability?pincode=${pincode}`);
-        const delhiveryData = await delhiveryRes.json();
-        let isServiceable = false;
-        // Delhivery API returns array for normal, object for heavy
-        if (Array.isArray(delhiveryData) && delhiveryData.length > 0) {
-          // Normal API: remark blank means serviceable
-          isServiceable = !delhiveryData[0]?.remark;
-        } else if (delhiveryData?.delivery_codes) {
-          // Heavy API: check payment_type or NSZ
-          isServiceable = delhiveryData.delivery_codes.some(dc => dc.postal_code === pincode && (!dc.remark || dc.remark === ''));
+        // Prefer internal proxy first to avoid client-side rate limits and improve reliability.
+        let postOffice = null;
+        try {
+          const internalRes = await fetch(`/api/indiapost/pincode?pincode=${encodeURIComponent(pincode)}&limit=1`);
+          const internalData = await internalRes.json();
+          const firstOffice = internalData?.data?.[0] || internalData?.offices?.[0] || null;
+          if (firstOffice) {
+            postOffice = {
+              Name: firstOffice?.office_name || firstOffice?.name || '',
+              Region: firstOffice?.region_name || '',
+              Division: firstOffice?.division_name || '',
+              District: firstOffice?.district_name || firstOffice?.district || '',
+              State: firstOffice?.state_name || firstOffice?.state || ''
+            };
+          }
+        } catch (_) {
+          // Continue to India Post public API fallback.
         }
-        if (!isServiceable) {
-          toast.error("Sorry, this pincode is not serviceable for delivery.");
-          return;
+
+        if (!postOffice) {
+          const response = await fetch(`https://api.postalpincode.in/pincode/${pincode}`);
+          const data = await response.json();
+          if (data[0]?.Status === "Success" && data[0]?.PostOffice?.length > 0) {
+            postOffice = data[0].PostOffice[0];
+          }
         }
-        // 2. Fetch address details from Indian Postal API
-        const response = await fetch(`https://api.postalpincode.in/pincode/${pincode}`);
-        const data = await response.json();
-        if (data[0]?.Status === "Success" && data[0]?.PostOffice?.length > 0) {
-          const postOffice = data[0].PostOffice[0];
+
+        if (postOffice) {
           handlePincodeSubmit({
             pincode: pincode,
             city: postOffice.Name || postOffice.Region || postOffice.Division,
@@ -811,10 +817,26 @@ export default function CheckoutPage() {
           });
           toast.success("Address auto-filled successfully!");
         } else {
-          toast.error("Invalid pincode. Please enter a valid pincode.");
+          // Do not block checkout for non-resolving pincode; allow manual entry.
+          handlePincodeSubmit({
+            pincode,
+            city: form.city || "",
+            district: form.district || "",
+            state: form.state || "",
+            country: form.country || "India"
+          });
+          toast.success("Pincode accepted. You can fill location details manually.");
         }
       } catch (err) {
-        toast.error("Failed to fetch pincode details. Please try again.");
+        // Network/API failures should not block the user from continuing.
+        handlePincodeSubmit({
+          pincode,
+          city: form.city || "",
+          district: form.district || "",
+          state: form.state || "",
+          country: form.country || "India"
+        });
+        toast.success("Pincode accepted. Fill city/state manually if needed.");
       }
     } else {
       // Open modal if pincode is empty or invalid
@@ -961,6 +983,7 @@ export default function CheckoutPage() {
         productId,
         price: Number(targetBundle?.price) || 0,
         maxQty,
+        __skipMeta: true,
         variantOptions: {
           ...variantOptions,
           bundleQty: targetBundleQty,
@@ -997,6 +1020,7 @@ export default function CheckoutPage() {
         productId,
         price: nextPrice,
         maxQty,
+        __skipMeta: true,
         variantOptions: {
           ...variantOptions,
           bundleQty: null,
@@ -1036,6 +1060,7 @@ export default function CheckoutPage() {
       productId,
       price: item?._cartPrice ?? item?.price,
       maxQty,
+      __skipMeta: true,
       variantOptions: {
         ...variantOptions,
         bundleQty: null,
@@ -1193,7 +1218,7 @@ export default function CheckoutPage() {
     }
   }, [appliedCoupon, isWalletOnly, form.payment]);
 
-  // Meta Pixel: AddPaymentInfo when payment method is selected on checkout
+  // Meta Pixel: AddPaymentInfo only once per selected payment method in a checkout session.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (!form.payment || isWalletOnly) return;
@@ -1205,7 +1230,7 @@ export default function CheckoutPage() {
 
     if (contentIds.length === 0) return;
 
-    const eventKey = `meta_add_payment_info_${form.payment}_${contentIds.join(',')}_${Number(totalAfterWallet || 0)}`;
+    const eventKey = `meta_add_payment_info_${String(form.payment).toLowerCase()}`;
     if (sessionStorage.getItem(eventKey)) return;
 
     trackMetaEvent('AddPaymentInfo', {
@@ -1215,6 +1240,8 @@ export default function CheckoutPage() {
       content_ids: contentIds,
       num_items: cartArray.reduce((sum, item) => sum + Number(item?.quantity || 0), 0),
       payment_method: String(form.payment).toUpperCase(),
+    }, {
+      dedupeKey: `meta_add_payment_info_${String(form.payment).toLowerCase()}`,
     });
 
     sessionStorage.setItem(eventKey, '1');
@@ -1542,7 +1569,7 @@ export default function CheckoutPage() {
             payload.coinsToRedeem = safeRedeemCoins;
           }
         } else {
-          if (!form.name || !form.email || !form.phone || !form.street || !form.city || !form.state || !form.country || !form.pincode) {
+          if (!form.name || !form.email || !form.phone || !form.street || !form.city || !form.state || !form.country || !resolvedPincode) {
             setFormError("Please fill all required shipping details.");
             setPlacingOrder(false);
             return;
@@ -1994,12 +2021,6 @@ export default function CheckoutPage() {
 
   return (
     <>
-      <FbqInitiateCheckout
-        value={totalAfterWallet}
-        currency="INR"
-        contentIds={cartArray.map((item) => String(item?._id || item?._cartKey || '')).filter(Boolean)}
-        numItems={cartArray.reduce((sum, item) => sum + Number(item?.quantity || 0), 0)}
-      />
       <div className="py-10 bg-white md:pb-0 pb-24 min-h-[35dvh]">
       <div className="max-w-[1250px] mx-auto grid grid-cols-1 md:grid-cols-3 gap-8">
         {/* Left column: address, form, payment */}

@@ -3,6 +3,14 @@
 Last Updated: 2026-02-27
 Owner: Quickfynd Backend Team
 
+## Product Description Rendering (Important)
+
+For product description UI parity with dashboard/web, follow:
+
+- `MOBILE_DESCRIPTION_RENDER_GUIDE.md`
+
+This is mandatory for correct rendering of rich description content on mobile.
+
 ## 1) Base Setup
 
 - **Base URL (Production):** `https://quickfynd.com`

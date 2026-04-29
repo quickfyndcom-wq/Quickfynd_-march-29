@@ -16,6 +16,11 @@ export default function CustomersPage() {
     const { getToken } = useAuth()
     const currency = process.env.NEXT_PUBLIC_CURRENCY_SYMBOL || '₹'
 
+    const getDisplayOrderNumber = (order) => {
+        if (order?.shortOrderNumber) return String(order.shortOrderNumber).padStart(5, '0')
+        return String(order?._id || order?.id || '').slice(0, 8).toUpperCase()
+    }
+
     const [loading, setLoading] = useState(true)
     const [customers, setCustomers] = useState([])
     const [selectedCustomer, setSelectedCustomer] = useState(null)
@@ -282,7 +287,7 @@ export default function CustomersPage() {
                                     <div className="flex items-center justify-between">
                                         <div className="flex-1 min-w-0">
                                             <p className="text-xs text-slate-600 truncate">
-                                                Order #{(customer.orders[0].id || customer.orders[0]._id || '').toString().slice(-8).toUpperCase()}
+                                                Order #{getDisplayOrderNumber(customer.orders[0])}
                                             </p>
                                             <p className="text-xs text-slate-500 mt-0.5">
                                                 {new Date(customer.orders[0].createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
@@ -516,7 +521,7 @@ export default function CustomersPage() {
                                                                 </td>
                                                                 <td className="px-4 py-3 text-slate-700">
                                                                     {txn.description || 
-                                                                     (txn.orderId ? `Order #${txn.orderId.slice(-8).toUpperCase()}` : 
+                                                                     (txn.orderId ? `Order #${String(txn.orderId).slice(0, 8).toUpperCase()}` : 
                                                                       txn.type === 'ADMIN_CREDIT' ? 'Added by admin' : 
                                                                       'Wallet transaction')}
                                                                 </td>
@@ -561,7 +566,7 @@ export default function CustomersPage() {
                                                             <div>
                                                                 <div className="flex items-center gap-2 mb-2">
                                                                     <div className="w-2 h-2 bg-blue-600 rounded-full"></div>
-                                                                    <p className="font-semibold text-slate-900">Order #{(order._id || order.id || '').toString().slice(-8).toUpperCase()}</p>
+                                                                    <p className="font-semibold text-slate-900">Order #{getDisplayOrderNumber(order)}</p>
                                                                 </div>
                                                                 <p className="text-sm text-slate-500 flex items-center gap-1">
                                                                     <Calendar size={14} />

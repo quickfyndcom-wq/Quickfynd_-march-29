@@ -1,7 +1,7 @@
 "use client";
 import ReduxProvider from "@/lib/ReduxProvider";
 import Navbar from "@/components/Navbar";
-import TopBarNotification from "@/components/TopBarNotification";
+import AppInstallPrompt from "@/components/AppInstallPrompt";
 import Footer from "@/components/Footer";
 import SupportBar from "@/components/SupportBar";
 import Chatbot from "@/components/Chatbot";
@@ -48,7 +48,7 @@ function InitializeApp({ children }) {
 export default function ClientLayout({ children }) {
   return (
     <ReduxProvider>
-      {/* <TopBarNotification /> */}
+      <AppInstallPrompt />
       <Navbar />
       <PageTracker />
       <Toaster />

@@ -196,8 +196,8 @@ export default function CategorySliderDisplay({ slider }) {
         .qf-slider__title {
           font-size: 28px;
           line-height: 1.1;
-          font-weight: 700;
-          color: #1f2937;
+          font-weight: 600;
+          color: #000000;
           margin: 6px 0 0;
         }
 

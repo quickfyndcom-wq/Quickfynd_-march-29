@@ -33,10 +33,26 @@ export default function PincodeModal({ open, onClose, onPincodeSubmit }) {
         });
         onClose();
       } else {
-        setError("Invalid pincode or no data found");
+        // Accept pincode even when API does not resolve location; user can fill location manually.
+        onPincodeSubmit({
+          pincode,
+          city: "",
+          district: "",
+          state: "",
+          country: "India"
+        });
+        onClose();
       }
     } catch (err) {
-      setError("Failed to fetch pincode details. Please try again.");
+      // Do not block user when lookup API fails.
+      onPincodeSubmit({
+        pincode,
+        city: "",
+        district: "",
+        state: "",
+        country: "India"
+      });
+      onClose();
     } finally {
       setLoading(false);
     }
@@ -76,32 +92,18 @@ export default function PincodeModal({ open, onClose, onPincodeSubmit }) {
                 if (value.length === 6) {
                   setLoading(true);
                   try {
-                    const delhiveryRes = await fetch(`/api/delhivery/pincode-serviceability?pincode=${value}`);
-                    const delhiveryData = await delhiveryRes.json();
-                    let isServiceable = false;
-                    let embargoRemark = '';
-                    if (delhiveryData?.delivery_codes && Array.isArray(delhiveryData.delivery_codes) && delhiveryData.delivery_codes.length > 0) {
-                      const pc = delhiveryData.delivery_codes[0]?.postal_code;
-                      if (pc) {
-                        // If embargo/remark present, show it
-                        if (pc.remarks && pc.remarks.trim() !== '') {
-                          embargoRemark = pc.remarks;
-                        }
-                        // Check if cod or pre_paid is 'Y'
-                        if (pc.cod === 'Y' || pc.pre_paid === 'Y') {
-                          isServiceable = true;
-                        }
-                      }
-                    }
-                    if (embargoRemark) {
-                      setError("Delivery temporarily unavailable for this pincode. Please try again later.");
-                    } else if (isServiceable) {
-                      setError("Pincode is serviceable for delivery.");
+                    const response = await fetch(`https://api.postalpincode.in/pincode/${value}`);
+                    const data = await response.json();
+                    if (data[0]?.Status === "Success" && data[0]?.PostOffice?.length > 0) {
+                      const po = data[0].PostOffice[0];
+                      const city = po.Name || po.Region || po.Division || "";
+                      const state = po.State || "";
+                      setError(`Location found: ${city}${state ? `, ${state}` : ""}`);
                     } else {
-                      setError("Sorry, this pincode is not serviceable for delivery.");
+                      setError("Pincode accepted. Location details can be entered manually.");
                     }
                   } catch (err) {
-                    setError("Failed to check serviceability. Please try again.");
+                    setError("Pincode accepted. Location details can be entered manually.");
                   } finally {
                     setLoading(false);
                   }
@@ -112,7 +114,7 @@ export default function PincodeModal({ open, onClose, onPincodeSubmit }) {
               required
             />
             {error && (
-              <div className={`text-sm mt-2 ${error.includes('not serviceable') ? 'text-red-600' : error.includes('serviceable') ? 'text-green-600' : 'text-red-600'}`}>{error}</div>
+              <div className={`text-sm mt-2 ${error.includes('Location found') ? 'text-green-600' : 'text-amber-600'}`}>{error}</div>
             )}
           </div>
           <div className="flex gap-3 mt-4">
@@ -130,10 +132,7 @@ export default function PincodeModal({ open, onClose, onPincodeSubmit }) {
               disabled={
                 loading ||
                 !pincode ||
-                pincode.length !== 6 ||
-                error.includes('not serviceable') ||
-                error.includes('Failed to check') ||
-                error.includes('temporarily unavailable')
+                pincode.length !== 6
               }
             >
               {loading ? "Fetching..." : "Continue"}

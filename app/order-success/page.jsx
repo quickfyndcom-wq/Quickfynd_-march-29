@@ -1,7 +1,7 @@
 'use client'
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Suspense } from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Loading from '@/components/Loading';
 import { useAuth } from '@/lib/useAuth';
 import { trackCustomerBehaviorEvent, getOrCreateSessionId, getOrCreateVisitorId, detectTrafficSource } from '@/lib/customerBehaviorTracking';
@@ -22,7 +22,9 @@ function OrderSuccessContent() {
   const router = useRouter();
   const [orders, setOrders] = useState(null);
   const [loading, setLoading] = useState(true);
+  const purchaseTrackedRef = useRef(false);
   const { user, getToken } = useAuth();
+  const orderIdParam = params.get('orderId');
 
   useEffect(() => {
     const fetchOrder = async (orderId) => {
@@ -54,21 +56,23 @@ function OrderSuccessContent() {
       }
     };
 
-    const orderId = params.get('orderId');
+    const orderId = orderIdParam;
     console.log('OrderSuccessContent: orderId from params:', orderId);
     if (!orderId) {
       console.error('OrderSuccessContent: orderId missing, redirecting to home.');
       router.replace('/');
       return;
     }
+    // Don't refetch if we already have the order (prevents double-fetch when auth state loads)
+    if (orders) return;
     fetchOrder(orderId);
-  }, [params, router, user, getToken]);
+  }, [orderIdParam, router, user, getToken]);
 
   const order = orders && orders.length > 0 ? orders[0] : null;
   function getOrderNumber(orderObj) {
     if (!orderObj) return '';
-    if (orderObj.shortOrderNumber) return String(orderObj.shortOrderNumber);
-    if (orderObj._id) return String(orderObj._id).slice(0, 8);
+    if (orderObj.shortOrderNumber) return String(orderObj.shortOrderNumber).padStart(5, '0');
+    if (orderObj._id) return String(orderObj._id).slice(0, 8).toUpperCase();
     return '';
   }
   // Calculate totals
@@ -85,26 +89,68 @@ function OrderSuccessContent() {
   const isPaid = order && (order.isPaid === true || paymentMethod === 'WALLET' || paymentMethod === 'CARD' || paymentMethod === 'STRIPE');
   const paidAmount = isPaid ? total : 0;
   const dueAmount = isPaid ? 0 : total;
+  const purchaseCurrency = String(currency || '').trim().toUpperCase() === '₹' ? 'INR' : (String(currency || 'INR').trim().toUpperCase() || 'INR');
 
   // Meta Pixel Purchase event with attribution data
   useEffect(() => {
-    if (order && typeof window !== 'undefined' && window.fbq) {
-      const orderEventId = String(order._id || order.shortOrderNumber || params.get('orderId') || 'unknown');
-      const purchaseEventKey = `meta_purchase_sent_${orderEventId}`;
-      if (sessionStorage.getItem(purchaseEventKey)) return;
-      const attributionData = window.attributionData || {};
-      window.fbq('track', 'Purchase', {
-        value: total,
-        currency: currency,
-        eventID: `purchase_${orderEventId}`,
-        utm_source: attributionData.utm_source || 'organic',
-        utm_medium: attributionData.utm_medium || 'direct',
-        utm_campaign: attributionData.utm_campaign || 'none',
-        utm_id: attributionData.utm_id || null
-      });
-      sessionStorage.setItem(purchaseEventKey, '1');
+    if (!order || typeof window === 'undefined') return;
+    if (purchaseTrackedRef.current) return;
+
+    const orderEventId = String(orderIdParam || order._id || order.shortOrderNumber || 'unknown');
+    const purchaseEventKey = `meta_purchase_sent_${orderEventId}`;
+
+    if (window.sessionStorage.getItem(purchaseEventKey)) return;
+
+    const firePurchase = () => {
+      if (window.sessionStorage.getItem(purchaseEventKey)) return false;
+      if (!window.fbq) return false;
+
+      const purchaseValue = Number(total);
+      if (!Number.isFinite(purchaseValue) || purchaseValue <= 0) {
+        console.warn('[MetaPixel] Purchase skipped: invalid value', total);
+        return false;
+      }
+
+      try {
+        window.fbq('track', 'Purchase', {
+          value: purchaseValue,
+          currency: purchaseCurrency,
+          ...(window.attributionData || {}),
+        }, {
+          eventID: `purchase_${orderEventId}`,
+        });
+
+        window.sessionStorage.setItem(purchaseEventKey, '1');
+        purchaseTrackedRef.current = true;
+        return true;
+      } catch (error) {
+        console.warn('[MetaPixel] Purchase track failed:', error);
+        return false;
+      }
+    };
+
+    let interval;
+    if (window.fbq) {
+      firePurchase();
+    } else {
+      let attempts = 0;
+      interval = setInterval(() => {
+        attempts++;
+        if (window.fbq && firePurchase()) {
+          clearInterval(interval);
+          interval = null;
+        } else if (attempts >= 50) {
+          clearInterval(interval);
+          interval = null;
+        }
+      }, 100);
     }
-  }, [order, total, currency, params]);
+
+    // Cancel any pending poll when this effect re-runs (e.g. auth state loads)
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [order, total, purchaseCurrency, orderIdParam]);
 
   useEffect(() => {
     if (!order || typeof window === 'undefined') return;

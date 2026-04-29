@@ -167,11 +167,20 @@ const AddressModal = ({ open, setShowAddressModal, onAddressAdded, initialAddres
                 }));
                 setPincodeError('');
             } else {
-                setPincodeError('Pincode not found. Please enter a valid pincode.');
+                // Do not block checkout when external pincode lookup cannot resolve metadata.
+                setAddress(prev => ({
+                    ...prev,
+                    zip: pincode
+                }));
+                setPincodeError('Pincode accepted. You can enter city/state manually.');
             }
         } catch (error) {
             console.error('Pincode fetch error:', error);
-            setPincodeError('Unable to fetch pincode details. Please enter manually.');
+            setAddress(prev => ({
+                ...prev,
+                zip: pincode
+            }));
+            setPincodeError('Pincode accepted. Location lookup unavailable, please enter city/state manually.');
         } finally {
             setPincodeLoading(false);
         }
@@ -410,7 +419,7 @@ const AddressModal = ({ open, setShowAddressModal, onAddressAdded, initialAddres
                             )}
                         </div>
                         {pincodeError && (
-                            <p className="text-xs text-red-600 mt-1">{pincodeError}</p>
+                            <p className={`text-xs mt-1 ${pincodeError.includes('accepted') ? 'text-amber-600' : 'text-red-600'}`}>{pincodeError}</p>
                         )}
                         {address.zip && !pincodeError && (
                             <p className="text-xs text-green-600 mt-1">✓ Address details auto-filled</p>

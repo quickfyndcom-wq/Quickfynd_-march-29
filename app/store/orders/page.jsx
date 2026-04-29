@@ -31,7 +31,7 @@ import axios from "axios"
 import toast from "react-hot-toast"
 import { Package, Truck, X, Download, Printer, RefreshCw, MapPin, MessageSquare } from "lucide-react"
 import { downloadInvoice, printInvoice } from "@/lib/generateInvoice"
-import { downloadAwbBill } from "@/lib/generateAwbBill"
+import { downloadAwbBill, generateAwbBill } from "@/lib/generateAwbBill"
 import { schedulePickup } from '@/lib/delhivery'
 
 // Add updateTrackingDetails function
@@ -60,6 +60,17 @@ const updateTrackingDetails = async (orderId, trackingId, trackingUrl, courier, 
 };
 
 export default function StoreOrders() {
+    const DEFAULT_RETURN_ADDRESS = [
+        'Nilaas shop, MLA ROAD NEAR POLICE STATION',
+        'AMBALAMUKKU KUNNAMNAGALAM KOZHIKODE-673571, INDIA'
+    ].join('\n')
+    const DEFAULT_SELLER_NAME = 'Quickfynd'
+    const DEFAULT_SELLER_ADDRESS = [
+        '14/380 Kunnamangalam MLA ROAD, Peruvayal,',
+        'Kerala, India, 673571'
+    ].join('\n')
+    const DEFAULT_GST = '32JWYPS4831L1ZI'
+
     const currency = process.env.NEXT_PUBLIC_CURRENCY_SYMBOL || '₹';
     const formatDateTimeLocalValue = (date) => {
         const source = date instanceof Date ? date : new Date(date);
@@ -69,8 +80,79 @@ export default function StoreOrders() {
     };
 
     const getImageSrc = (image) => {
-        if (typeof image === 'string' && image.trim()) return image
-        if (image && typeof image === 'object') return image.url || image.src || '/placeholder.png'
+        if (Array.isArray(image)) return getImageSrc(image[0])
+        if (typeof image === 'string' && image.trim()) return image.trim()
+        if (image && typeof image === 'object') {
+            return image.url || image.src || image.secure_url || image.image || '/placeholder.png'
+        }
+        return '/placeholder.png'
+    }
+
+    const normalizeAddressText = (address) => {
+        if (!address) return ''
+        if (typeof address === 'string') return address.trim()
+        if (typeof address === 'object') {
+            const pin = address.zip || address.pincode || address.pin
+            const locationLine = [address.city, address.state, pin].filter(Boolean).join(', ')
+            const parts = [
+                address.name,
+                address.line1,
+                address.line2,
+                address.street,
+                locationLine,
+                address.country,
+                pin ? `Pin: ${pin}` : '',
+                address.phone ? `Phone: ${address.phone}` : ''
+            ].filter(Boolean)
+            return parts.join('\n').trim()
+        }
+        return String(address).trim()
+    }
+
+    const resolveReturnAddress = (order, storeData = {}) => {
+        // Business requested fixed return address for AWB labels.
+        return DEFAULT_RETURN_ADDRESS
+    }
+
+    const resolveSellerName = (order, storeData = {}) => {
+        return (
+            storeData?.name ||
+            order?.storeName ||
+            order?.sellerName ||
+            order?.store?.name ||
+            DEFAULT_SELLER_NAME
+        )
+    }
+
+    const resolveSellerAddress = (order, storeData = {}) => {
+        const candidates = [
+            storeData?.address,
+            order?.storeAddress,
+            order?.sellerAddress,
+            order?.store?.address
+        ]
+        for (const candidate of candidates) {
+            const normalized = normalizeAddressText(candidate)
+            if (normalized) return normalized
+        }
+        return DEFAULT_SELLER_ADDRESS
+    }
+
+    const resolveOrderItemImage = (item) => {
+        const candidates = [
+            item?.image,
+            item?.productImage,
+            item?.product?.image,
+            item?.productId?.image,
+            item?.product?.images?.[0],
+            item?.productId?.images?.[0],
+            item?.product?.imageUrl,
+            item?.productId?.imageUrl
+        ]
+        for (const candidate of candidates) {
+            const src = getImageSrc(candidate)
+            if (src && src !== '/placeholder.png') return src
+        }
         return '/placeholder.png'
     }
     const [orders, setOrders] = useState([]);
@@ -110,6 +192,29 @@ export default function StoreOrders() {
         dropoff_location: {}
     });
     const [generatingAwb, setGeneratingAwb] = useState(false);
+    const [storeContracts, setStoreContracts] = useState([]);
+    const [selectedContract, setSelectedContract] = useState(null);
+    const [loadingStoreContracts, setLoadingStoreContracts] = useState(false);
+    const [showAwbPreviewModal, setShowAwbPreviewModal] = useState(false);
+    const [awbPreviewUrl, setAwbPreviewUrl] = useState('');
+    const [awbPreviewDoc, setAwbPreviewDoc] = useState(null);
+    const [awbPreviewGenerating, setAwbPreviewGenerating] = useState(false);
+    const [showAwbGenerateModal, setShowAwbGenerateModal] = useState(false);
+    const [awbFormDetails, setAwbFormDetails] = useState({});
+    const [awbFormPreviewUrl, setAwbFormPreviewUrl] = useState('');
+    const [awbFormPreviewDoc, setAwbFormPreviewDoc] = useState(null);
+    
+    // NEW: Weight & Dimensions states for AWB modal
+    const [useManualWeight, setUseManualWeight] = useState(false);
+    const [manualWeight, setManualWeight] = useState('');
+    const [packageLength, setPackageLength] = useState('10');
+    const [packageWidth, setPackageWidth] = useState('20');
+    const [packageHeight, setPackageHeight] = useState('20');
+    const [awbFormErrors, setAwbFormErrors] = useState({});
+    
+    // NEW: Track AWB status (generated/downloaded) per order
+    const [awbStatus, setAwbStatus] = useState({}); // { orderId: { generated: true, downloaded: true } }
+    
     const refreshIntervalRef = useRef(null);
     const router = useRouter();
 
@@ -318,6 +423,16 @@ export default function StoreOrders() {
     const stats = getOrderStats();
     const filteredOrders = getFilteredOrders();
 
+    const getDisplayOrderNumber = (order) => {
+        if (order?.shortOrderNumber) return String(order.shortOrderNumber).padStart(5, '0');
+        return String(order?._id || '').slice(0, 8).toUpperCase();
+    };
+
+    const getOrderSourceLabel = (order) => {
+        const normalized = String(order?.orderSource || '').trim().toUpperCase();
+        return normalized === 'APP' ? 'APP' : 'WEB';
+    };
+
     const exportOrdersToCsv = () => {
         if (!filteredOrders.length) {
             toast.error('No orders available to export for the selected filters.');
@@ -403,7 +518,7 @@ export default function StoreOrders() {
                 const itemName = item?.name || item?.productId?.name || item?.productId?.title || '';
 
                 return [
-                    order?.shortOrderNumber || String(order?._id || '').slice(0, 8),
+                    getDisplayOrderNumber(order),
                     order?._id || '',
                     order?.createdAt ? new Date(order.createdAt).toLocaleString('en-IN') : '',
                     getCustomerName(order),
@@ -671,6 +786,13 @@ export default function StoreOrders() {
             courier: ''
         });
     };
+
+    // When modal opens, fetch tracking info only
+    useEffect(() => {
+        if (isModalOpen && selectedOrder) {
+            // Contracts will be fetched when Generate AWB is clicked
+        }
+    }, [isModalOpen, selectedOrder, getToken])
 
     // Helper function to compute correct payment status
     const getPaymentStatus = (order) => {
@@ -1081,6 +1203,7 @@ export default function StoreOrders() {
                                 <th className="px-4 py-3">Total</th>
                                 <th className="px-4 py-3">Payment</th>
                                 <th className="px-4 py-3">Status</th>
+                                <th className="px-4 py-3">AWB Status</th>
                                 <th className="px-4 py-3">Need to Pick</th>
                                 <th className="px-4 py-3">Tracking</th>
                                 <th className="px-4 py-3">Date & Time</th>
@@ -1149,7 +1272,7 @@ export default function StoreOrders() {
                                     onClick={() => openModal(order)}
                                   >
                                     <td className="pl-6 text-green-600 font-medium">{index + 1}</td>
-                                    <td className="px-4 py-3 font-mono text-xs text-slate-700">{order.shortOrderNumber || order._id.slice(0, 8)}</td>
+                                    <td className="px-4 py-3 font-mono text-xs text-slate-700">{getDisplayOrderNumber(order)}</td>
                                     <td className="px-4 py-3">
                                         <div className="flex flex-col gap-1">
                                             <span className="font-medium text-slate-800">
@@ -1162,6 +1285,9 @@ export default function StoreOrders() {
                                                     Guest
                                                 </span>
                                             )}
+                                            <span className={`text-xs px-2 py-0.5 rounded-full w-fit font-semibold ${getOrderSourceLabel(order) === 'APP' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-700'}`}>
+                                                {getOrderSourceLabel(order)}
+                                            </span>
                                         </div>
                                     </td>
                                     <td className="px-4 py-3">
@@ -1218,9 +1344,21 @@ export default function StoreOrders() {
                                             );
                                         })()}
                                     </td>
-                                                                        <td className="px-4 py-3 font-bold text-orange-600">
-                                                                            {latestTrackingStatus ? latestTrackingStatus : (needToPick ? 'Yes' : '')}
-                                                                        </td>
+                                    <td className="px-4 py-3">
+                                        {(() => {
+                                            const status = awbStatus[order._id];
+                                            if (!status || !status.generated) {
+                                                return <span className="text-slate-400 text-xs">—</span>;
+                                            }
+                                            if (status.downloaded) {
+                                                return <span className="bg-green-100 text-green-700 text-xs px-2 py-1 rounded-full font-medium">✓ Downloaded</span>;
+                                            }
+                                            return <span className="bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded-full font-medium">📄 Generated</span>;
+                                        })()}
+                                    </td>
+                                    <td className="px-4 py-3 font-bold text-orange-600">
+                                        {latestTrackingStatus ? latestTrackingStatus : (needToPick ? 'Yes' : '')}
+                                    </td>
                                     <td className="px-4 py-3">
                                         {order.trackingId ? (
                                             <span className="bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded-full font-medium">
@@ -1246,7 +1384,7 @@ export default function StoreOrders() {
                             <div className="flex justify-between items-center">
                                 <div>
                                     <h2 className="text-2xl font-bold mb-1">Order Details</h2>
-                                    <p className="text-blue-100 text-xs">Order ID: {String(selectedOrder._id).slice(0, 8).toUpperCase()} &nbsp;|&nbsp; Order No: <span className='font-mono text-white'>{selectedOrder.shortOrderNumber || selectedOrder._id.slice(0, 8)}</span></p>
+                                    <p className="text-blue-100 text-xs">Order No: <span className='font-mono text-white'>{getDisplayOrderNumber(selectedOrder)}</span></p>
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <button
@@ -1258,6 +1396,91 @@ export default function StoreOrders() {
                                         <span className="text-sm">Download</span>
                                     </button>
                                     <button
+                                        onClick={async () => {
+                                            try {
+                                                setGeneratingAwb(true)
+                                                // Always try to load latest store details so logo/return address stay correct.
+                                                let storeData = {}
+                                                const storeId = selectedOrder.storeId || selectedOrder.store || selectedOrder.sellerId || (selectedOrder.store && selectedOrder.store._id)
+                                                if (storeId) {
+                                                    const token = await getToken(true)
+                                                    const { data } = await axios.get(`/api/store/${storeId}`, {
+                                                        headers: { Authorization: `Bearer ${token}` }
+                                                    })
+                                                    storeData = data?.store || {}
+
+                                                    if (!storeContracts || storeContracts.length === 0) {
+                                                        let contracts = data?.store?.contractIds || []
+                                                        // If no contracts in DB, show sample contracts for testing
+                                                        if (!contracts || contracts.length === 0) {
+                                                            contracts = [
+                                                                { key: 'contract_1', label: 'BUSINESS_PARCEL', id: '41250721' },
+                                                                { key: 'contract_2', label: 'Normal', id: '41431600' },
+                                                                { key: 'contract_3', label: 'speed post', id: '41853808' }
+                                                            ]
+                                                        }
+                                                        setStoreContracts(contracts)
+                                                    }
+                                                }
+                                                // Build AWB details form
+                                                const awbDetails = {
+                                                    awbNumber: selectedOrder.trackingId || selectedOrder._id,
+                                                    orderId: getDisplayOrderNumber(selectedOrder),
+                                                    courier: selectedOrder.courier || '',
+                                                    date: new Date().toLocaleDateString(),
+                                                    senderName: resolveSellerName(selectedOrder, storeData),
+                                                    senderAddress: DEFAULT_SELLER_ADDRESS,
+                                                    senderPhone: '',
+                                                    receiverName: (selectedOrder.shippingAddress && selectedOrder.shippingAddress.name) || selectedOrder.guestName || '',
+                                                    receiverAddress: selectedOrder.shippingAddress ? [selectedOrder.shippingAddress.street, selectedOrder.shippingAddress.city, selectedOrder.shippingAddress.state, selectedOrder.shippingAddress.zip].filter(Boolean).join(', ') : '',
+                                                    receiverPhone: selectedOrder.shippingAddress?.phone || '',
+                                                    receiverPin: selectedOrder.shippingAddress?.zip || selectedOrder.shippingAddress?.pincode || '',
+                                                    contents: (selectedOrder.orderItems || []).map(i => `${i.quantity || 1} x ${(i.name || i.product?.name || '').substring(0,40)}`).join('; '),
+                                                    weight: Math.max(1, Math.ceil((selectedOrder.total || 0) / 100)),
+                                                    dimensions: (awbManifestData.dimensions || []).map(d => `${d.length_cm}x${d.width_cm}x${d.height_cm} cm`).join('; '),
+                                                    price: selectedOrder.total || selectedOrder.amount || '',
+                                                    shippingCharge: Number(selectedOrder.shippingFee ?? selectedOrder.shipping ?? selectedOrder.deliveryCharge ?? 0),
+                                                    paymentMethod: selectedOrder.paymentMethod || selectedOrder.payment_method || '',
+                                                    orderItems: (selectedOrder.orderItems || []).map(item => ({
+                                                        ...item,
+                                                        image: resolveOrderItemImage(item)
+                                                    })),
+                                                    storeLogo: storeData.logo || selectedOrder.storeLogo || selectedOrder.logo || '/logo/logo1.png',
+                                                    returnAddress: resolveReturnAddress(selectedOrder, storeData),
+                                                    customerId: selectedOrder.customerId || selectedOrder.userId || '',
+                                                    gst: storeData.gst || selectedOrder.gst || DEFAULT_GST,
+                                                    contractId: '',
+                                                    contractLabel: '',
+                                                    paymentType: (selectedOrder.paymentMethod || '').toUpperCase().includes('COD') ? 'COD' : 'Prepaid'
+                                                }
+                                                setAwbFormDetails(awbDetails)
+                                                setSelectedContract(null)
+                                                setAwbFormPreviewUrl('')
+                                                setAwbFormPreviewDoc(null)
+                                                
+                                                // Reset weight & dimensions form
+                                                setUseManualWeight(false)
+                                                setManualWeight('')
+                                                setPackageLength('10')
+                                                setPackageWidth('20')
+                                                setPackageHeight('20')
+                                                setAwbFormErrors({})
+                                                
+                                                setShowAwbGenerateModal(true)
+                                            } catch (err) {
+                                                console.error('Generate AWB error', err)
+                                                toast.error('Failed to open AWB form')
+                                            } finally {
+                                                setGeneratingAwb(false)
+                                            }
+                                        }}
+                                        className="flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors backdrop-blur-sm"
+                                        title="Generate AWB"
+                                    >
+                                        <Download size={18} />
+                                        <span className="text-sm">Generate AWB</span>
+                                    </button>
+                                    <button
                                         onClick={() => printInvoice(selectedOrder)}
                                         className="flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors backdrop-blur-sm"
                                         title="Print Invoice"
@@ -1265,58 +1488,6 @@ export default function StoreOrders() {
                                         <Printer size={18} />
                                         <span className="text-sm">Print</span>
                                     </button>
-                                    <button
-                                        onClick={() => {
-                                            const awbNumber = selectedOrder.trackingId || trackingData.trackingId;
-                                            if (!awbNumber) {
-                                                toast.error('Generate or add AWB number first!');
-                                                return;
-                                            }
-                                            downloadAwbBill({
-                                                awbNumber: awbNumber,
-                                                orderId: selectedOrder._id,
-                                                courier: selectedOrder.courier || 'Delhivery',
-                                                date: selectedOrder.createdAt,
-                                                senderName: process.env.NEXT_PUBLIC_INVOICE_COMPANY_NAME || 'Qui',
-                                                senderAddress: `${process.env.NEXT_PUBLIC_INVOICE_ADDRESS_LINE1 || ''}, ${process.env.NEXT_PUBLIC_INVOICE_ADDRESS_LINE2 || ''}`,
-                                                senderPhone: process.env.NEXT_PUBLIC_INVOICE_CONTACT || '',
-                                                receiverName: selectedOrder.shippingAddress?.name,
-                                                receiverAddress: `${selectedOrder.shippingAddress?.street}, ${selectedOrder.shippingAddress?.city}, ${selectedOrder.shippingAddress?.state}, ${selectedOrder.shippingAddress?.zip}, ${selectedOrder.shippingAddress?.country}`,
-                                                receiverPhone: (() => {
-                                                    const primary = [selectedOrder.shippingAddress?.phoneCode, selectedOrder.shippingAddress?.phone].filter(Boolean).join(' ');
-                                                    const alt = selectedOrder.shippingAddress?.alternatePhone
-                                                        ? [selectedOrder.shippingAddress?.alternatePhoneCode || selectedOrder.shippingAddress?.phoneCode, selectedOrder.shippingAddress.alternatePhone].filter(Boolean).join(' ')
-                                                        : '';
-                                                    return alt ? `${primary} / ${alt}` : primary;
-                                                })(),
-                                                weight: selectedOrder.weight || '',
-                                                dimensions: selectedOrder.dimensions || '',
-                                                contents: selectedOrder.orderItems?.map(i => i.product?.name).join(', '),
-                                                pdfSize: 'a5' // Pass A5 size for AWB
-                                            });
-                                        }}
-                                        className="flex items-center gap-2 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-lg transition-colors shadow backdrop-blur-sm"
-                                        title="Download AWB Bill"
-                                    >
-                                        <Download size={18} />
-                                        <span className="text-sm">AWB Bill</span>
-                                    </button>
-                                    {/* Send to Delhivery button - only show if not sent yet */}
-                                    {!selectedOrder.sentToDelhivery && (
-                                        <button
-                                            onClick={sendOrderToDelhivery}
-                                            disabled={sendingToDelhivery}
-                                            className="flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition-colors shadow backdrop-blur-sm disabled:opacity-60"
-                                            title="Send Order to Delhivery"
-                                        >
-                                            {sendingToDelhivery ? (
-                                                <span className="animate-spin">⚙️</span>
-                                            ) : (
-                                                <Truck size={18} />
-                                            )}
-                                            <span className="text-sm">Send to Delhivery</span>
-                                        </button>
-                                    )}
                                     <button onClick={closeModal} className="p-2 hover:bg-white/20 rounded-full transition-colors">
                                         <X size={24} />
                                     </button>
@@ -1422,6 +1593,7 @@ export default function StoreOrders() {
                                                 )}
                                             </div>
                                         )}
+
                                     </div>
                                 ) : null}
 
@@ -2030,6 +2202,433 @@ export default function StoreOrders() {
                     </div>
                 </div>
             )}
+
+            {/* New AWB Generation Form Modal */}
+            {showAwbGenerateModal && selectedOrder && (
+                <div onClick={() => {
+                    setUseManualWeight(false)
+                    setManualWeight('')
+                    setPackageLength('10')
+                    setPackageWidth('20')
+                    setPackageHeight('20')
+                    setAwbFormErrors({})
+                    setShowAwbGenerateModal(false)
+                }} className="fixed inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm z-[60] p-4">
+                    <div onClick={e => e.stopPropagation()} className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                        {/* Header */}
+                        <div className="sticky top-0 bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-6 rounded-t-2xl flex justify-between items-center">
+                            <h2 className="text-2xl font-bold">Generate AWB</h2>
+                            <button onClick={() => {
+                                setUseManualWeight(false)
+                                setManualWeight('')
+                                setPackageLength('10')
+                                setPackageWidth('20')
+                                setPackageHeight('20')
+                                setAwbFormErrors({})
+                                setShowAwbGenerateModal(false)
+                            }} className="p-2 hover:bg-white/20 rounded-full">
+                                <X size={24} />
+                            </button>
+                        </div>
+
+                        <div className="p-6 space-y-6">
+                            {/* AWB Details Preview */}
+                            <div className="bg-gray-50 border border-gray-200 rounded-xl p-5">
+                                <h3 className="font-bold text-lg mb-4 text-slate-900">Order & Shipment Details</h3>
+                                <div className="grid grid-cols-2 gap-4 text-sm">
+                                    <div>
+                                        <p className="text-xs text-slate-600">Order ID</p>
+                                        <p className="font-semibold">{awbFormDetails.orderId}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-slate-600">Date</p>
+                                        <p className="font-semibold">{awbFormDetails.date}</p>
+                                    </div>
+                                    <div className="col-span-2">
+                                        <p className="text-xs text-slate-600 mb-1">📍 From (Seller Address)</p>
+                                        <p className="font-semibold text-slate-900">{awbFormDetails.senderName}</p>
+                                        <p className="text-xs text-slate-700 whitespace-pre-line">{awbFormDetails.senderAddress}</p>
+                                    </div>
+                                    <div className="col-span-2">
+                                        <p className="text-xs text-slate-600 mb-1">📍 To (Buyer Address)</p>
+                                        <p className="font-semibold text-slate-900">{awbFormDetails.receiverName}</p>
+                                        <p className="text-xs text-slate-700">{awbFormDetails.receiverAddress}</p>
+                                        <p className="text-xs text-slate-600">{awbFormDetails.receiverPhone}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-slate-600">Weight (g)</p>
+                                        <p className="font-semibold">{awbFormDetails.weight}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-slate-600">Total Amount</p>
+                                        <p className="font-semibold">₹{awbFormDetails.price}</p>
+                                    </div>
+                                    <div className="col-span-2">
+                                        <p className="text-xs text-slate-600 mb-1">📦 Product Details</p>
+                                        <div className="bg-white border rounded-lg p-3 max-h-56 overflow-y-auto">
+                                            {awbFormDetails.orderItems && awbFormDetails.orderItems.length > 0 ? (
+                                                <div className="space-y-4">
+                                                    {awbFormDetails.orderItems.map((item, idx) => (
+                                                        <div key={idx} className="border-b pb-3 last:border-b-0 flex gap-3">
+                                                            {/* Product Image */}
+                                                            <div className="flex-shrink-0">
+                                                                <img 
+                                                                    src={getImageSrc(item.image || item.product?.image || item.productId?.image || item.product?.images?.[0] || item.productId?.images?.[0])} 
+                                                                    alt={item.name || item.product?.name}
+                                                                    className="w-16 h-16 object-cover rounded-lg border"
+                                                                />
+                                                            </div>
+                                                            {/* Product Info */}
+                                                            <div className="flex-1 min-w-0">
+                                                                <p className="font-semibold text-slate-900 truncate">{item.name || item.product?.name || 'Product'}</p>
+                                                                {item.sku && <p className="text-xs text-slate-600">SKU: {item.sku}</p>}
+                                                                <p className="text-xs text-slate-600">Qty: {item.quantity || 1}</p>
+                                                                <p className="text-xs text-slate-600">Price: ₹{item.price || item.product?.price || '0'} each</p>
+                                                                <p className="text-xs font-semibold text-slate-700 mt-1">Subtotal: ₹{((item.quantity || 1) * (item.price || item.product?.price || 0)).toFixed(2)}</p>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <p className="text-xs text-slate-600">{awbFormDetails.contents || 'No items'}</p>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="col-span-2">
+                                        <p className="text-xs text-slate-600 mb-1">📍 Return Address</p>
+                                        <p className="text-xs text-slate-700 bg-red-50 border border-red-200 rounded-lg p-2">{awbFormDetails.returnAddress || 'Store return address not set'}</p>
+                                    </div>
+                                    <div className="col-span-2">
+                                        <p className="text-xs text-slate-600 mb-1">💳 Payment Method</p>
+                                        <p className="text-sm font-bold px-3 py-2 rounded-lg inline-block" style={{backgroundColor: awbFormDetails.paymentType === 'COD' ? '#fef3c7' : '#d1fae5', color: awbFormDetails.paymentType === 'COD' ? '#92400e' : '#065f46'}}>
+                                            {awbFormDetails.paymentType === 'COD' ? '💵 COD - Surface' : '💳 Prepaid'}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* ⭐ WEIGHT & DIMENSIONS INPUT SECTION ⭐ */}
+                            <div className="bg-gradient-to-br from-amber-50 to-orange-50 border-2 border-amber-200 rounded-xl p-5">
+                                <div className="flex items-center gap-2 mb-4">
+                                    <div className="w-8 h-8 bg-amber-600 rounded-lg flex items-center justify-center text-white font-bold">📦</div>
+                                    <h3 className="font-bold text-lg text-slate-900">Package Weight & Dimensions <span className="text-red-600">*</span></h3>
+                                </div>
+
+                                {/* WEIGHT WITH TOGGLE */}
+                                <div className="mb-5 pb-5 border-b border-amber-200">
+                                    <div className="flex items-center justify-between mb-3">
+                                        <label className="font-semibold text-slate-900">Weight (grams)</label>
+                                        <label className="flex items-center gap-2 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={useManualWeight}
+                                                onChange={(e) => {
+                                                    setUseManualWeight(e.target.checked);
+                                                    if (!e.target.checked) setManualWeight('');
+                                                    setAwbFormErrors(prev => ({ ...prev, weight: '' }));
+                                                }}
+                                                className="w-4 h-4"
+                                            />
+                                            <span className="text-sm text-slate-700">Use Custom Weight</span>
+                                        </label>
+                                    </div>
+
+                                    {!useManualWeight ? (
+                                        <div className="bg-white border-2 border-amber-300 rounded-lg p-3">
+                                            <p className="text-lg font-bold text-slate-900">500g</p>
+                                            <p className="text-xs text-slate-600 mt-1">📌 Default weight — check above to customise</p>
+                                        </div>
+                                    ) : (
+                                        <div>
+                                            <input
+                                                type="number"
+                                                min="1"
+                                                max="35000"
+                                                value={manualWeight}
+                                                onChange={(e) => {
+                                                    setManualWeight(e.target.value);
+                                                    setAwbFormErrors(prev => ({ ...prev, weight: '' }));
+                                                }}
+                                                placeholder="Enter custom weight in grams"
+                                                className="w-full px-4 py-2 border-2 border-blue-400 rounded-lg focus:outline-none focus:border-blue-600 bg-blue-50"
+                                            />
+                                            <p className="text-xs text-slate-600 mt-2">✏️ Editing custom weight</p>
+                                        </div>
+                                    )}
+                                    {awbFormErrors.weight && <p className="text-red-600 text-sm mt-2">{awbFormErrors.weight}</p>}
+                                </div>
+
+                                {/* DIMENSIONS GRID */}
+                                <div>
+                                    <h4 className="font-semibold text-slate-900 mb-3">Dimensions</h4>
+                                    <div className="grid grid-cols-3 gap-3">
+                                        {/* LENGTH */}
+                                        <div>
+                                            <label className="text-sm font-semibold text-slate-700 block mb-2">Length (cm)</label>
+                                            <input
+                                                type="number"
+                                                min="1"
+                                                max="300"
+                                                step="0.1"
+                                                value={packageLength}
+                                                onChange={(e) => {
+                                                    setPackageLength(e.target.value);
+                                                    setAwbFormErrors(prev => ({ ...prev, length: '' }));
+                                                }}
+                                                placeholder="e.g., 30"
+                                                className="w-full px-3 py-2 border-2 border-blue-400 rounded-lg focus:outline-none focus:border-blue-600 bg-blue-50"
+                                            />
+                                            {awbFormErrors.length && <p className="text-red-600 text-xs mt-1">{awbFormErrors.length}</p>}
+                                        </div>
+
+                                        {/* WIDTH */}
+                                        <div>
+                                            <label className="text-sm font-semibold text-slate-700 block mb-2">Width (cm)</label>
+                                            <input
+                                                type="number"
+                                                min="1"
+                                                max="300"
+                                                step="0.1"
+                                                value={packageWidth}
+                                                onChange={(e) => {
+                                                    setPackageWidth(e.target.value);
+                                                    setAwbFormErrors(prev => ({ ...prev, width: '' }));
+                                                }}
+                                                placeholder="e.g., 20"
+                                                className="w-full px-3 py-2 border-2 border-blue-400 rounded-lg focus:outline-none focus:border-blue-600 bg-blue-50"
+                                            />
+                                            {awbFormErrors.width && <p className="text-red-600 text-xs mt-1">{awbFormErrors.width}</p>}
+                                        </div>
+
+                                        {/* HEIGHT */}
+                                        <div>
+                                            <label className="text-sm font-semibold text-slate-700 block mb-2">Height (cm)</label>
+                                            <input
+                                                type="number"
+                                                min="1"
+                                                max="300"
+                                                step="0.1"
+                                                value={packageHeight}
+                                                onChange={(e) => {
+                                                    setPackageHeight(e.target.value);
+                                                    setAwbFormErrors(prev => ({ ...prev, height: '' }));
+                                                }}
+                                                placeholder="e.g., 10"
+                                                className="w-full px-3 py-2 border-2 border-blue-400 rounded-lg focus:outline-none focus:border-blue-600 bg-blue-50"
+                                            />
+                                            {awbFormErrors.height && <p className="text-red-600 text-xs mt-1">{awbFormErrors.height}</p>}
+                                        </div>
+                                    </div>
+
+                                    {/* VOLUMETRIC WEIGHT INFO */}
+                                    {packageLength && packageWidth && packageHeight && (
+                                        <div className="mt-4 bg-blue-100 border-l-4 border-blue-600 rounded-lg p-3">
+                                            <p className="text-sm font-semibold text-slate-900">📊 Volumetric Weight:</p>
+                                            <p className="text-sm text-slate-800 mt-1">
+                                                ({packageLength} × {packageWidth} × {packageHeight}) ÷ 5000 = <strong>{(packageLength * packageWidth * packageHeight / 5000).toFixed(2)} kg</strong>
+                                            </p>
+                                            <p className="text-xs text-slate-700 mt-2">💡 <strong>Charged weight = max(actual, volumetric)</strong></p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-xl p-5">
+                                <div className="flex items-center gap-2 mb-4">
+                                    <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold">🏢</div>
+                                    <h3 className="font-bold text-lg text-slate-900">Select Contract ID <span className="text-red-600">*</span> (Required)</h3>
+                                </div>
+                                <p className="text-xs text-slate-600 mb-4">Choose which contract applies to this shipment:</p>
+                                <div className="space-y-3">
+                                    {storeContracts && storeContracts.length > 0 ? (
+                                        storeContracts.map(c => (
+                                            <label key={c.key} className="flex items-center p-4 border-2 rounded-lg cursor-pointer transition-all" 
+                                                style={{borderColor: selectedContract?.key === c.key ? '#3b82f6' : '#e5e7eb', backgroundColor: selectedContract?.key === c.key ? '#eff6ff' : '#ffffff'}}>
+                                                <input
+                                                    type="radio"
+                                                    name="awb-contract"
+                                                    value={c.key}
+                                                    checked={selectedContract?.key === c.key}
+                                                    onChange={() => setSelectedContract(c)}
+                                                    className="w-5 h-5 text-blue-600 cursor-pointer"
+                                                />
+                                                <div className="ml-4 flex-1">
+                                                    <p className="font-bold text-slate-900">{c.label || c.key}</p>
+                                                    <p className="text-sm text-slate-600 font-mono">ID: {c.id}</p>
+                                                </div>
+                                                {selectedContract?.key === c.key && (
+                                                    <span className="text-blue-600 font-bold text-lg">✓</span>
+                                                )}
+                                            </label>
+                                        ))
+                                    ) : (
+                                        <p className="text-slate-600 text-sm">No contracts available</p>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Preview & Download buttons */}
+                            <div className="flex gap-3 pt-4 border-t">
+                                <button
+                                    onClick={async () => {
+                                        // VALIDATION: Check weight & dimensions
+                                        const errors = {};
+                                        const effectiveWeight = useManualWeight ? manualWeight : 500;
+                                        
+                                        if (!effectiveWeight || effectiveWeight <= 0) {
+                                            errors.weight = 'Weight must be greater than 0 grams';
+                                        }
+                                        if (effectiveWeight > 35000) {
+                                            errors.weight = 'Weight must not exceed 35,000 grams (35 kg)';
+                                        }
+                                        
+                                        if (!packageLength || packageLength <= 0) {
+                                            errors.length = 'Length is required';
+                                        } else if (packageLength > 300) {
+                                            errors.length = 'Length max 300 cm';
+                                        }
+                                        
+                                        if (!packageWidth || packageWidth <= 0) {
+                                            errors.width = 'Width is required';
+                                        } else if (packageWidth > 300) {
+                                            errors.width = 'Width max 300 cm';
+                                        }
+                                        
+                                        if (!packageHeight || packageHeight <= 0) {
+                                            errors.height = 'Height is required';
+                                        } else if (packageHeight > 300) {
+                                            errors.height = 'Height max 300 cm';
+                                        }
+                                        
+                                        if (!selectedContract) {
+                                            errors.contract = 'Please select a contract first';
+                                        }
+                                        
+                                        // Show errors if any
+                                        if (Object.keys(errors).length > 0) {
+                                            setAwbFormErrors(errors);
+                                            if (errors.contract) {
+                                                toast.error(errors.contract);
+                                            } else {
+                                                toast.error('Please fill in all required fields correctly');
+                                            }
+                                            return;
+                                        }
+                                        
+                                        // Clear errors
+                                        setAwbFormErrors({});
+                                        
+                                        try {
+                                            setAwbPreviewGenerating(true)
+                                            const detailsWithContract = {
+                                                ...awbFormDetails,
+                                                contractId: selectedContract.id,
+                                                contractLabel: selectedContract.label,
+                                                weight: useManualWeight ? parseInt(manualWeight) : 500,
+                                                isManualWeight: useManualWeight,
+                                                dimensions: {
+                                                    length: parseFloat(packageLength),
+                                                    width: parseFloat(packageWidth),
+                                                    height: parseFloat(packageHeight)
+                                                }
+                                            }
+                                            const doc = generateAwbBill(detailsWithContract)
+                                            const blob = doc.output('blob')
+                                            const url = URL.createObjectURL(blob)
+                                            setAwbFormPreviewDoc(doc)
+                                            setAwbFormPreviewUrl(url)
+                                            // Mark AWB as generated for this order
+                                            setAwbStatus(prev => ({
+                                                ...prev,
+                                                [selectedOrder._id]: { ...prev[selectedOrder._id], generated: true }
+                                            }))
+                                            toast.success('AWB preview generated')
+                                        } catch (err) {
+                                            console.error('AWB generation error', err)
+                                            toast.error('Failed to generate AWB')
+                                        } finally {
+                                            setAwbPreviewGenerating(false)
+                                        }
+                                    }}
+                                    className={`flex-1 px-6 py-3 rounded-lg font-semibold transition ${
+                                        awbPreviewGenerating
+                                            ? 'bg-gray-400 text-white cursor-wait'
+                                            : 'bg-blue-600 text-white hover:bg-blue-700'
+                                    }`}
+                                >
+                                    {awbPreviewGenerating ? '⏳ Generating...' : '👁️ Preview AWB'}
+                                </button>
+                                
+                                <button
+                                    onClick={async () => {
+                                        if (!awbFormPreviewDoc) {
+                                            toast.error('Please preview AWB first')
+                                            return
+                                        }
+                                        try {
+                                            awbFormPreviewDoc.save(`AWB_${awbFormDetails.orderId}_${new Date().getTime()}.pdf`)
+                                            // Mark AWB as downloaded for this order
+                                            setAwbStatus(prev => ({
+                                                ...prev,
+                                                [selectedOrder._id]: { ...prev[selectedOrder._id], generated: true, downloaded: true }
+                                            }))
+                                            toast.success('AWB downloaded successfully')
+                                            
+                                            // Reset form and close
+                                            setUseManualWeight(false)
+                                            setManualWeight('')
+                                            setPackageLength('10')
+                                            setPackageWidth('20')
+                                            setPackageHeight('20')
+                                            setAwbFormErrors({})
+                                            setShowAwbGenerateModal(false)
+                                        } catch (err) {
+                                            console.error('Download error', err)
+                                            toast.error('Failed to download AWB')
+                                        }
+                                    }}
+                                    disabled={!awbFormPreviewDoc}
+                                    className={`flex-1 px-6 py-3 rounded-lg font-semibold transition ${
+                                        !awbFormPreviewDoc
+                                            ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
+                                            : 'bg-green-600 text-white hover:bg-green-700'
+                                    }`}
+                                >
+                                    {!awbFormPreviewDoc ? '⬇️ Download (preview first)' : '⬇️ Download AWB'}
+                                </button>
+
+                                <button
+                                    onClick={() => {
+                                        // Reset form and close
+                                        setUseManualWeight(false)
+                                        setManualWeight('')
+                                        setPackageLength('10')
+                                        setPackageWidth('20')
+                                        setPackageHeight('20')
+                                        setAwbFormErrors({})
+                                        setShowAwbGenerateModal(false)
+                                    }}
+                                    className="px-6 py-3 bg-gray-300 text-slate-700 rounded-lg font-semibold hover:bg-gray-400 transition"
+                                >
+                                    Close
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* AWB PDF Preview in iframe if available */}
+                        {awbFormPreviewUrl && (
+                            <div className="border-t p-6">
+                                <h3 className="font-bold text-lg mb-3 text-slate-900">📄 AWB Preview</h3>
+                                <iframe
+                                    src={awbFormPreviewUrl}
+                                    className="w-full h-96 border rounded-lg"
+                                    title="AWB Preview"
+                                />
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
         </>
     );
 }
+

@@ -78,7 +78,7 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
         const [variants, setVariants] = useState([]);
         const [images, setImages] = useState({ "1": null, "2": null, "3": null, "4": null, "5": null, "6": null, "7": null, "8": null });
         const [productInfo, setProductInfo] = useState({
-            name: '', slug: '', brand: '', shortDescription: '', description: '', metaTitle: '', metaDescription: '', seoKeywords: [], mrp: '', price: '', category: '', sku: '', stockQuantity: 0, colors: [], sizes: [], fastDelivery: false, allowReturn: true, allowReplacement: true, reviews: [], badges: [], imageAspectRatio: '1:1', tags: [], deliveredBy: '', soldBy: '', paymentInfo: ''
+            name: '', slug: '', brand: '', shortDescription: '', description: '', metaTitle: '', metaDescription: '', seoKeywords: [], mrp: '', price: '', category: '', sku: '', stockQuantity: 0, colors: [], sizes: [], fastDelivery: false, allowReturn: true, allowReplacement: true, reviews: [], badges: [], imageAspectRatio: '1:1', tags: [], deliveredBy: '', soldBy: '', paymentInfo: '', mobileSpecsEnabled: false, mobileSpecs: []
         });
         const [tagInput, setTagInput] = useState('');
         const [seoKeywordInput, setSeoKeywordInput] = useState('');
@@ -300,7 +300,14 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                 imageAspectRatio: product.imageAspectRatio || '1:1',
                 deliveredBy: product.attributes?.deliveredBy || '',
                 soldBy: product.attributes?.soldBy || '',
-                paymentInfo: product.attributes?.paymentInfo || ''
+                paymentInfo: product.attributes?.paymentInfo || '',
+                mobileSpecsEnabled: Boolean(product.mobileSpecsEnabled),
+                mobileSpecs: Array.isArray(product.mobileSpecs)
+                    ? product.mobileSpecs.map((spec) => ({
+                        label: String(spec?.label || ''),
+                        value: String(spec?.value || '')
+                    }))
+                    : []
             })
             // Set selected categories from product data - debug and handle all cases
             console.log('Product data for categories:', { 
@@ -411,6 +418,28 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
         });
     }
 
+    const addMobileSpec = () => {
+        setProductInfo((prev) => ({
+            ...prev,
+            mobileSpecs: [...(Array.isArray(prev.mobileSpecs) ? prev.mobileSpecs : []), { label: '', value: '' }]
+        }));
+    }
+
+    const updateMobileSpec = (index, field, value) => {
+        setProductInfo((prev) => {
+            const currentSpecs = Array.isArray(prev.mobileSpecs) ? [...prev.mobileSpecs] : [];
+            currentSpecs[index] = { ...(currentSpecs[index] || { label: '', value: '' }), [field]: value };
+            return { ...prev, mobileSpecs: currentSpecs };
+        });
+    }
+
+    const removeMobileSpec = (index) => {
+        setProductInfo((prev) => {
+            const currentSpecs = Array.isArray(prev.mobileSpecs) ? prev.mobileSpecs : [];
+            return { ...prev, mobileSpecs: currentSpecs.filter((_, i) => i !== index) };
+        });
+    }
+
     const handleImageUpload = async (key, file) => {
         const isVideo = file?.type?.startsWith('video/');
         if (isVideo && file.size > 50 * 1024 * 1024) {
@@ -478,7 +507,7 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
             const token = await getToken()
 
             Object.entries(productInfo).forEach(([key, value]) => {
-                if (["colors", "sizes", "seoKeywords"].includes(key)) {
+                if (["colors", "sizes", "seoKeywords", "mobileSpecs"].includes(key)) {
                     formData.append(key, JSON.stringify(value))
                 } else if (key === 'reviews') {
                     const cleanReviews = value.map(({ name, rating, comment }) => ({ name, rating, comment }))
@@ -492,6 +521,16 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                     formData.append(key, value)
                 }
             })
+
+            const cleanedMobileSpecs = (Array.isArray(productInfo.mobileSpecs) ? productInfo.mobileSpecs : [])
+                .map((spec) => ({
+                    label: String(spec?.label || '').trim(),
+                    value: String(spec?.value || '').trim(),
+                }))
+                .filter((spec) => spec.label && spec.value)
+
+            formData.set('mobileSpecs', JSON.stringify(cleanedMobileSpecs))
+            formData.set('mobileSpecsEnabled', String(Boolean(productInfo.mobileSpecsEnabled)))
 
             // Add selected categories - this is the ONLY source of category data
             formData.append('categories', JSON.stringify(selectedCategories))
@@ -942,6 +981,60 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                         ))}
                     </div>
                     <p className="text-xs text-gray-500">Select badges to display on the product page</p>
+                </div>
+
+                <div className="border rounded-lg p-4 bg-slate-50 space-y-3">
+                    <label className="inline-flex items-center gap-2">
+                        <input
+                            type="checkbox"
+                            checked={Boolean(productInfo.mobileSpecsEnabled)}
+                            onChange={(e) => setProductInfo((prev) => ({ ...prev, mobileSpecsEnabled: e.target.checked }))}
+                            className="accent-indigo-600"
+                        />
+                        <span className="font-medium text-slate-800">Enable Mobile Specs Table</span>
+                    </label>
+
+                    {productInfo.mobileSpecsEnabled && (
+                        <div className="space-y-3">
+                            <p className="text-xs text-slate-600">Add specification rows for mobile products (for example: Display, RAM, Battery, Camera).</p>
+
+                            <div className="space-y-2">
+                                {(Array.isArray(productInfo.mobileSpecs) ? productInfo.mobileSpecs : []).map((spec, index) => (
+                                    <div key={index} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-2 items-center">
+                                        <input
+                                            type="text"
+                                            value={spec?.label || ''}
+                                            onChange={(e) => updateMobileSpec(index, 'label', e.target.value)}
+                                            placeholder="Spec name (e.g., Display)"
+                                            className="w-full border rounded px-3 py-2"
+                                        />
+                                        <input
+                                            type="text"
+                                            value={spec?.value || ''}
+                                            onChange={(e) => updateMobileSpec(index, 'value', e.target.value)}
+                                            placeholder="Spec value (e.g., 6.7-inch AMOLED)"
+                                            className="w-full border rounded px-3 py-2"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => removeMobileSpec(index)}
+                                            className="px-3 py-2 rounded bg-red-100 text-red-700 hover:bg-red-200"
+                                        >
+                                            Remove
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <button
+                                type="button"
+                                onClick={addMobileSpec}
+                                className="px-4 py-2 rounded bg-indigo-600 text-white hover:bg-indigo-700"
+                            >
+                                + Add Spec Row
+                            </button>
+                        </div>
+                    )}
                 </div>
 
                 <div>

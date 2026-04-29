@@ -30,6 +30,7 @@ const OrderSchema = new mongoose.Schema({
   shippingFee: { type: Number, default: 0 },
   status: { type: String, default: "ORDER_PLACED", index: true },
   paymentMethod: String,
+  orderSource: { type: String, enum: ['WEB', 'APP'], default: 'WEB', index: true },
   paymentStatus: String,
   isPaid: { type: Boolean, default: false },
   isCouponUsed: { type: Boolean, default: false },

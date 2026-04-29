@@ -216,7 +216,7 @@ const HorizontalSlider = ({ section, router, allProducts }) => {
       {/* Section Header */}
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h2 className="text-xl sm:text-2xl font-bold text-gray-900">
+          <h2 className="text-xl sm:text-2xl font-semibold text-black">
             {section.title || section.category}
           </h2>
           {section.subtitle && (

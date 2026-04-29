@@ -12,9 +12,19 @@ import Coupon from '@/models/Coupon';
 import GuestUser from '@/models/GuestUser';
 import Wallet from '@/models/Wallet';
 import PersonalizedOffer from '@/models/PersonalizedOffer';
+import OrderCounter from '@/models/OrderCounter';
 import { sendOrderConfirmationEmail, sendGuestAccountCreationEmail } from '@/lib/email';
 import { fetchNormalizedDelhiveryTracking } from '@/lib/delhivery';
 import { getAuth } from '@/lib/firebase-admin';
+
+const ORDER_NUMBER_SEQUENCE_KEY = 'short_order_number';
+const ORDER_NUMBER_START = 55234;
+
+function hasValidShortOrderNumber(value) {
+    if (value === null || value === undefined) return false;
+    const normalized = String(value).trim();
+    return /^\d{5,6}$/.test(normalized) && Number(normalized) >= ORDER_NUMBER_START;
+}
 
 const PaymentMethod = {
     COD: 'COD',
@@ -23,6 +33,68 @@ const PaymentMethod = {
     RAZORPAY: 'RAZORPAY',
     WALLET: 'WALLET'
 };
+
+async function getNextShortOrderNumber() {
+    // 1) Fast path: increment existing counter atomically.
+    const incremented = await OrderCounter.findOneAndUpdate(
+        { key: ORDER_NUMBER_SEQUENCE_KEY },
+        { $inc: { value: 1 } },
+        { new: true }
+    );
+
+    if (incremented) {
+        return Number(incremented.value);
+    }
+
+    // 2) Initialize sequence only once. If another request initializes first,
+    // fall back to incrementing the newly created document.
+    try {
+        const created = await OrderCounter.create({
+            key: ORDER_NUMBER_SEQUENCE_KEY,
+            value: ORDER_NUMBER_START,
+        });
+        return Number(created.value);
+    } catch (error) {
+        if (error?.code === 11000) {
+            const retried = await OrderCounter.findOneAndUpdate(
+                { key: ORDER_NUMBER_SEQUENCE_KEY },
+                { $inc: { value: 1 } },
+                { new: true }
+            );
+            if (retried) return Number(retried.value);
+        }
+        throw error;
+    }
+}
+
+function normalizeOrderSource(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (!normalized) return null;
+    if (['app', 'mobile', 'android', 'ios', 'react-native', 'reactnative'].includes(normalized)) return 'APP';
+    if (['web', 'website', 'browser'].includes(normalized)) return 'WEB';
+    return null;
+}
+
+function inferOrderSource(request, body = {}) {
+    const explicitSource =
+        normalizeOrderSource(body?.orderSource) ||
+        normalizeOrderSource(body?.source) ||
+        normalizeOrderSource(body?.platform) ||
+        normalizeOrderSource(request.headers.get('x-order-source')) ||
+        normalizeOrderSource(request.headers.get('x-client-platform')) ||
+        normalizeOrderSource(request.headers.get('x-platform')) ||
+        normalizeOrderSource(request.headers.get('x-app-source'));
+
+    if (explicitSource) return explicitSource;
+
+    const userAgent = String(request.headers.get('user-agent') || '').toLowerCase();
+    const appSignatures = ['okhttp', 'cfnetwork', 'dalvik', 'reactnative', 'react-native', 'expo'];
+    if (appSignatures.some((signature) => userAgent.includes(signature))) {
+        return 'APP';
+    }
+
+    return 'WEB';
+}
 
 function findMatchingVariantIndex(variants = [], variantOptions = {}) {
     if (!Array.isArray(variants) || variants.length === 0 || !variantOptions) return -1;
@@ -293,6 +365,7 @@ export async function POST(request) {
             razorpaySignature
         } = body;
         let userId = null;
+        const inferredOrderSource = inferOrderSource(request, body);
         let isPlusMember = false;
 
         console.log('ORDER API: Full body:', JSON.stringify(body, null, 2));
@@ -647,6 +720,7 @@ export async function POST(request) {
                 total: parseFloat(total.toFixed(2)),
                 shippingFee: shippingFee,
                 paymentMethod,
+                orderSource: inferredOrderSource,
                 paymentStatus: paymentStatus || 'PENDING',
                 isCouponUsed: !!coupon,
                 coupon: coupon || {},
@@ -809,6 +883,7 @@ export async function POST(request) {
             const reservedInventory = await reserveInventoryForOrderItems(orderData.orderItems || []);
             let order;
             try {
+                orderData.shortOrderNumber = await getNextShortOrderNumber();
                 order = await Order.create(orderData);
             } catch (createOrderError) {
                 await rollbackReservedInventory(reservedInventory);
@@ -990,7 +1065,13 @@ export async function POST(request) {
         return NextResponse.json({ message: 'Orders Placed Successfully', order: createdOrder, id: createdOrder._id.toString(), orderId: createdOrder._id.toString() });
     } catch (error) {
         console.error(error);
-        return NextResponse.json({ error: error.code || error.message }, { status: 400 });
+        const message = typeof error?.message === 'string' && error.message.trim()
+            ? error.message
+            : 'Failed to place order. Please try again.';
+        return NextResponse.json(
+            { error: message, code: error?.code || null },
+            { status: 400 }
+        );
     }
 }
 
@@ -1014,22 +1095,15 @@ export async function GET(request) {
                         path: 'orderItems.productId',
                         model: 'Product'
                     })
-                    .populate('addressId')
-                    .lean();
+                    .populate('addressId');
 
                 if (!order) {
                     console.log('GET /api/orders: Order not found for orderId:', orderId);
                     return NextResponse.json({ error: 'Order not found for the provided orderId.' }, { status: 404 });
                 }
 
-                // Ensure shortOrderNumber exists (for old orders without it)
-                if (!order.shortOrderNumber) {
-                    const hex = order._id.toString().slice(-6);
-                    order.shortOrderNumber = parseInt(hex, 16);
-                }
-
                 console.log('GET /api/orders: Order found, isGuest:', order.isGuest);
-                return NextResponse.json({ order });
+                return NextResponse.json({ order: order.toObject() });
             } catch (err) {
                 console.error('GET /api/orders: Error fetching order:', err, 'orderId:', orderId);
                 return NextResponse.json({ error: 'Invalid orderId format or internal error.' }, { status: 400 });
@@ -1107,15 +1181,12 @@ export async function GET(request) {
         .populate('addressId')
         .sort({ createdAt: -1 })
         .limit(limit)
-        .skip(offset)
-        .lean();
+        .skip(offset);
 
         // Ensure all orders have shortOrderNumber calculated
-        const enrichedOrders = orders.map(order => {
-            if (!order.shortOrderNumber) {
-                const hex = order._id.toString().slice(-6);
-                order.shortOrderNumber = parseInt(hex, 16);
-            }
+        const enrichedOrders = [];
+        for (const orderDoc of orders) {
+            const order = orderDoc.toObject();
 
             const paymentMethod = String(order?.paymentMethod || '').toUpperCase();
             const status = String(order?.status || '').toUpperCase();
@@ -1132,8 +1203,8 @@ export async function GET(request) {
                 }
             }
 
-            return order;
-        });
+            enrichedOrders.push(order);
+        }
 
         return NextResponse.json({ orders: enrichedOrders });
     } catch (error) {

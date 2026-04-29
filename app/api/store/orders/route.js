@@ -2,10 +2,50 @@ import authSeller from "@/middlewares/authSeller";
 import { NextResponse } from "next/server";
 import connectDB from '@/lib/mongodb';
 import Order from '@/models/Order';
+import OrderCounter from '@/models/OrderCounter';
 import Product from '@/models/Product';
 import User from '@/models/User';
 import Address from '@/models/Address';
 import { fetchNormalizedDelhiveryTracking } from '@/lib/delhivery';
+
+const ORDER_NUMBER_SEQUENCE_KEY = 'short_order_number';
+const ORDER_NUMBER_START = 55234;
+
+function hasValidShortOrderNumber(value) {
+    if (value === null || value === undefined) return false;
+    const normalized = String(value).trim();
+    return /^\d{5,6}$/.test(normalized) && Number(normalized) >= ORDER_NUMBER_START;
+}
+
+async function getNextShortOrderNumber() {
+    const incremented = await OrderCounter.findOneAndUpdate(
+        { key: ORDER_NUMBER_SEQUENCE_KEY },
+        { $inc: { value: 1 } },
+        { new: true }
+    );
+
+    if (incremented) {
+        return Number(incremented.value);
+    }
+
+    try {
+        const created = await OrderCounter.create({
+            key: ORDER_NUMBER_SEQUENCE_KEY,
+            value: ORDER_NUMBER_START,
+        });
+        return Number(created.value);
+    } catch (error) {
+        if (error?.code === 11000) {
+            const retried = await OrderCounter.findOneAndUpdate(
+                { key: ORDER_NUMBER_SEQUENCE_KEY },
+                { $inc: { value: 1 } },
+                { new: true }
+            );
+            if (retried) return Number(retried.value);
+        }
+        throw error;
+    }
+}
 
 // Debug log helper
 function debugLog(...args) {
@@ -91,14 +131,16 @@ export async function GET(request){
             return NextResponse.json({ error: 'not authorized' }, { status: 401 })
         }
 
-        const orders = await Order.find({ storeId })
+        const orderDocs = await Order.find({ storeId })
             .populate('addressId')
             .populate({
                 path: 'orderItems.productId',
                 model: 'Product'
             })
             .sort({ createdAt: -1 })
-            .lean();
+            ;
+
+        const orders = orderDocs.map((orderDoc) => orderDoc.toObject());
         
         debugLog('orders found:', orders.length);
         

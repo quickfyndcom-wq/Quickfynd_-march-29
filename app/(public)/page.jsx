@@ -10,9 +10,45 @@ import Hero from "@/components/Hero";
 import HomeCategories from "@/components/HomeCategories";
 import LatestProducts from "@/components/LatestProducts";
 import HeroBannerSlider from "@/components/HeroBannerSlider";
+import MobileBannerSlider from "@/components/MobileBannerSlider";
 import RecentSearchProducts from "@/components/RecentSearchProducts";
 import RecommendedProducts from "@/components/RecommendedProducts";
 import HighDiscountCarousel from "@/components/HighDiscountCarousel";
+
+const MobileDesktopBannerWrapper = () => {
+  const [showFallback, setShowFallback] = useState(false);
+  const [mobileLoaded, setMobileLoaded] = useState(false);
+
+  const handleMobileBannerNoData = () => {
+    console.log('[Banner] Mobile banner has no data, showing desktop banner as fallback on mobile');
+    setShowFallback(true);
+  };
+
+  const handleMobileBannerLoaded = () => {
+    setMobileLoaded(true);
+  };
+
+  return (
+    <>
+      {/* Mobile Banner with Fallback - Only show desktop banner if mobile banner has NO data */}
+      <div className="md:hidden">
+        <MobileBannerSlider 
+          onNoData={handleMobileBannerNoData} 
+          onLoaded={handleMobileBannerLoaded}
+        />
+        {/* Desktop banner fallback - only show if mobile banner loaded but has no data */}
+        {showFallback && mobileLoaded && (
+          <HeroBannerSlider />
+        )}
+      </div>
+
+      {/* Desktop Banner - Always show on desktop only */}
+      <div className="hidden md:block">
+        <HeroBannerSlider />
+      </div>
+    </>
+  );
+};
 
 const BannerSliderSkeleton = () => (
     <div className="max-w-[1280px] mx-auto w-full px-4 py-4">
@@ -88,7 +124,7 @@ export default function Home() {
     return (
         <>
                 {/* <HomeCategories /> */}
-                <HeroBannerSlider/>
+                <MobileDesktopBannerWrapper />
                 {/* <Hero /> */}
                 <LatestProducts />
                                      <HighDiscountCarousel />

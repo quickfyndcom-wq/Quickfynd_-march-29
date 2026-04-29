@@ -10,6 +10,31 @@ export async function POST(request) {
     await connectDB();
     
     const data = await request.json();
+
+    const normalizeOrderSource = (value) => {
+      const normalized = String(value || '').trim().toLowerCase();
+      if (['app', 'mobile', 'android', 'ios', 'react-native', 'reactnative'].includes(normalized)) return 'APP';
+      if (['web', 'website', 'browser'].includes(normalized)) return 'WEB';
+      return null;
+    };
+
+    const inferOrderSource = () => {
+      const explicit =
+        normalizeOrderSource(data?.orderSource) ||
+        normalizeOrderSource(data?.source) ||
+        normalizeOrderSource(data?.platform) ||
+        normalizeOrderSource(request.headers.get('x-order-source')) ||
+        normalizeOrderSource(request.headers.get('x-client-platform')) ||
+        normalizeOrderSource(request.headers.get('x-platform'));
+      if (explicit) return explicit;
+
+      const userAgent = String(request.headers.get('user-agent') || '').toLowerCase();
+      const appSignatures = ['okhttp', 'cfnetwork', 'dalvik', 'reactnative', 'react-native', 'expo'];
+      if (appSignatures.some((signature) => userAgent.includes(signature))) return 'APP';
+      return 'WEB';
+    };
+
+    const inferredOrderSource = inferOrderSource();
     // Required fields for India
     const { name, email, phone, address, state, pincode, cartItems, userId } = data;
     if (!name || !phone || !address || !state || !pincode || !cartItems || cartItems.length === 0) {
@@ -25,6 +50,7 @@ export async function POST(request) {
     // Create order
     const order = await Order.create({
       userId: user ? user._id.toString() : null,
+      orderSource: inferredOrderSource,
       name,
       email,
       phone,

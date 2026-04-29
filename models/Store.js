@@ -8,6 +8,9 @@ const StoreSchema = new mongoose.Schema({
   email: String,
   contact: String,
   address: String,
+  returnAddress: String, // Return/warehouse address for AWB
+  gst: String, // GST number
+  customerId: String, // Customer/Contract ID
   logo: String,
   banner: String,
   website: String,
@@ -17,6 +20,9 @@ const StoreSchema = new mongoose.Schema({
   businessHours: String,
   returnPolicy: String,
   shippingPolicy: String,
+  // Optional seller contract IDs (e.g., courier/account contracts).
+  // Stored as array of objects: { key: 'contract_a', label: 'Contract A', id: '...'}
+  contractIds: { type: [{ key: String, label: String, id: String }], default: [] },
   isActive: { type: Boolean, default: false },
   status: { type: String, default: "pending", enum: ["pending", "approved", "rejected"] },
   featuredProductIds: { type: [String], default: [] }, // Array of featured product IDs

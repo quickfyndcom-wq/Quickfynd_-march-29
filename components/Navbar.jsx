@@ -543,6 +543,7 @@ const Navbar = () => {
   const fetchWishlistCount = async () => {
     if (wishlistFetchInFlightRef.current) return;
     wishlistFetchInFlightRef.current = true;
+    let timer = null;
     try {
       if (!auth.currentUser) {
         // Get guest wishlist count from localStorage
@@ -564,7 +565,7 @@ const Navbar = () => {
 
       const token = await auth.currentUser.getIdToken();
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 10000);
+      timer = setTimeout(() => controller.abort(), 10000);
       const response = await fetch('/api/wishlist', {
         method: 'GET',
         headers: {
@@ -573,6 +574,7 @@ const Navbar = () => {
         signal: controller.signal,
       });
       clearTimeout(timer);
+      timer = null;
 
       if (!response.ok) {
         return;
@@ -586,10 +588,15 @@ const Navbar = () => {
       setWishlistCount(validItems.length);
     } catch (error) {
       const isAbortError = error?.name === 'AbortError';
-      if (!isAbortError) {
+      const isNetworkFetchError =
+        error instanceof TypeError && /failed to fetch|networkerror/i.test(String(error?.message || ''));
+
+      // Avoid noisy console errors for transient browser/network issues.
+      if (!isAbortError && !isNetworkFetchError) {
         console.error('Error fetching wishlist count:', error);
       }
     } finally {
+      if (timer) clearTimeout(timer);
       wishlistFetchInFlightRef.current = false;
     }
   };

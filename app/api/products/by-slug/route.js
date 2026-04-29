@@ -10,7 +10,7 @@ export async function GET(request) {
         return NextResponse.json({ error: "Missing slug" }, { status: 400 });
     }
     // Only select needed fields for performance
-    const selectFields = 'name slug description shortDescription metaTitle metaDescription seoKeywords mrp price images category categories tags sku inStock stockQuantity hasVariants variants attributes hasBulkPricing bulkPricing fastDelivery allowReturn allowReplacement storeId imageAspectRatio createdAt updatedAt';
+    const selectFields = 'name slug description shortDescription metaTitle metaDescription seoKeywords mrp price images category categories tags sku inStock stockQuantity hasVariants variants attributes hasBulkPricing bulkPricing fastDelivery allowReturn allowReplacement mobileSpecsEnabled mobileSpecs storeId imageAspectRatio createdAt updatedAt';
     let product = await Product.findOne({ slug })
         .select(selectFields)
         .lean();

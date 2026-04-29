@@ -25,6 +25,8 @@ const ProductSchema = new mongoose.Schema({
   fastDelivery: { type: Boolean, default: false },
   allowReturn: { type: Boolean, default: true },
   allowReplacement: { type: Boolean, default: true },
+  mobileSpecsEnabled: { type: Boolean, default: false },
+  mobileSpecs: { type: [{ label: String, value: String }], default: [] },
   imageAspectRatio: { type: String, default: '1:1' },
   storeId: String,
   tags: { type: [String], default: [] },
