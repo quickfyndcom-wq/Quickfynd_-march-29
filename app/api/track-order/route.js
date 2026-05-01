@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server'
 import connectDB from '@/lib/mongodb'
 import Order from '@/models/Order'
+import Product from '@/models/Product'
+import Store from '@/models/Store'
 import { fetchNormalizedDelhiveryTracking } from '@/lib/delhivery'
+import { fetchSeventeenTrackInfo } from '@/lib/seventeentrack'
+import { fetchNormalizedIndiaPostTracking } from '@/lib/indiaPost'
 
 const asOrderShape = (normalized, awb = '') => {
   if (!normalized) return null;
@@ -53,8 +57,14 @@ export async function GET(req) {
     let order = null;
     if (awb) {
       const awbTrim = awb.trim();
-      // 1. Try by trackingId
-      order = await Order.findOne({ trackingId: awbTrim }).lean()
+      // 1. Try by trackingId / awb / airwayBillNo (legacy field compatibility)
+      order = await Order.findOne({
+        $or: [
+          { trackingId: awbTrim },
+          { awb: awbTrim },
+          { airwayBillNo: awbTrim }
+        ]
+      }).lean()
         .populate('orderItems.productId')
         .sort({ createdAt: -1 })
         .lean();
@@ -107,7 +117,11 @@ export async function GET(req) {
     try {
       const courier = (order.courier || '').toLowerCase();
       const trackingId = order.trackingId || order.awb || order.airwayBillNo;
-      if (trackingId && (courier.includes('delhivery') || !order.trackingUrl)) {
+      // Try Delhivery when courier is explicitly delhivery OR courier is missing and it's not India Post.
+      const isIndiaPost = courier.includes('india post');
+      const isDelhivery = courier.includes('delhivery') || (!courier && !isIndiaPost);
+
+      if (trackingId && isDelhivery) {
         const normalized = await fetchNormalizedDelhiveryTracking(trackingId);
         if (normalized) {
           order.delhivery = normalized.delhivery;
@@ -121,9 +135,83 @@ export async function GET(req) {
           }
         }
       }
+
+      // Fetch live India Post tracking: try India Post direct API first, fallback to 17track
+      if (trackingId && isIndiaPost) {
+        let ipTracking = null;
+
+        // 1. Try India Post direct API (free, real-time) — only if credentials are configured
+        const hasIndiaPostCreds = !!(process.env.INDIAPOST_USERNAME?.trim() && process.env.INDIAPOST_PASSWORD?.trim());
+        if (hasIndiaPostCreds) {
+          try {
+            const ipDirect = await fetchNormalizedIndiaPostTracking(trackingId);
+            if (ipDirect?.indiapost?.tracking_details?.length > 0) {
+              const events = ipDirect.indiapost.tracking_details.map(e => ({
+                time: `${e.date || ''} ${e.time || ''}`.trim(),
+                description: e.event || '',
+                location: e.office || '',
+                country: 'IN',
+              }));
+              const isDelivered = (ipDirect.indiapost.current_status || '').toLowerCase().includes('delivered');
+              ipTracking = {
+                awb: trackingId,
+                statusCode: isDelivered ? 40 : 10,
+                statusLabel: isDelivered ? 'Delivered' : 'In Transit',
+                isDelivered,
+                deliveredAt: isDelivered ? ipDirect.indiapost.current_status_time : null,
+                currentLocation: ipDirect.indiapost.current_status_location || null,
+                latestEvent: events[events.length - 1] || null,
+                events: events.slice().reverse(), // newest first
+                source: 'indiapost',
+              };
+            }
+          } catch (ipDirectErr) {
+            console.error('India Post direct tracking failed, falling back to 17track:', ipDirectErr?.message || ipDirectErr);
+          }
+        }
+
+        // 2. Fallback to 17track if India Post direct failed or no credentials
+        if (!ipTracking) {
+          try {
+            let seventeenTrackConfig = {};
+            if (order.storeId) {
+              const storeOr = [{ userId: order.storeId }];
+              if (/^[a-fA-F0-9]{24}$/.test(String(order.storeId))) {
+                storeOr.unshift({ _id: order.storeId });
+              }
+              const store = await Store.findOne({ $or: storeOr })
+                .select('+integrations.seventeentrack.baseUrl +integrations.seventeentrack.apiKey +integrations.seventeentrack.publicKey +integrations.seventeentrack.secretKey')
+                .lean();
+              const cfg = store?.integrations?.seventeentrack || {};
+              seventeenTrackConfig = {
+                baseUrl: String(cfg.baseUrl || '').trim(),
+                apiKey: String(cfg.apiKey || '').trim(),
+                publicKey: String(cfg.publicKey || '').trim(),
+                secretKey: String(cfg.secretKey || '').trim(),
+              };
+            }
+            ipTracking = await fetchSeventeenTrackInfo(trackingId, seventeenTrackConfig);
+            if (ipTracking) ipTracking.source = '17track';
+          } catch (ipErr) {
+            console.error('India Post 17track fetch failed:', ipErr?.message || ipErr);
+          }
+        }
+
+        if (ipTracking) {
+          order.indiaPost = ipTracking;
+          // Update order status to reflect real delivery status
+          if (ipTracking.isDelivered) {
+            order.status = 'DELIVERED';
+          } else if (ipTracking.statusCode === 10) {
+            order.status = order.status === 'ORDER_PLACED' || order.status === 'PROCESSING'
+              ? 'SHIPPED'
+              : order.status;
+          }
+        }
+      }
     } catch (e) {
-      // Don't fail the API if Delhivery call fails; just log
-      console.error('Delhivery tracking fetch failed:', e?.message || e);
+      // Don't fail the API if courier call fails; just log
+      console.error('Courier tracking fetch failed:', e?.message || e);
     }
 
     return NextResponse.json({ success: true, order });

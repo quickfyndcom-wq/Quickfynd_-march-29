@@ -5,6 +5,73 @@ import Order from "@/models/Order";
 import Product from "@/models/Product";
 import { verifyAuth } from "@/lib/verifyAuth";
 
+function inferOrderSource(request, payload = {}) {
+  const normalize = (value) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (!normalized) return null;
+    if (
+      ['app', 'mobile', 'android', 'ios', 'react-native', 'reactnative', 'flutter', 'dart', 'expo'].includes(normalized) ||
+      normalized.includes('app') ||
+      normalized.includes('android') ||
+      normalized.includes('ios') ||
+      normalized.includes('flutter') ||
+      normalized.includes('dart')
+    ) {
+      return 'APP';
+    }
+    if (['web', 'website', 'browser'].includes(normalized) || normalized.includes('web')) return 'WEB';
+    return null;
+  };
+
+  const isTruthyFlag = (value) => {
+    if (value === true) return true;
+    if (typeof value === 'number') return value === 1;
+    const normalized = String(value || '').trim().toLowerCase();
+    return ['true', '1', 'yes', 'y'].includes(normalized);
+  };
+
+  const nested = payload?.meta && typeof payload.meta === 'object' ? payload.meta : {};
+
+  const appHint =
+    normalize(payload?.appId) ||
+    normalize(payload?.clientApp) ||
+    normalize(payload?.client) ||
+    normalize(payload?.channel) ||
+    normalize(payload?.deviceType) ||
+    normalize(payload?.device) ||
+    normalize(payload?.appName) ||
+    normalize(nested?.appId) ||
+    normalize(nested?.clientApp) ||
+    normalize(nested?.platform);
+
+  if (isTruthyFlag(payload?.isApp) || isTruthyFlag(payload?.isMobileApp) || isTruthyFlag(nested?.isApp)) return 'APP';
+  if (appHint) return 'APP';
+
+  const explicit =
+    normalize(payload?.orderSource) ||
+    normalize(payload?.source) ||
+    normalize(payload?.platform) ||
+    normalize(nested?.orderSource) ||
+    normalize(nested?.source) ||
+    normalize(nested?.platform) ||
+    normalize(request.headers.get('x-order-source')) ||
+    normalize(request.headers.get('x-client-platform')) ||
+    normalize(request.headers.get('x-app-platform')) ||
+    normalize(request.headers.get('x-mobile-platform')) ||
+    normalize(request.headers.get('x-platform')) ||
+    normalize(request.headers.get('x-app-source')) ||
+    normalize(request.headers.get('x-app-id')) ||
+    normalize(request.headers.get('x-device-type')) ||
+    normalize(request.headers.get('x-mobile-app')) ||
+    normalize(request.headers.get('x-client'));
+  if (explicit) return explicit;
+
+  const ua = String(request.headers.get('user-agent') || '').toLowerCase();
+  const appSignatures = ['okhttp', 'cfnetwork', 'dalvik', 'reactnative', 'react-native', 'expo', 'flutter', 'dart'];
+  if (appSignatures.some((signature) => ua.includes(signature))) return 'APP';
+  return 'WEB';
+}
+
 export async function POST(request) {
   const startTime = Date.now();
   
@@ -82,11 +149,14 @@ export async function POST(request) {
       console.log('[Verify] Creating order in database...');
       
       // Prepare the order creation payload
+      const inferredOrderSource = inferOrderSource(request, paymentPayload || {});
       const orderPayload = {
         items: paymentPayload.items,
         paymentMethod: 'CARD',
         shippingFee: paymentPayload.shippingFee || 0,
         shippingMethod: paymentPayload.shippingMethod,
+        orderSource: inferredOrderSource,
+        source: inferredOrderSource,
         razorpayPaymentId: razorpay_payment_id,
         razorpayOrderId: razorpay_order_id,
       };
@@ -120,6 +190,8 @@ export async function POST(request) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'x-order-source': inferredOrderSource,
+          'x-client-platform': inferredOrderSource,
           ...(paymentPayload.token ? { 'Authorization': `Bearer ${paymentPayload.token}` } : {})
         },
         body: JSON.stringify(orderPayload)

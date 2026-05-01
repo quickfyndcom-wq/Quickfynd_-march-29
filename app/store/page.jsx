@@ -44,6 +44,41 @@ const formatRangeDateTime = (value) => {
     })
 }
 
+const getNetSoldQuantity = (order, item) => {
+    const orderedQty = Number(item?.quantity) || 0
+    if (orderedQty <= 0) return 0
+
+    // Fully cancelled orders should not count as sold units.
+    if (String(order?.status || '').toUpperCase() === 'CANCELLED') {
+        return 0
+    }
+
+    // Support partial-cancel fields if present.
+    const cancelledQty = Number(item?.cancelledQuantity ?? item?.canceledQuantity ?? 0)
+    return Math.max(0, orderedQty - Math.max(0, cancelledQty))
+}
+
+const getProductImageSrc = (item) => {
+    const candidates = [
+        item?.image,
+        item?.productImage,
+        item?.productId?.image,
+        item?.product?.image,
+        item?.productId?.images?.[0],
+        item?.product?.images?.[0],
+    ]
+
+    for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate.trim()) return candidate.trim()
+        if (candidate && typeof candidate === 'object') {
+            const resolved = candidate.url || candidate.src || candidate.secure_url || ''
+            if (resolved) return String(resolved).trim()
+        }
+    }
+
+    return '/placeholder.png'
+}
+
 export default function Dashboard() {
     const { user, loading: authLoading, getToken } = useAuth();
     console.log('[page.jsx] user:', user, 'authLoading:', authLoading);
@@ -211,16 +246,26 @@ export default function Dashboard() {
         for (const item of order?.orderItems || []) {
             const rawName = item?.productId?.name || item?.name || item?.productId?.title || 'Product'
             const productName = String(rawName).trim() || 'Product'
-            const quantity = Number(item?.quantity) || 0
+            const quantity = getNetSoldQuantity(order, item)
             if (quantity <= 0) continue
 
-            accumulator[productName] = (accumulator[productName] || 0) + quantity
+            if (!accumulator[productName]) {
+                accumulator[productName] = {
+                    quantity: 0,
+                    image: getProductImageSrc(item)
+                }
+            }
+
+            accumulator[productName].quantity += quantity
+            if (!accumulator[productName].image || accumulator[productName].image === '/placeholder.png') {
+                accumulator[productName].image = getProductImageSrc(item)
+            }
         }
         return accumulator
     }, {})
 
     const rangeProductCounts = Object.entries(productCountMap)
-        .map(([name, quantity]) => ({ name, quantity }))
+        .map(([name, details]) => ({ name, quantity: details.quantity, image: details.image }))
         .sort((left, right) => {
             if (right.quantity !== left.quantity) return right.quantity - left.quantity
             return left.name.localeCompare(right.name)
@@ -256,7 +301,7 @@ export default function Dashboard() {
             <div className="border border-slate-200 rounded-xl bg-white shadow-sm p-4 sm:p-5 mb-8">
                 <div className="flex flex-col gap-2 mb-5">
                     <h2 className="text-lg font-semibold text-slate-800">Product Count By Date Range</h2>
-                    <p className="text-sm text-slate-500">Select a start and end date-time to see how many units of each product were ordered in that period.</p>
+                    <p className="text-sm text-slate-500">Select a start and end date-time to see net sold units in that period (cancelled units are excluded).</p>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-5">
@@ -302,15 +347,29 @@ export default function Dashboard() {
                         <table className="w-full min-w-[320px] sm:min-w-[420px] border border-slate-200 rounded-lg overflow-hidden">
                             <thead className="bg-slate-50 text-left text-sm text-slate-600">
                                 <tr>
+                                    <th className="px-4 py-3 font-medium text-center">Units Sold</th>
+                                    <th className="px-4 py-3 font-medium text-center">Image</th>
                                     <th className="px-4 py-3 font-medium">Product</th>
-                                    <th className="px-4 py-3 font-medium">Units Ordered</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {rangeProductCounts.map((item) => (
                                     <tr key={item.name} className="border-t border-slate-200 text-sm text-slate-700">
-                                        <td className="px-4 py-3">{item.name}</td>
-                                        <td className="px-4 py-3 font-semibold">{item.quantity}</td>
+                                        <td className="px-4 py-3 text-center font-semibold align-middle">{item.quantity}</td>
+                                        <td className="px-4 py-3 align-middle">
+                                            <div className="relative mx-auto flex h-24 w-24 items-center justify-center overflow-hidden rounded-md border border-slate-200 bg-slate-50">
+                                                <Image
+                                                    src={item.image || '/placeholder.png'}
+                                                    alt={item.name}
+                                                    fill
+                                                    sizes="96px"
+                                                    className="object-contain object-center"
+                                                />
+                                            </div>
+                                        </td>
+                                        <td className="px-4 py-3 align-middle">
+                                            <span className="block min-w-0 text-[13px] leading-5">{item.name}</span>
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>

@@ -82,10 +82,15 @@ export default function CategorySliderDisplay({ slider }) {
           className="qf-slider__track"
           style={{ scrollBehavior: 'smooth' }}
         >
-          {sliderProducts.map(product => (
+          {sliderProducts.map(product => {
+            const productId = product.id || product._id || product.productId;
+            const ratingValue = Number(product.averageRating || product.rating || 0);
+            const reviewCount = Number(product.ratingCount || product.reviewCount || product.reviews || 0);
+
+            return (
             <Link
-              key={product.id}
-              href={`/product/${product.id}`}
+              key={productId}
+              href={`/product/${productId}`}
               className="qf-card"
             >
               {/* Product Image */}
@@ -129,16 +134,17 @@ export default function CategorySliderDisplay({ slider }) {
                 </div>
 
                 {/* Rating */}
-                {product.rating && (
+                {(ratingValue > 0 || reviewCount > 0) && (
                   <div className="qf-card__rating">
                     <span className="qf-card__rating-pill">
-                      ★ {product.rating}
+                      ★ {ratingValue.toFixed(1)}
                     </span>
+                    <span className="qf-card__rating-count">({reviewCount})</span>
                   </div>
                 )}
               </div>
             </Link>
-          ))}
+          )})}
         </div>
 
         {/* Right Arrow - Hidden on mobile */}
@@ -358,6 +364,14 @@ export default function CategorySliderDisplay({ slider }) {
 
         .qf-card__rating {
           display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+
+        .qf-card__rating-count {
+          font-size: 12px;
+          color: #6b7280;
+          font-family: 'Poppins', sans-serif;
         }
 
         .qf-card__rating-pill {

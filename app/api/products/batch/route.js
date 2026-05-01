@@ -1,5 +1,6 @@
 import connectDB from "@/lib/mongodb";
 import Product from "@/models/Product";
+import Rating from "@/models/Rating";
 import { NextResponse } from "next/server";
 
 export async function POST(req) {
@@ -19,8 +20,37 @@ export async function POST(req) {
             .select('name slug price mrp images category categories inStock fastDelivery imageAspectRatio shortDescription sku hasVariants variants allowReturn allowReplacement mobileSpecsEnabled mobileSpecs')
             .lean();
 
+        const ratingsMap = {};
+        if (products.length > 0) {
+            const allRatings = await Rating.find({
+                productId: { $in: products.map(product => String(product._id)) },
+                approved: true
+            }).select('productId rating').lean();
+
+            allRatings.forEach(review => {
+                if (!ratingsMap[review.productId]) {
+                    ratingsMap[review.productId] = [];
+                }
+                ratingsMap[review.productId].push(review.rating);
+            });
+        }
+
+        const enrichedProducts = products.map(product => {
+            const reviews = ratingsMap[String(product._id)] || [];
+            const ratingCount = reviews.length;
+            const averageRating = ratingCount > 0
+                ? reviews.reduce((sum, rating) => sum + rating, 0) / ratingCount
+                : 0;
+
+            return {
+                ...product,
+                ratingCount,
+                averageRating
+            };
+        });
+
         // Preserve order of productIds in response
-        const productMap = new Map(products.map(p => [p._id.toString(), p]));
+        const productMap = new Map(enrichedProducts.map(product => [product._id.toString(), product]));
         const orderedProducts = productIds
             .map(id => productMap.get(id))
             .filter(Boolean);

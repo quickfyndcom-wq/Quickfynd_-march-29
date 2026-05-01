@@ -30,7 +30,8 @@ export default function HomePreferences() {
         dealsOfTheDay: { enabled: true, title: "Deals of the Day", discount: 50 },
         sitemapCategories: { enabled: true, columnsPerRow: 4 },
         homeMenuCategories: { enabled: true, style: "grid", itemsPerRow: 5 },
-        navbarMenu: { enabled: true, position: "top", style: "horizontal" }
+        navbarMenu: { enabled: true, position: "top", style: "horizontal" },
+        desktopAppPromotion: { enabled: true }
     })
 
     // Fetch all products and settings
@@ -65,6 +66,20 @@ export default function HomePreferences() {
             } catch (err) {
                 // Appearance settings not saved yet, use defaults
                 console.log('Using default appearance settings')
+            }
+
+            try {
+                const { data: appPromotionData } = await axios.get('/api/store/app-download-promotion', {
+                    headers: { Authorization: `Bearer ${token}` }
+                })
+                setDesignSettings(prev => ({
+                    ...prev,
+                    desktopAppPromotion: {
+                        enabled: appPromotionData?.enabled !== false,
+                    },
+                }))
+            } catch (err) {
+                console.log('Using default app download promotion settings')
             }
         } catch (error) {
             toast.error('Failed to load data')
@@ -110,10 +125,18 @@ export default function HomePreferences() {
         try {
             setSaving(true)
             const token = await getToken()
+            const { desktopAppPromotion, ...appearanceSettings } = designSettings
+
             await axios.post('/api/store/appearance/sections',
-                designSettings,
+                appearanceSettings,
                 { headers: { Authorization: `Bearer ${token}` } }
             )
+
+            await axios.post('/api/store/app-download-promotion',
+                { enabled: desktopAppPromotion.enabled },
+                { headers: { Authorization: `Bearer ${token}` } }
+            )
+
             toast.success('Home design settings saved successfully')
         } catch (error) {
             toast.error('Failed to save design settings')
@@ -536,6 +559,30 @@ export default function HomePreferences() {
                                     </div>
                                 </div>
                             )}
+                        </div>
+
+                        <div className="bg-white border border-slate-200 rounded-lg p-6">
+                            <div className="flex items-center justify-between mb-4">
+                                <div>
+                                    <h3 className="font-semibold text-slate-900">Desktop App Promotion Bar</h3>
+                                    <p className="text-sm text-slate-500">Enable or disable the desktop top bar that promotes the Play Store app.</p>
+                                </div>
+                                <label className="relative inline-flex items-center cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={designSettings.desktopAppPromotion.enabled}
+                                        onChange={e => setDesignSettings({
+                                            ...designSettings,
+                                            desktopAppPromotion: { ...designSettings.desktopAppPromotion, enabled: e.target.checked }
+                                        })}
+                                        className="sr-only peer"
+                                    />
+                                    <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                                </label>
+                            </div>
+                            <p className="text-sm text-slate-600">
+                                When enabled, desktop visitors see the app download promotion bar for 10 seconds on customer-facing pages.
+                            </p>
                         </div>
 
                         {/* Save Button */}

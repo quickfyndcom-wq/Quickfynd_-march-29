@@ -119,7 +119,7 @@ export async function POST(request) {
             );
         }
 
-        // Create or update review (requires approval)
+        // Create or update review and publish it immediately.
         const newReview = await Rating.findOneAndUpdate(
             { userId, productId },
             {
@@ -127,7 +127,7 @@ export async function POST(request) {
                 review,
                 images: imageUrls,
                 orderId: purchasedOrder._id.toString(),
-                approved: false
+                approved: true
             },
             { upsert: true, new: true }
         );
@@ -137,7 +137,7 @@ export async function POST(request) {
 
         return Response.json({
             success: true,
-            message: "Review submitted successfully and pending approval",
+            message: "Review submitted successfully",
             review: { ...newReview.toObject(), user }
         });
 

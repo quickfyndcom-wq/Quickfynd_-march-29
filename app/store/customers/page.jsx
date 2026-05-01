@@ -10,16 +10,13 @@ import { Calendar, Mail, Package, Search, ShoppingBag, TrendingUp, User, X } fro
 import Image from "next/image"
 import { useEffect, useState } from "react"
 import toast from "react-hot-toast"
+import { getDisplayOrderNumber } from '@/lib/orderNumber'
 
 
 export default function CustomersPage() {
     const { getToken } = useAuth()
     const currency = process.env.NEXT_PUBLIC_CURRENCY_SYMBOL || '₹'
 
-    const getDisplayOrderNumber = (order) => {
-        if (order?.shortOrderNumber) return String(order.shortOrderNumber).padStart(5, '0')
-        return String(order?._id || order?.id || '').slice(0, 8).toUpperCase()
-    }
 
     const [loading, setLoading] = useState(true)
     const [customers, setCustomers] = useState([])
@@ -521,7 +518,7 @@ export default function CustomersPage() {
                                                                 </td>
                                                                 <td className="px-4 py-3 text-slate-700">
                                                                     {txn.description || 
-                                                                     (txn.orderId ? `Order #${String(txn.orderId).slice(0, 8).toUpperCase()}` : 
+                                                                     (txn.orderId ? `Order #${getDisplayOrderNumber({ _id: txn.orderId })}` : 
                                                                       txn.type === 'ADMIN_CREDIT' ? 'Added by admin' : 
                                                                       'Wallet transaction')}
                                                                 </td>

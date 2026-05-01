@@ -9,7 +9,7 @@ import Address from '@/models/Address';
 import { fetchNormalizedDelhiveryTracking } from '@/lib/delhivery';
 
 const ORDER_NUMBER_SEQUENCE_KEY = 'short_order_number';
-const ORDER_NUMBER_START = 55234;
+const ORDER_NUMBER_START = 52300;
 
 function hasValidShortOrderNumber(value) {
     if (value === null || value === undefined) return false;
@@ -50,6 +50,53 @@ async function getNextShortOrderNumber() {
 // Debug log helper
 function debugLog(...args) {
     try { console.log('[ORDER API DEBUG]', ...args); } catch {}
+}
+
+function mapDelhiveryStatusToOrderStatus(delhivery, currentStatus = '') {
+    if (!delhivery) return null;
+
+    const texts = [];
+    if (delhivery.current_status) {
+        texts.push(String(delhivery.current_status).toLowerCase());
+    }
+
+    if (Array.isArray(delhivery.events) && delhivery.events.length > 0) {
+        const latestEvent = delhivery.events.reduce((latest, event) => {
+            if (!latest) return event;
+            const latestTime = new Date(latest.time || latest.timestamp || 0).getTime();
+            const eventTime = new Date(event.time || event.timestamp || 0).getTime();
+            return eventTime > latestTime ? event : latest;
+        }, null);
+        if (latestEvent?.status) {
+            texts.push(String(latestEvent.status).toLowerCase());
+        }
+    }
+
+    if (texts.length === 0) return null;
+    const combined = texts.join(' | ');
+    const current = String(currentStatus || '').toUpperCase();
+
+    if (combined.includes('delivered')) return 'DELIVERED';
+    if (combined.includes('out for delivery')) return 'OUT_FOR_DELIVERY';
+    if (
+        combined.includes('rto') ||
+        combined.includes('return to origin') ||
+        combined.includes('return accepted') ||
+        combined.includes('dispatched for rto')
+    ) return 'RTO';
+
+    if (
+        combined.includes('in transit') ||
+        combined.includes('dispatched') ||
+        combined.includes('shipped') ||
+        combined.includes('forwarded')
+    ) {
+        if (['ORDER_PLACED', 'PROCESSING', 'WAITING_FOR_PICKUP', 'PICKUP_REQUESTED'].includes(current)) {
+            return 'SHIPPED';
+        }
+    }
+
+    return null;
 }
 
 
@@ -201,8 +248,23 @@ export async function GET(request){
                 try {
                     const normalized = await fetchNormalizedDelhiveryTracking(trackingId);
                     if (normalized) {
+                        let syncedStatus = order.status;
+                        const mappedStatus = mapDelhiveryStatusToOrderStatus(normalized.delhivery, order.status);
+                        if (mappedStatus && String(mappedStatus).toUpperCase() !== String(order.status || '').toUpperCase()) {
+                            syncedStatus = mappedStatus;
+                            try {
+                                await Order.updateOne(
+                                    { _id: order._id, storeId },
+                                    { $set: { status: mappedStatus } }
+                                );
+                            } catch (statusErr) {
+                                debugLog('Status auto-sync failed for order', order._id, statusErr?.message || statusErr);
+                            }
+                        }
+
                         return {
                             ...order,
+                            status: syncedStatus,
                             courier: normalized.courier || order.courier,
                             trackingId: normalized.trackingId || order.trackingId,
                             trackingUrl: normalized.trackingUrl || order.trackingUrl,

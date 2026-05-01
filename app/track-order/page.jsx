@@ -319,6 +319,82 @@ function TrackOrderPageInner() {
                   </div>
                 </div>
               )}
+
+              {/* India Post Tracking */}
+              {order.courier?.toLowerCase().includes('india post') && order.trackingId && (
+                <div className="bg-white rounded-xl shadow-sm border border-red-200 overflow-hidden">
+                  <div className="bg-gradient-to-r from-red-600 to-orange-500 px-5 py-3.5 flex items-center gap-2">
+                    <span className="text-lg">📮</span>
+                    <h3 className="text-base font-bold text-white">India Post Tracking</h3>
+                    {order.indiaPost?.statusLabel && (
+                      <span className={`ml-auto text-xs px-2.5 py-1 rounded-full font-semibold ${order.indiaPost.isDelivered ? 'bg-green-500 text-white' : 'bg-white/20 text-white'}`}>
+                        {order.indiaPost.statusLabel}
+                      </span>
+                    )}
+                  </div>
+                  <div className="p-5 space-y-4">
+                    {/* AWB */}
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm bg-red-50 rounded-lg p-3 border border-red-100">
+                      <div><span className="text-slate-500">AWB:</span> <span className="font-mono font-semibold text-slate-800">{order.trackingId}</span></div>
+                      {order.indiaPost?.currentLocation && (
+                        <div><span className="text-slate-500">Location:</span> <span className="font-medium">{order.indiaPost.currentLocation}</span></div>
+                      )}
+                      {order.indiaPost?.deliveredAt && (
+                        <div className="col-span-2"><span className="text-slate-500">Delivered on:</span> <span className="font-semibold text-green-700">{order.indiaPost.deliveredAt}</span></div>
+                      )}
+                    </div>
+
+                    {/* Status */}
+                    {order.indiaPost?.statusLabel && (
+                      <div className={`p-3 rounded-lg border ${order.indiaPost.isDelivered ? 'bg-green-50 border-green-200' : 'bg-blue-50 border-blue-200'}`}>
+                        <p className="text-xs text-slate-500 font-semibold">Status</p>
+                        <p className={`font-bold text-xl mt-0.5 ${order.indiaPost.isDelivered ? 'text-green-700' : 'text-blue-700'}`}>
+                          {order.indiaPost.isDelivered ? '✅' : '📦'} {order.indiaPost.statusLabel}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Current location highlight */}
+                    {order.indiaPost?.currentLocation && (
+                      <div className="bg-gradient-to-r from-red-500 to-orange-500 p-4 rounded-lg text-white">
+                        <p className="text-xs font-semibold opacity-90">📍 Current Location</p>
+                        <p className="font-bold text-lg mt-0.5">{order.indiaPost.currentLocation}</p>
+                      </div>
+                    )}
+
+                    {/* Events timeline */}
+                    {Array.isArray(order.indiaPost?.events) && order.indiaPost.events.length > 0 && (
+                      <div className="relative">
+                        <p className="text-xs font-semibold text-slate-600 mb-3">📦 Tracking History</p>
+                        <div className="absolute left-4 top-7 bottom-0 w-0.5 bg-red-200"/>
+                        <ul className="space-y-4">
+                          {order.indiaPost.events.map((evt, idx) => (
+                            <li key={idx} className="relative pl-10">
+                              <span className={`absolute left-2 top-1.5 w-4 h-4 rounded-full border-2 border-white shadow ${idx === 0 ? 'bg-red-600' : 'bg-red-300'}`}/>
+                              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                                <div>
+                                  {evt.location && <div className="font-semibold text-slate-800 text-sm">📍 {evt.location}</div>}
+                                  {evt.description && <div className={`text-sm ${idx === 0 ? 'font-bold text-red-700' : 'text-slate-600'}`}>{evt.description}</div>}
+                                </div>
+                                <div className="text-xs text-slate-500 whitespace-nowrap">{evt.time}</div>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    <a
+                      href={`https://t.17track.net/en#nums=${order.trackingId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-center gap-2 w-full py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-xl transition-colors"
+                    >
+                      📦 Track on 17track
+                    </a>
+                  </div>
+                </div>
+              )}
                   {/* More tracking details/help */}
                   <div className="bg-slate-100 border border-slate-200 rounded-xl p-4 mt-4 text-sm text-slate-700">
                     <p>

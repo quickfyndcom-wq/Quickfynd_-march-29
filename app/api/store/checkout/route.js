@@ -1,101 +1,58 @@
 import { NextResponse } from "next/server";
-import connectDB from '@/lib/mongodb';
-import Order from '@/models/Order';
-import User from '@/models/User';
-import { sendOrderConfirmationEmail } from '@/lib/email';
 
-// Customer order placement (guest or logged-in)
+// Compatibility endpoint: forward to canonical /api/orders flow.
+// This keeps old mobile clients working while ensuring one source of truth.
 export async function POST(request) {
   try {
-    await connectDB();
-    
-    const data = await request.json();
+    const body = await request.text();
+    const targetUrl = new URL("/api/orders", request.url);
 
-    const normalizeOrderSource = (value) => {
-      const normalized = String(value || '').trim().toLowerCase();
-      if (['app', 'mobile', 'android', 'ios', 'react-native', 'reactnative'].includes(normalized)) return 'APP';
-      if (['web', 'website', 'browser'].includes(normalized)) return 'WEB';
-      return null;
+    const passthroughHeaders = {
+      "content-type": "application/json",
     };
 
-    const inferOrderSource = () => {
-      const explicit =
-        normalizeOrderSource(data?.orderSource) ||
-        normalizeOrderSource(data?.source) ||
-        normalizeOrderSource(data?.platform) ||
-        normalizeOrderSource(request.headers.get('x-order-source')) ||
-        normalizeOrderSource(request.headers.get('x-client-platform')) ||
-        normalizeOrderSource(request.headers.get('x-platform'));
-      if (explicit) return explicit;
+    const authHeader = request.headers.get("authorization");
+    if (authHeader) passthroughHeaders.authorization = authHeader;
 
-      const userAgent = String(request.headers.get('user-agent') || '').toLowerCase();
-      const appSignatures = ['okhttp', 'cfnetwork', 'dalvik', 'reactnative', 'react-native', 'expo'];
-      if (appSignatures.some((signature) => userAgent.includes(signature))) return 'APP';
-      return 'WEB';
-    };
+    const forwardedHeaderKeys = [
+      "x-order-source",
+      "x-client-platform",
+      "x-app-platform",
+      "x-mobile-platform",
+      "x-platform",
+      "x-app-source",
+      "x-app-id",
+      "x-device-type",
+      "x-mobile-app",
+      "x-client",
+      "user-agent",
+    ];
 
-    const inferredOrderSource = inferOrderSource();
-    // Required fields for India
-    const { name, email, phone, address, state, pincode, cartItems, userId } = data;
-    if (!name || !phone || !address || !state || !pincode || !cartItems || cartItems.length === 0) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    for (const key of forwardedHeaderKeys) {
+      const value = request.headers.get(key);
+      if (value) passthroughHeaders[key] = value;
     }
 
-    // Optionally associate with user if logged in
-    let user = null;
-    if (userId) {
-      user = await User.findById(userId).lean();
-    }
-
-    // Create order
-    const order = await Order.create({
-      userId: user ? user._id.toString() : null,
-      orderSource: inferredOrderSource,
-      name,
-      email,
-      phone,
-      address,
-      state,
-      pincode,
-      orderItems: cartItems.map(item => ({
-        productId: item.productId,
-        quantity: item.quantity,
-        price: item.price,
-      })),
-      status: "pending",
+    const response = await fetch(targetUrl.toString(), {
+      method: "POST",
+      headers: passthroughHeaders,
+      body,
     });
 
-    // Populate order with items
-    const populatedOrder = await Order.findById(order._id)
-      .populate({
-        path: 'orderItems.productId',
-        model: 'Product'
-      })
-      .lean();
-
-    // Send confirmation email (non-blocking)
+    const responseText = await response.text();
+    let payload;
     try {
-      const recipientEmail = populatedOrder?.email || user?.email;
-      if (recipientEmail) {
-        await sendOrderConfirmationEmail({
-          email: recipientEmail,
-          name: populatedOrder?.name || user?.name || 'there',
-          orderId: populatedOrder?._id,
-          shortOrderNumber: populatedOrder?.shortOrderNumber,
-          total: populatedOrder?.total || 0,
-          orderItems: populatedOrder?.orderItems || [],
-          shippingAddress: populatedOrder?.shippingAddress || null,
-          createdAt: populatedOrder?.createdAt || new Date(),
-          paymentMethod: populatedOrder?.paymentMethod || 'N/A',
-        });
-      }
-    } catch (emailError) {
-      console.error('[store/checkout] Confirmation email failed:', emailError);
+      payload = JSON.parse(responseText);
+    } catch {
+      payload = { error: responseText || "Order request failed" };
     }
 
-    return NextResponse.json({ message: "Order placed successfully", order: populatedOrder });
+    return NextResponse.json(payload, { status: response.status });
   } catch (error) {
-    console.error(error);
-    return NextResponse.json({ error: error.code || error.message }, { status: 400 });
+    console.error("[store/checkout] Proxy error:", error);
+    return NextResponse.json(
+      { error: error?.message || "Failed to place order" },
+      { status: 500 }
+    );
   }
 }

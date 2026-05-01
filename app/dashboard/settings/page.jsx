@@ -18,6 +18,12 @@ export default function SettingsPage() {
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [integrationLoading, setIntegrationLoading] = useState(false);
+  const [integrationSaving, setIntegrationSaving] = useState(false);
+  const [showIntegrationCard, setShowIntegrationCard] = useState(false);
+  const [seventeenTrackApiKey, setSeventeenTrackApiKey] = useState('');
+  const [seventeenTrackConfigured, setSeventeenTrackConfigured] = useState(false);
+  const [seventeenTrackMasked, setSeventeenTrackMasked] = useState('');
   const router = useRouter();
   const auth = getAuth();
 
@@ -27,10 +33,86 @@ export default function SettingsPage() {
         router.push('/sign-in');
       } else {
         fetchSettings(user.uid);
+        fetchSeventeenTrackConfig(user);
       }
     });
     return () => unsubscribe();
   }, [auth, router]);
+
+  const fetchSeventeenTrackConfig = async (user) => {
+    try {
+      setIntegrationLoading(true);
+      const token = await user.getIdToken();
+      const response = await fetch('/api/store/integrations/seventeentrack', {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (response.status === 404) {
+        // User has no store; hide seller integration settings.
+        setShowIntegrationCard(false);
+        return;
+      }
+
+      if (!response.ok) {
+        return;
+      }
+
+      const data = await response.json();
+      if (data?.success) {
+        setShowIntegrationCard(true);
+        setSeventeenTrackConfigured(!!data.configured);
+        setSeventeenTrackMasked(data.masked || '');
+      }
+    } catch {
+      // Keep account settings usable even if integration call fails.
+    } finally {
+      setIntegrationLoading(false);
+    }
+  };
+
+  const handleSaveSeventeenTrack = async () => {
+    const user = auth.currentUser;
+    const apiKey = seventeenTrackApiKey.trim();
+
+    if (!user) {
+      toast.error('Please sign in first');
+      return;
+    }
+
+    if (!apiKey) {
+      toast.error('Enter 17track API key');
+      return;
+    }
+
+    try {
+      setIntegrationSaving(true);
+      const token = await user.getIdToken();
+      const response = await fetch('/api/store/integrations/seventeentrack', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ apiKey }),
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data?.success) {
+        toast.error(data?.error || 'Failed to save 17track API key');
+        return;
+      }
+
+      toast.success('17track API key saved');
+      setSeventeenTrackApiKey('');
+      await fetchSeventeenTrackConfig(user);
+    } catch {
+      toast.error('Failed to save 17track API key');
+    } finally {
+      setIntegrationSaving(false);
+    }
+  };
 
   const fetchSettings = async (userId) => {
     try {
@@ -261,6 +343,43 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
+
+        {/* Seller Integrations */}
+        {showIntegrationCard && (
+          <div className="bg-white rounded-lg shadow-md p-6 mb-6 border border-orange-100">
+            <h2 className="text-xl font-bold text-gray-900 mb-1">17track Integration</h2>
+            <p className="text-sm text-gray-600 mb-4">Save your 17track API key here for India Post live status, history, current place, and delivered time.</p>
+
+            {integrationLoading ? (
+              <p className="text-sm text-gray-500">Loading integration status...</p>
+            ) : (
+              <>
+                {seventeenTrackConfigured && (
+                  <div className="mb-3 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
+                    Configured: <span className="font-mono">{seventeenTrackMasked || 'Saved'}</span>
+                  </div>
+                )}
+
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    value={seventeenTrackApiKey}
+                    onChange={(e) => setSeventeenTrackApiKey(e.target.value)}
+                    placeholder="Paste 17track API key"
+                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-orange-500"
+                  />
+                  <button
+                    onClick={handleSaveSeventeenTrack}
+                    disabled={integrationSaving}
+                    className="bg-orange-600 text-white px-4 py-2 rounded-lg hover:bg-orange-700 transition font-medium disabled:opacity-50"
+                  >
+                    {integrationSaving ? 'Saving...' : 'Save Key'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Save Button */}
         <div className="flex gap-4">

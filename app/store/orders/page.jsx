@@ -31,8 +31,9 @@ import axios from "axios"
 import toast from "react-hot-toast"
 import { Package, Truck, X, Download, Printer, RefreshCw, MapPin, MessageSquare } from "lucide-react"
 import { downloadInvoice, printInvoice } from "@/lib/generateInvoice"
-import { downloadAwbBill, generateAwbBill } from "@/lib/generateAwbBill"
+import { downloadAwbBill, generateAwbBill, generateCombinedAwbBill } from "@/lib/generateAwbBill"
 import { schedulePickup } from '@/lib/delhivery'
+import { getDisplayOrderNumber } from '@/lib/orderNumber'
 
 // Add updateTrackingDetails function
 // (must be inside the component, not top-level)
@@ -164,7 +165,21 @@ export default function StoreOrders() {
         trackingUrl: '',
         courier: ''
     });
+    const [indiaPostAwb, setIndiaPostAwb] = useState('');
+    const [indiaPostTracking, setIndiaPostTracking] = useState(null);
+    const [fetchingIndiaPostTracking, setFetchingIndiaPostTracking] = useState(false);
+    const [indiaPostNoKey, setIndiaPostNoKey] = useState(false);
     const [filterStatus, setFilterStatus] = useState('ALL');
+    const [filterDelivery, setFilterDelivery] = useState('ALL');
+    const [filterCancel, setFilterCancel] = useState('ALL');
+    const [searchQuery, setSearchQuery] = useState('');
+    const [currentPage, setCurrentPage] = useState(1);
+    const [pageSize, setPageSize] = useState(20);
+    const [showCancelModal, setShowCancelModal] = useState(false);
+    const [pendingCancelStatus, setPendingCancelStatus] = useState(null);
+    const [cancelModalReason, setCancelModalReason] = useState('');
+    const [cancelModalBy, setCancelModalBy] = useState('SELLER');
+    const [savingCancellationDetails, setSavingCancellationDetails] = useState(false);
     const [datePreset, setDatePreset] = useState('ALL');
     const [fromDate, setFromDate] = useState('');
     const [toDate, setToDate] = useState('');
@@ -200,6 +215,7 @@ export default function StoreOrders() {
     const [awbPreviewDoc, setAwbPreviewDoc] = useState(null);
     const [awbPreviewGenerating, setAwbPreviewGenerating] = useState(false);
     const [showAwbGenerateModal, setShowAwbGenerateModal] = useState(false);
+    const [awbModalMode, setAwbModalMode] = useState('generate');
     const [awbFormDetails, setAwbFormDetails] = useState({});
     const [awbFormPreviewUrl, setAwbFormPreviewUrl] = useState('');
     const [awbFormPreviewDoc, setAwbFormPreviewDoc] = useState(null);
@@ -214,11 +230,302 @@ export default function StoreOrders() {
     
     // NEW: Track AWB status (generated/downloaded) per order
     const [awbStatus, setAwbStatus] = useState({}); // { orderId: { generated: true, downloaded: true } }
+    const [awbDetailsByOrder, setAwbDetailsByOrder] = useState({});
+    const [selectedAwbOrderIds, setSelectedAwbOrderIds] = useState([]);
+    const [bulkDownloadingAwbs, setBulkDownloadingAwbs] = useState(false);
     
+    const storeSettingsCacheRef = useRef(undefined);
     const refreshIntervalRef = useRef(null);
     const router = useRouter();
 
     const { user, getToken, loading: authLoading } = useAuth();
+
+    const getOrderAwbNumber = (order) => {
+        return String(order?.trackingId || order?.awb || order?.airwayBillNo || '').trim();
+    };
+
+    const getOrderStoreId = (order) => {
+        const storeRef = order?.store;
+        return order?.storeId || order?.sellerId || (typeof storeRef === 'string' ? storeRef : storeRef?._id) || '';
+    };
+
+    const hasGeneratedAwb = (order) => {
+        return Boolean(awbStatus?.[order?._id]?.generated);
+    };
+
+    const hasGeneratedAwbMissingReference = (order) => {
+        return Boolean(hasGeneratedAwb(order) && !getOrderAwbNumber(order));
+    };
+
+    const hasReturnWithStatus = (order, status) => {
+        return Boolean(order?.returns?.some((returnRequest) => returnRequest?.status === status));
+    };
+
+    const hasReturnByTypeAndStatus = (order, type, status) => {
+        return Boolean(order?.returns?.some((returnRequest) => returnRequest?.type === type && returnRequest?.status === status));
+    };
+
+    const TRACKED_LIFECYCLE_STATUSES = new Set([
+        'RETURNED',
+        'RETURN_INITIATED',
+        'RETURN_APPROVED',
+        'RETURN_REJECTED',
+        'REPLACEMENT_REQUESTED',
+        'REPLACEMENT_APPROVED',
+        'REPLACEMENT_SHIPPED',
+        'REPLACEMENT_OUT_FOR_DELIVERY',
+        'REPLACEMENT_DELIVERED',
+        'REPLACED',
+        'RETURNED_REFUNDED'
+    ]);
+
+    const getLifecycleBucket = (order) => {
+        const normalizedOrderStatus = String(order?.status || '').toUpperCase();
+        if (TRACKED_LIFECYCLE_STATUSES.has(normalizedOrderStatus)) {
+            if (normalizedOrderStatus === 'REPLACEMENT_DELIVERED') {
+                return 'REPLACED';
+            }
+            return normalizedOrderStatus;
+        }
+
+        const returnRequests = Array.isArray(order?.returns) ? order.returns : [];
+        for (let index = returnRequests.length - 1; index >= 0; index -= 1) {
+            const returnRequest = returnRequests[index];
+            const label = getReturnRequestStatusLabel(returnRequest);
+            if (label === 'UNKNOWN') continue;
+            if (label === 'REQUESTED') {
+                return returnRequest?.type === 'REPLACEMENT' ? 'REPLACEMENT_REQUESTED' : 'RETURN_REQUESTED';
+            }
+            if (label === 'REJECTED') {
+                return returnRequest?.type === 'RETURN' ? 'RETURN_REJECTED' : null;
+            }
+            if (TRACKED_LIFECYCLE_STATUSES.has(label)) {
+                return label;
+            }
+        }
+
+        return null;
+    };
+
+    const hasLifecycleStatus = (order, status) => {
+        return getLifecycleBucket(order) === status;
+    };
+
+    const getReturnRequestStatusLabel = (returnRequest) => {
+        if (!returnRequest) return 'UNKNOWN';
+        if (returnRequest.type === 'REPLACEMENT' && returnRequest.status === 'REQUESTED') return 'REPLACEMENT_REQUESTED';
+        if (returnRequest.type === 'REPLACEMENT' && returnRequest.status === 'APPROVED') return 'REPLACEMENT_APPROVED';
+        if (returnRequest.type === 'REPLACEMENT' && returnRequest.status === 'COMPLETED') return 'REPLACED';
+        if (returnRequest.type === 'RETURN' && returnRequest.status === 'APPROVED') return 'RETURN_APPROVED';
+        if (returnRequest.type === 'RETURN' && returnRequest.status === 'COMPLETED') return 'RETURNED_REFUNDED';
+        return returnRequest.status;
+    };
+
+    const getReturnedRefundAmount = (order) => {
+        if (!order?.returns?.length || !order?.orderItems?.length) return 0;
+
+        return order.returns.reduce((sum, returnRequest) => {
+            if (returnRequest?.type !== 'RETURN' || returnRequest?.status !== 'COMPLETED') {
+                return sum;
+            }
+
+            const item = order.orderItems?.[returnRequest.itemIndex];
+            if (!item) return sum;
+
+            const itemAmount = Number(item.price || 0) * Number(item.quantity || 1);
+            return sum + itemAmount;
+        }, 0);
+    };
+
+    const getNetOrderAmount = (order) => {
+        const orderTotal = Number(order?.total || 0);
+        const refundedAmount = getReturnedRefundAmount(order);
+        return Math.max(0, orderTotal - refundedAmount);
+    };
+
+    const hasAwbPendingDownload = (order) => {
+        const status = awbStatus?.[order?._id];
+        return Boolean(status?.generated && !status?.downloaded);
+    };
+
+    const openAwbEditor = async (order) => {
+        try {
+            setGeneratingAwb(true)
+            setAwbModalMode(hasGeneratedAwb(order) ? 'edit' : 'generate')
+
+            // Always try to load latest store details so logo/return address stay correct.
+            let storeData = {}
+            const storeId = getOrderStoreId(order)
+            if (storeId) {
+                const token = await getToken(true).catch(() => null)
+                storeData = await getCurrentStoreSettings(order, token)
+
+                if (!storeContracts || storeContracts.length === 0) {
+                    let contracts = storeData?.contractIds || []
+                    if (!contracts || contracts.length === 0) {
+                        contracts = [
+                            { key: 'contract_1', label: 'BUSINESS_PARCEL', id: '41250721' },
+                            { key: 'contract_2', label: 'Normal', id: '41431600' },
+                            { key: 'contract_3', label: 'speed post', id: '41853808' }
+                        ]
+                    }
+                    setStoreContracts(contracts)
+                }
+            }
+
+            const awbDetails = {
+                ...buildAwbDetails(order, storeData),
+                ...(awbDetailsByOrder?.[order._id] || {})
+            }
+            setAwbFormDetails(awbDetails)
+
+            const contracts = (storeContracts && storeContracts.length > 0)
+                ? storeContracts
+                : (storeData?.contractIds || [])
+            const preselectedContract = contracts.find((contract) => {
+                return String(contract?.id || '') === String(awbDetails?.contractId || '')
+            }) || null
+            setSelectedContract(preselectedContract)
+            setAwbFormPreviewUrl('')
+            setAwbFormPreviewDoc(null)
+
+            setUseManualWeight(false)
+            setManualWeight('')
+            setPackageLength('10')
+            setPackageWidth('20')
+            setPackageHeight('20')
+            setAwbFormErrors({})
+
+            setShowAwbGenerateModal(true)
+        } catch (err) {
+            console.error('Generate AWB error', err)
+            toast.error('Failed to open AWB form')
+        } finally {
+            setGeneratingAwb(false)
+        }
+    }
+
+    const getCurrentStoreSettings = async (order, tokenOverride) => {
+        if (storeSettingsCacheRef.current !== undefined) {
+            return storeSettingsCacheRef.current || {};
+        }
+
+        const token = tokenOverride || await getToken().catch(() => null);
+        const storeId = getOrderStoreId(order);
+        if (!token) {
+            if (!storeId) return {};
+            try {
+                const { data } = await axios.get(`/api/store/${storeId}`);
+                storeSettingsCacheRef.current = data?.store || {};
+                return storeSettingsCacheRef.current;
+            } catch {
+                return {};
+            }
+        }
+
+        try {
+            const { data } = await axios.get('/api/store/settings', {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            storeSettingsCacheRef.current = data?.store || {};
+            return storeSettingsCacheRef.current;
+        } catch (error) {
+            if (storeId) {
+                try {
+                    const { data } = await axios.get(`/api/store/${storeId}`);
+                    storeSettingsCacheRef.current = data?.store || {};
+                    return storeSettingsCacheRef.current;
+                } catch {
+                    return {};
+                }
+            }
+            return {};
+        }
+    };
+
+    const buildAwbDetails = (order, storeData = {}) => ({
+        awbNumber: getOrderAwbNumber(order) || order?._id,
+        orderId: getDisplayOrderNumber(order),
+        courier: order?.courier || '',
+        date: new Date().toLocaleDateString(),
+        senderName: resolveSellerName(order, storeData),
+        senderAddress: DEFAULT_SELLER_ADDRESS,
+        senderPhone: '',
+        receiverName: order?.shippingAddress?.name || order?.guestName || '',
+        receiverAddress: order?.shippingAddress
+            ? [order.shippingAddress.street, order.shippingAddress.city, order.shippingAddress.state, order.shippingAddress.zip].filter(Boolean).join(', ')
+            : '',
+        receiverPhone: order?.shippingAddress?.phone || '',
+        receiverPin: order?.shippingAddress?.zip || order?.shippingAddress?.pincode || '',
+        contents: (order?.orderItems || []).map(i => `${i.quantity || 1} x ${(i.name || i.product?.name || '').substring(0, 40)}`).join('; '),
+        weight: Math.max(1, Math.ceil((order?.total || 0) / 100)),
+        dimensions: (awbManifestData.dimensions || []).map(d => `${d.length_cm}x${d.width_cm}x${d.height_cm} cm`).join('; '),
+        price: order?.total || order?.amount || '',
+        shippingCharge: Number(order?.shippingFee ?? order?.shipping ?? order?.deliveryCharge ?? 0),
+        paymentMethod: order?.paymentMethod || order?.payment_method || '',
+        orderItems: (order?.orderItems || []).map(item => ({
+            ...item,
+            image: resolveOrderItemImage(item)
+        })),
+        storeLogo: storeData.logo || order?.storeLogo || order?.logo || '/logo/logo1.png',
+        returnAddress: resolveReturnAddress(order, storeData),
+        customerId: order?.customerId || order?.userId || '',
+        gst: storeData.gst || order?.gst || DEFAULT_GST,
+        contractId: '',
+        contractLabel: '',
+        paymentType: (order?.paymentMethod || '').toUpperCase().includes('COD') ? 'COD' : 'Prepaid'
+    });
+
+    const toggleAwbSelection = (orderId) => {
+        setSelectedAwbOrderIds((prev) => (
+            prev.includes(orderId) ? prev.filter((id) => id !== orderId) : [...prev, orderId]
+        ));
+    };
+
+    const downloadSelectedAwbs = async (ordersToDownload) => {
+        if (!ordersToDownload.length) {
+            toast.error('Select at least one AWB to download.');
+            return;
+        }
+
+        try {
+            setBulkDownloadingAwbs(true);
+            const token = await getToken().catch(() => null);
+            const storeData = await getCurrentStoreSettings(ordersToDownload[0], token);
+            const awbDetailsList = [];
+
+            for (const order of ordersToDownload) {
+                try {
+                    awbDetailsList.push({
+                        ...buildAwbDetails(order, storeData),
+                        ...(awbDetailsByOrder?.[order._id] || {})
+                    });
+                } catch (error) {
+                    console.error('Bulk AWB generation failed:', order?._id, error);
+                }
+            }
+
+            if (!awbDetailsList.length) {
+                toast.error('Failed to download selected AWBs.');
+                return;
+            }
+
+            const combinedDoc = generateCombinedAwbBill(awbDetailsList);
+            combinedDoc.save(`AWB_bulk_${new Date().getTime()}.pdf`);
+
+            setAwbStatus((prev) => {
+                const next = { ...prev };
+                ordersToDownload.forEach((order) => {
+                    next[order._id] = { ...next[order._id], generated: true, downloaded: true };
+                });
+                return next;
+            });
+
+            toast.success(`${awbDetailsList.length} AWB ${awbDetailsList.length === 1 ? 'added to the PDF' : 'added to one PDF'}`);
+        } finally {
+            setBulkDownloadingAwbs(false);
+        }
+    };
 
     const callCourierProxy = async (action, params, data) => {
         setLtlLoading(true);
@@ -267,6 +574,12 @@ export default function StoreOrders() {
         { value: 'RETURNED', label: 'Returned', color: 'bg-indigo-100 text-indigo-700' },
         { value: 'RETURN_INITIATED', label: 'Return Initiated', color: 'bg-pink-100 text-pink-700' },
         { value: 'RETURN_APPROVED', label: 'Return Approved', color: 'bg-pink-100 text-pink-700' },
+        { value: 'REPLACEMENT_REQUESTED', label: 'Replacement Requested', color: 'bg-violet-100 text-violet-700' },
+        { value: 'REPLACEMENT_APPROVED', label: 'Replacement Approved', color: 'bg-violet-100 text-violet-700' },
+        { value: 'REPLACEMENT_SHIPPED', label: 'Replacement Shipped', color: 'bg-purple-100 text-purple-700' },
+        { value: 'REPLACEMENT_OUT_FOR_DELIVERY', label: 'Replacement Out For Delivery', color: 'bg-teal-100 text-teal-700' },
+        { value: 'REPLACEMENT_DELIVERED', label: 'Replacement Delivered', color: 'bg-green-100 text-green-700' },
+        { value: 'REPLACED', label: 'Replaced', color: 'bg-emerald-100 text-emerald-700' },
     ];
 
     // Map Delhivery live status (current_status + latest event) to internal order status
@@ -368,25 +681,35 @@ export default function StoreOrders() {
 
     // Calculate order statistics
     const getOrderStats = () => {
+        const isRegularStatusOrder = (order) => !getLifecycleBucket(order);
         const stats = {
             TOTAL: orders.length,
-            ORDER_PLACED: orders.filter(o => o.status === 'ORDER_PLACED').length,
-            PROCESSING: orders.filter(o => o.status === 'PROCESSING').length,
-            MANIFESTED: orders.filter(o => o.status === 'MANIFESTED').length,
-            PICKUP_SCHEDULED: orders.filter(o => o.status === 'PICKUP_SCHEDULED').length,
-            SHIPPED: orders.filter(o => o.status === 'SHIPPED').length,
-            DELIVERED: orders.filter(o => o.status === 'DELIVERED').length,
-            CANCELLED: orders.filter(o => o.status === 'CANCELLED').length,
-            PAYMENT_FAILED: orders.filter(o => o.status === 'PAYMENT_FAILED').length,
-            RTO: orders.filter(o => o.status === 'RTO').length,
-            RETURNED: orders.filter(o => o.status === 'RETURNED').length,
-            RETURN_REQUESTED: orders.filter(o => o.returns && o.returns.some(r => r.status === 'REQUESTED')).length,
+            ORDER_PLACED: orders.filter(o => isRegularStatusOrder(o) && o.status === 'ORDER_PLACED').length,
+            PROCESSING: orders.filter(o => isRegularStatusOrder(o) && o.status === 'PROCESSING').length,
+            MANIFESTED: orders.filter(o => isRegularStatusOrder(o) && o.status === 'MANIFESTED').length,
+            PICKUP_SCHEDULED: orders.filter(o => isRegularStatusOrder(o) && o.status === 'PICKUP_SCHEDULED').length,
+            SHIPPED: orders.filter(o => isRegularStatusOrder(o) && o.status === 'SHIPPED').length,
+            DELIVERED: orders.filter(o => isRegularStatusOrder(o) && o.status === 'DELIVERED').length,
+            CANCELLED: orders.filter(o => isRegularStatusOrder(o) && o.status === 'CANCELLED').length,
+            PAYMENT_FAILED: orders.filter(o => isRegularStatusOrder(o) && o.status === 'PAYMENT_FAILED').length,
+            RTO: orders.filter(o => isRegularStatusOrder(o) && o.status === 'RTO').length,
+            RETURNED: orders.filter(o => hasLifecycleStatus(o, 'RETURNED')).length,
+            RETURN_REQUESTED: orders.filter(o => hasLifecycleStatus(o, 'RETURN_REQUESTED')).length,
+            RETURN_APPROVED: orders.filter(o => hasLifecycleStatus(o, 'RETURN_APPROVED')).length,
+            RETURN_REJECTED: orders.filter(o => hasLifecycleStatus(o, 'RETURN_REJECTED')).length,
+            REPLACEMENT_REQUESTED: orders.filter(o => hasLifecycleStatus(o, 'REPLACEMENT_REQUESTED')).length,
+            REPLACEMENT_APPROVED: orders.filter(o => hasLifecycleStatus(o, 'REPLACEMENT_APPROVED')).length,
+            REPLACED: orders.filter(o => hasLifecycleStatus(o, 'REPLACED')).length,
+            RETURNED_REFUNDED: orders.filter(o => hasLifecycleStatus(o, 'RETURNED_REFUNDED')).length,
             DAMAGED_REVIEW: orders.filter(o => ['MINOR_DAMAGE', 'DAMAGED'].includes(o?.deliveryReview?.packageCondition)).length,
+            AWB_GENERATED: orders.filter(o => hasAwbPendingDownload(o)).length,
+            AWB_REFERENCE_MISSING: orders.filter(o => hasGeneratedAwbMissingReference(o)).length,
             PENDING_PAYMENT: orders.filter(o => {
-                // Exclude cancelled and returned orders from pending payment
-                return !isOrderPaid(o) && o.status !== 'CANCELLED' && o.status !== 'RETURNED' && o.status !== 'RTO';
+                // Exclude cancelled, returned, RTO, payment failed, and return-requested orders
+                const hasReturn = hasReturnWithStatus(o, 'REQUESTED');
+                return isRegularStatusOrder(o) && !isOrderPaid(o) && !hasReturn && o.status !== 'CANCELLED' && o.status !== 'RETURNED' && o.status !== 'RTO' && o.status !== 'PAYMENT_FAILED';
             }).length,
-            PENDING_SHIPMENT: orders.filter(o => !o.trackingId && ['ORDER_PLACED', 'PROCESSING'].includes(o.status)).length,
+            PENDING_SHIPMENT: orders.filter(o => isRegularStatusOrder(o) && !o.trackingId && ['ORDER_PLACED', 'PROCESSING'].includes(o.status)).length,
         };
         return stats;
     };
@@ -410,23 +733,101 @@ export default function StoreOrders() {
     // Filter orders based on selected status + date range
     const getFilteredOrders = () => {
         const dateFiltered = orders.filter(isOrderInRange);
-        if (filterStatus === 'ALL') return dateFiltered;
-        if (filterStatus === 'PENDING_PAYMENT') return dateFiltered.filter(o => {
-            return !isOrderPaid(o);
+        let statusFiltered;
+        if (filterStatus === 'ALL') statusFiltered = dateFiltered;
+        else if (filterStatus === 'PENDING_PAYMENT') {
+            const hasReturn = (o) => hasReturnWithStatus(o, 'REQUESTED');
+            statusFiltered = dateFiltered.filter(o => !getLifecycleBucket(o) && !isOrderPaid(o) && !hasReturn(o) && o.status !== 'CANCELLED' && o.status !== 'RETURNED' && o.status !== 'RTO' && o.status !== 'PAYMENT_FAILED');
+        }
+        else if (filterStatus === 'PENDING_SHIPMENT') statusFiltered = dateFiltered.filter(o => !getLifecycleBucket(o) && !o.trackingId && ['ORDER_PLACED', 'PROCESSING'].includes(o.status));
+        else if (filterStatus === 'AWB_GENERATED') statusFiltered = dateFiltered.filter(o => hasAwbPendingDownload(o));
+        else if (filterStatus === 'AWB_REFERENCE_MISSING') statusFiltered = dateFiltered.filter(o => hasGeneratedAwbMissingReference(o));
+        else if (filterStatus === 'RETURN_REQUESTED') statusFiltered = dateFiltered.filter(o => hasLifecycleStatus(o, 'RETURN_REQUESTED'));
+        else if (filterStatus === 'RETURN_APPROVED') statusFiltered = dateFiltered.filter(o => hasLifecycleStatus(o, 'RETURN_APPROVED'));
+        else if (filterStatus === 'RETURN_REJECTED') statusFiltered = dateFiltered.filter(o => hasLifecycleStatus(o, 'RETURN_REJECTED'));
+        else if (filterStatus === 'REPLACEMENT_REQUESTED') statusFiltered = dateFiltered.filter(o => hasLifecycleStatus(o, 'REPLACEMENT_REQUESTED'));
+        else if (filterStatus === 'REPLACEMENT_APPROVED') statusFiltered = dateFiltered.filter(o => hasLifecycleStatus(o, 'REPLACEMENT_APPROVED'));
+        else if (filterStatus === 'REPLACED') statusFiltered = dateFiltered.filter(o => hasLifecycleStatus(o, 'REPLACED'));
+        else if (filterStatus === 'RETURNED_REFUNDED') statusFiltered = dateFiltered.filter(o => hasLifecycleStatus(o, 'RETURNED_REFUNDED'));
+        else if (filterStatus === 'DAMAGED_REVIEW') statusFiltered = dateFiltered.filter(o => ['MINOR_DAMAGE', 'DAMAGED'].includes(o?.deliveryReview?.packageCondition));
+        else statusFiltered = dateFiltered.filter(o => !getLifecycleBucket(o) && o.status === filterStatus);
+
+        if (filterDelivery === 'ALL') {
+            // apply cancel filter
+        } else {
+            const today = new Date(); today.setHours(0,0,0,0);
+            statusFiltered = statusFiltered.filter(o => {
+                const edd = o?.delhivery?.expected_delivery_date;
+                if (!edd) return filterDelivery === 'NO_DATE';
+                const exp = new Date(edd); exp.setHours(0,0,0,0);
+                const diff = Math.round((exp - today) / 86400000);
+                if (filterDelivery === 'TODAY') return diff === 0;
+                if (filterDelivery === 'TOMORROW') return diff === 1;
+                if (filterDelivery === 'OVERDUE') return diff < 0;
+                if (filterDelivery === 'UPCOMING') return diff > 1;
+                return true;
+            });
+        }
+        if (filterCancel !== 'ALL') {
+            statusFiltered = statusFiltered.filter(o => {
+                if (filterCancel === 'CUSTOMER') return o.cancelledBy === 'CUSTOMER';
+                if (filterCancel === 'UNDELIVERABLE_PINCODE') return o.cancelledBy === 'UNDELIVERABLE_PINCODE';
+                if (filterCancel === 'SELLER') return o.cancelledBy === 'SELLER' || (!o.cancelledBy && o.status === 'CANCELLED');
+                return true;
+            });
+        }
+
+        const normalizedQuery = searchQuery.trim().toLowerCase();
+        if (!normalizedQuery) {
+            return statusFiltered;
+        }
+
+        return statusFiltered.filter((order) => {
+            const searchableFields = [
+                order?._id,
+                order?.id,
+                order?.trackingId,
+                order?.awb,
+                order?.airwayBillNo,
+                order?.guestEmail,
+                order?.shippingAddress?.email,
+                order?.userId?.email,
+                getDisplayOrderNumber(order),
+                order?.shortOrderNumber
+            ]
+                .filter(Boolean)
+                .map((value) => String(value).toLowerCase());
+
+            return searchableFields.some((value) => value.includes(normalizedQuery));
         });
-        if (filterStatus === 'PENDING_SHIPMENT') return dateFiltered.filter(o => !o.trackingId && ['ORDER_PLACED', 'PROCESSING'].includes(o.status));
-        if (filterStatus === 'RETURN_REQUESTED') return dateFiltered.filter(o => o.returns && o.returns.some(r => r.status === 'REQUESTED'));
-        if (filterStatus === 'DAMAGED_REVIEW') return dateFiltered.filter(o => ['MINOR_DAMAGE', 'DAMAGED'].includes(o?.deliveryReview?.packageCondition));
-        return dateFiltered.filter(o => o.status === filterStatus);
     };
 
     const stats = getOrderStats();
     const filteredOrders = getFilteredOrders();
+    const totalPages = Math.max(1, Math.ceil(filteredOrders.length / pageSize));
+    const startIndex = (currentPage - 1) * pageSize;
+    const paginatedOrders = filteredOrders.slice(startIndex, startIndex + pageSize);
+    const isAwbGeneratedFilter = filterStatus === 'AWB_GENERATED';
+    const isAwbReferenceMissingFilter = filterStatus === 'AWB_REFERENCE_MISSING';
+    const isAwbSelectionFilter = isAwbGeneratedFilter || isAwbReferenceMissingFilter;
+    const selectedAwbOrders = filteredOrders.filter((order) => selectedAwbOrderIds.includes(order._id));
 
-    const getDisplayOrderNumber = (order) => {
-        if (order?.shortOrderNumber) return String(order.shortOrderNumber).padStart(5, '0');
-        return String(order?._id || '').slice(0, 8).toUpperCase();
-    };
+    useEffect(() => {
+        if (!isAwbSelectionFilter) {
+            setSelectedAwbOrderIds((prev) => (prev.length ? [] : prev));
+            return;
+        }
+
+        const visibleIds = new Set(filteredOrders.map((order) => order._id));
+        setSelectedAwbOrderIds((prev) => {
+            const next = prev.filter((id) => visibleIds.has(id));
+            if (next.length === prev.length && next.every((id, index) => id === prev[index])) {
+                return prev;
+            }
+            return next;
+        });
+    }, [filteredOrders, isAwbSelectionFilter]);
+
 
     const getOrderSourceLabel = (order) => {
         const normalized = String(order?.orderSource || '').trim().toUpperCase();
@@ -633,12 +1034,82 @@ export default function StoreOrders() {
         }
     };
 
-    // Manually trigger automatic status sync from latest courier tracking
-    const autoSyncStatusFromTracking = async (targetOrder) => {
+    // Save India Post AWB and auto-fetch tracking
+    const saveIndiaPostTracking = async () => {
+        const awb = (indiaPostAwb || '').trim();
+        if (!awb) {
+            toast.error('India Post AWB number is required');
+            return;
+        }
+        const trackingUrl = `https://t.17track.net/en#nums=${encodeURIComponent(awb)}`;
+        let nextStatus = selectedOrder.status;
+        if (nextStatus === 'ORDER_PLACED' || nextStatus === 'PROCESSING') {
+            nextStatus = 'SHIPPED';
+        }
+        try {
+            const token = await getToken();
+            await axios.put(`/api/store/orders/${selectedOrder._id}`, {
+                status: nextStatus,
+                trackingId: awb,
+                courier: 'India Post',
+                trackingUrl,
+            }, { headers: { Authorization: `Bearer ${token}` } });
+            toast.success('India Post AWB saved! Customer can track on India Post website.');
+            await fetchOrders();
+            setSelectedOrder(prev => prev ? { ...prev, status: nextStatus, trackingId: awb, courier: 'India Post', trackingUrl } : prev);
+            // Auto-fetch tracking after saving
+            fetchIndiaPostTracking(awb);
+        } catch (error) {
+            toast.error(error?.response?.data?.error || 'Failed to save India Post AWB');
+        }
+    };
+
+    // Fetch live India Post tracking via 17track API
+    const fetchIndiaPostTracking = async (awbOverride) => {
+        const awb = (awbOverride || selectedOrder?.trackingId || '').trim();
+        if (!awb) return;
+        setFetchingIndiaPostTracking(true);
+        setIndiaPostNoKey(false);
+        try {
+            const token = await getToken();
+            const { data } = await axios.get(`/api/india-post-tracking?awb=${encodeURIComponent(awb)}`, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
+            });
+            if (data.success && data.tracking) {
+                setIndiaPostTracking(data.tracking);
+                // Auto-update order status in DB if delivered
+                if (data.tracking.isDelivered && selectedOrder?.status !== 'DELIVERED') {
+                    const token = await getToken();
+                    if (token) {
+                        await axios.put(`/api/store/orders/${selectedOrder._id}`, { status: 'DELIVERED' }, {
+                            headers: { Authorization: `Bearer ${token}` }
+                        }).catch(() => {});
+                        setSelectedOrder(prev => prev ? { ...prev, status: 'DELIVERED' } : prev);
+                        await fetchOrders();
+                        toast.success('Status auto-updated to DELIVERED based on India Post tracking!');
+                    }
+                }
+            } else if (data.noKey) {
+                // No API key configured — silently ignore
+                setIndiaPostTracking(null);
+                setIndiaPostNoKey(true);
+            } else {
+                setIndiaPostTracking(null);
+            }
+        } catch {
+            setIndiaPostTracking(null);
+        } finally {
+            setFetchingIndiaPostTracking(false);
+        }
+    };
+
+    // Trigger automatic status sync from latest courier tracking
+    const autoSyncStatusFromTracking = async (targetOrder, options = {}) => {
+        const { silent = false } = options;
         const order = targetOrder || selectedOrder;
 
         if (!order || !order.trackingId) {
-            toast.error('Add a tracking ID first');
+            if (!silent) toast.error('Add a tracking ID first');
             return;
         }
         try {
@@ -653,16 +1124,44 @@ export default function StoreOrders() {
             
             clearTimeout(timeoutId);
 
-            if (!data.order || !data.order.delhivery) {
-                toast.error('No live courier status found yet. Try again later.');
+            if (!data.order) {
+                if (!silent) toast.error('No live courier status found yet. Try again later.');
                 return;
             }
 
             const currentStatus = data.order.status || order.status;
-            const mappedStatus = mapDelhiveryStatusToOrderStatus(data.order.delhivery, currentStatus);
+            let mappedStatus = currentStatus;
+
+            const statusText = String(data.order.status || '').toLowerCase();
+            const looksDelivered = statusText.includes('delivered');
+
+            // India Post: map from indiaPost statusCode
+            if (data.order.indiaPost) {
+                const ip = data.order.indiaPost;
+                if (ip.isDelivered) {
+                    mappedStatus = 'DELIVERED';
+                } else if (ip.statusCode === 10) {
+                    mappedStatus = 'SHIPPED';
+                } else if (ip.statusCode === 30) {
+                    mappedStatus = 'DELIVERY_EXCEPTION';
+                } else if (ip.statusCode === 70) {
+                    mappedStatus = 'RETURNED';
+                }
+                // Also push tracking events into local state so timeline is visible immediately
+                if (ip.events?.length > 0) {
+                    setIndiaPostTracking(ip);
+                }
+            } else {
+                // Delhivery
+                mappedStatus = mapDelhiveryStatusToOrderStatus(data.order.delhivery, currentStatus);
+                // Fallback: if backend already returned delivered text status, force DELIVERED.
+                if (!mappedStatus && looksDelivered) {
+                    mappedStatus = 'DELIVERED';
+                }
+            }
 
             if (!mappedStatus || mappedStatus === currentStatus) {
-                toast.error('Status is already up to date with tracking.');
+                if (!silent) toast.error('Status is already up to date with tracking.');
                 return;
             }
 
@@ -677,14 +1176,14 @@ export default function StoreOrders() {
             setSelectedOrder(prev => prev && prev._id === order._id ? { ...prev, status: mappedStatus } : prev);
             setOrders(prev => prev.map(o => o._id === order._id ? { ...o, status: mappedStatus } : o));
 
-            toast.success(`Order status set to "${mappedStatus}" from tracking.`);
+            if (!silent) toast.success(`Order status set to "${mappedStatus}" from tracking.`);
         } catch (error) {
-            if (error.name === 'AbortError') {
-                console.error('Auto status sync timeout after 10 seconds');
-                toast.error('Request timeout. Delhivery API took too long. Please try again.');
+            if (axios.isCancel(error) || error.name === 'AbortError' || error.name === 'CanceledError') {
+                console.warn('Auto status sync aborted (timeout)');
+                if (!silent) toast.error('Request timeout. Courier API took too long. Please try again.');
             } else {
                 console.error('Auto status sync failed:', error);
-                toast.error(error?.response?.data?.error || 'Failed to auto-sync status from tracking');
+                if (!silent) toast.error(error?.response?.data?.error || 'Failed to auto-sync status from tracking');
             }
         }
     };
@@ -703,11 +1202,46 @@ export default function StoreOrders() {
         console.log('[MODAL DEBUG] Order isGuest:', order.isGuest);
         setSelectedOrder(order);
         // Pre-fill tracking data if it exists
+        // Auto-fix old India Post URLs (indiapost.gov.in) to 17track
+        const isIndiaPost = (order.courier || '').toLowerCase().includes('india post');
+        const hasOldUrl = (order.trackingUrl || '').includes('indiapost.gov.in');
+        const correctedTrackingUrl = isIndiaPost && order.trackingId
+            ? `https://t.17track.net/en#nums=${encodeURIComponent(order.trackingId)}`
+            : (order.trackingUrl || '');
+        if (isIndiaPost && (hasOldUrl || !order.trackingUrl) && order.trackingId) {
+            // Silently persist the corrected URL to DB
+            getToken().then(token => {
+                if (token) {
+                    axios.put(`/api/store/orders/${order._id}`, {
+                        trackingUrl: correctedTrackingUrl
+                    }, { headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
+                }
+            });
+        }
         setTrackingData({
             trackingId: order.trackingId || '',
-            trackingUrl: order.trackingUrl || '',
+            trackingUrl: isIndiaPost ? correctedTrackingUrl : (order.trackingUrl || ''),
             courier: order.courier || ''
         });
+        // Reset India Post state for new order
+        setIndiaPostAwb(order.courier?.toLowerCase().includes('india post') ? (order.trackingId || '') : '');
+        setIndiaPostTracking(null);
+        setIndiaPostNoKey(false);
+        // Auto-fetch India Post tracking if it's an India Post order with an AWB
+        if ((order.courier || '').toLowerCase().includes('india post') && order.trackingId) {
+            // Defer so selectedOrder state is set first
+            setTimeout(() => fetchIndiaPostTracking(order.trackingId), 100);
+        }
+
+        // Auto-sync status silently for any tracked order when modal opens
+        if (order.trackingId) {
+            setTimeout(() => autoSyncStatusFromTracking(order, { silent: true }), 250);
+        }
+
+        // Turn off Delhivery auto-refresh if switching to a non-Delhivery order
+        if (!(order.courier || '').toLowerCase().includes('delhivery')) {
+            setAutoRefreshEnabled(false);
+        }
         // Pre-fill AWB manifest data from order
         const isCod = order.payment_method === 'cod' || order.paymentMethod === 'cod';
         setAwbManifestData({
@@ -877,6 +1411,49 @@ export default function StoreOrders() {
         }
     };
 
+    const saveCancellationDetails = async () => {
+        try {
+            setSavingCancellationDetails(true);
+            const token = await getToken(true);
+            if (!token) {
+                toast.error('Authentication failed.');
+                return;
+            }
+
+            const { data } = await axios.post('/api/store/orders/update-cancellation', {
+                orderId: selectedOrder._id,
+                cancelledBy: selectedOrder.cancelledBy || 'SELLER',
+                cancelReason: selectedOrder.cancelReason || ''
+            }, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+
+            const savedOrder = data?.order || {};
+
+            setSelectedOrder(prev => prev ? {
+                ...prev,
+                status: savedOrder.status || 'CANCELLED',
+                cancelledBy: savedOrder.cancelledBy ?? prev.cancelledBy,
+                cancelReason: savedOrder.cancelReason ?? prev.cancelReason
+            } : prev);
+
+            setOrders(prev => prev.map(order => order._id === selectedOrder._id ? {
+                ...order,
+                status: savedOrder.status || 'CANCELLED',
+                cancelledBy: savedOrder.cancelledBy ?? order.cancelledBy,
+                cancelReason: savedOrder.cancelReason ?? order.cancelReason
+            } : order));
+
+            toast.success('Cancellation details saved');
+            await fetchOrders();
+        } catch (err) {
+            console.error('Failed to save cancellation details:', err);
+            toast.error(err?.response?.data?.error || err?.response?.data?.message || 'Failed to save cancellation details');
+        } finally {
+            setSavingCancellationDetails(false);
+        }
+    };
+
     useEffect(() => {
         if (authLoading) return; // Wait for auth to load
         if (!user) {
@@ -887,6 +1464,16 @@ export default function StoreOrders() {
         fetchOrders();
         // eslint-disable-next-line
     }, [authLoading, user]);
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [filterStatus, filterDelivery, filterCancel, searchQuery, datePreset, fromDate, toDate, pageSize]);
+
+    useEffect(() => {
+        if (currentPage > totalPages) {
+            setCurrentPage(totalPages);
+        }
+    }, [currentPage, totalPages]);
 
     // Auto-refresh tracking data
     useEffect(() => {
@@ -901,6 +1488,14 @@ export default function StoreOrders() {
             }
         };
     }, [autoRefreshEnabled, selectedOrder, refreshInterval]);
+
+    // Background poll every 60s to catch customer cancellations and other updates
+    useEffect(() => {
+        const bgPoll = setInterval(() => {
+            fetchOrders();
+        }, 60000);
+        return () => clearInterval(bgPoll);
+    }, []);
 
     useEffect(() => {
         const today = new Date();
@@ -930,6 +1525,8 @@ export default function StoreOrders() {
 
     const refreshTrackingData = async () => {
         if (!selectedOrder || !selectedOrder.trackingId) return;
+        // Don't run Delhivery refresh for India Post orders
+        if ((selectedOrder.courier || '').toLowerCase().includes('india post')) return;
         try {
             const token = await getToken();
             const { data } = await axios.get(`/api/track-order?awb=${selectedOrder.trackingId}`, {
@@ -1100,8 +1697,8 @@ export default function StoreOrders() {
             </div>
 
             {/* Status Filter Tabs */}
-            <div className="mb-6 flex flex-wrap gap-2">
-                {['ALL', 'PROCESSING', 'MANIFESTED', 'PICKUP_SCHEDULED', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'PAYMENT_FAILED', 'RTO', 'RETURNED', 'RETURN_REQUESTED', 'DAMAGED_REVIEW'].map(status => (
+            <div className="mb-3 flex flex-wrap gap-2">
+                {['ALL', 'PROCESSING', 'MANIFESTED', 'PICKUP_SCHEDULED', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'PAYMENT_FAILED', 'RTO', 'RETURNED', 'RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED', 'REPLACEMENT_REQUESTED', 'REPLACEMENT_APPROVED', 'REPLACED', 'RETURNED_REFUNDED', 'DAMAGED_REVIEW', 'AWB_GENERATED', 'AWB_REFERENCE_MISSING'].map(status => (
                     <button
                         key={status}
                         onClick={() => setFilterStatus(status)}
@@ -1111,17 +1708,129 @@ export default function StoreOrders() {
                                 : 'bg-gray-100 text-slate-700 hover:bg-gray-200'
                         }`}
                     >
-                        <span>{status === 'ALL' ? 'All Orders' : status === 'PAYMENT_FAILED' ? 'Payment Failed' : status === 'RETURN_REQUESTED' ? 'Return Requested' : status === 'DAMAGED_REVIEW' ? 'Damaged Review' : status.replace(/_/g, ' ')}</span>
-                        {(status === 'RETURN_REQUESTED' || status === 'DAMAGED_REVIEW') && (status === 'RETURN_REQUESTED' ? stats.RETURN_REQUESTED : stats.DAMAGED_REVIEW) > 0 && (
+                        <span>{status === 'ALL' ? 'All Orders' : status === 'PAYMENT_FAILED' ? 'Payment Failed' : status === 'RETURN_REQUESTED' ? 'Return Requested' : status === 'RETURN_APPROVED' ? 'Return Approved' : status === 'RETURN_REJECTED' ? 'Return Rejected' : status === 'REPLACEMENT_REQUESTED' ? 'Replacement Requested' : status === 'REPLACEMENT_APPROVED' ? 'Replacement Approved' : status === 'REPLACED' ? 'Replaced' : status === 'RETURNED_REFUNDED' ? 'Returned & Refunded' : status === 'DAMAGED_REVIEW' ? 'Damaged Review' : status === 'AWB_GENERATED' ? 'AWB Generated' : status === 'AWB_REFERENCE_MISSING' ? 'AWB Ref Missing' : status.replace(/_/g, ' ')}</span>
+                        {(['RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED', 'REPLACEMENT_REQUESTED', 'REPLACEMENT_APPROVED', 'REPLACED', 'RETURNED_REFUNDED', 'DAMAGED_REVIEW', 'AWB_GENERATED', 'AWB_REFERENCE_MISSING'].includes(status)) && (status === 'RETURN_REQUESTED' ? stats.RETURN_REQUESTED : status === 'RETURN_APPROVED' ? stats.RETURN_APPROVED : status === 'RETURN_REJECTED' ? stats.RETURN_REJECTED : status === 'REPLACEMENT_REQUESTED' ? stats.REPLACEMENT_REQUESTED : status === 'REPLACEMENT_APPROVED' ? stats.REPLACEMENT_APPROVED : status === 'REPLACED' ? stats.REPLACED : status === 'RETURNED_REFUNDED' ? stats.RETURNED_REFUNDED : status === 'DAMAGED_REVIEW' ? stats.DAMAGED_REVIEW : status === 'AWB_GENERATED' ? stats.AWB_GENERATED : stats.AWB_REFERENCE_MISSING) > 0 && (
                             <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-                                filterStatus === status ? 'bg-blue-800' : 'bg-red-500 text-white'
+                                filterStatus === status ? 'bg-blue-800' : status === 'AWB_GENERATED' ? 'bg-emerald-500 text-white' : status === 'AWB_REFERENCE_MISSING' ? 'bg-amber-500 text-white' : status === 'RETURN_APPROVED' ? 'bg-green-500 text-white' : status === 'REPLACEMENT_APPROVED' ? 'bg-violet-600 text-white' : status === 'REPLACED' ? 'bg-green-500 text-white' : status === 'RETURNED_REFUNDED' ? 'bg-cyan-500 text-white' : status === 'RETURN_REJECTED' ? 'bg-rose-500 text-white' : status === 'REPLACEMENT_REQUESTED' ? 'bg-violet-500 text-white' : 'bg-red-500 text-white'
                             }`}>
-                                {status === 'RETURN_REQUESTED' ? stats.RETURN_REQUESTED : stats.DAMAGED_REVIEW}
+                                {status === 'RETURN_REQUESTED' ? stats.RETURN_REQUESTED : status === 'RETURN_APPROVED' ? stats.RETURN_APPROVED : status === 'RETURN_REJECTED' ? stats.RETURN_REJECTED : status === 'REPLACEMENT_REQUESTED' ? stats.REPLACEMENT_REQUESTED : status === 'REPLACEMENT_APPROVED' ? stats.REPLACEMENT_APPROVED : status === 'REPLACED' ? stats.REPLACED : status === 'RETURNED_REFUNDED' ? stats.RETURNED_REFUNDED : status === 'DAMAGED_REVIEW' ? stats.DAMAGED_REVIEW : status === 'AWB_GENERATED' ? stats.AWB_GENERATED : stats.AWB_REFERENCE_MISSING}
                             </span>
                         )}
                     </button>
                 ))}
             </div>
+
+            {/* Delivery Date Filter */}
+            <div className="mb-6 flex flex-wrap gap-2 items-center">
+                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide mr-1">Exp. Delivery:</span>
+                {[
+                    { key: 'ALL', label: 'All', color: 'bg-slate-600' },
+                    { key: 'TODAY', label: '🟢 Today', color: 'bg-green-600' },
+                    { key: 'TOMORROW', label: '🔵 Tomorrow', color: 'bg-blue-600' },
+                    { key: 'OVERDUE', label: '🔴 Overdue', color: 'bg-red-600' },
+                    { key: 'UPCOMING', label: '🟡 Upcoming', color: 'bg-yellow-500' },
+                    { key: 'NO_DATE', label: 'No Date', color: 'bg-gray-400' },
+                ].map(({ key, label, color }) => (
+                    <button
+                        key={key}
+                        onClick={() => setFilterDelivery(key)}
+                        className={`px-3 py-1.5 rounded-lg font-medium text-sm transition-all ${
+                            filterDelivery === key
+                                ? `${color} text-white shadow-md`
+                                : 'bg-gray-100 text-slate-700 hover:bg-gray-200'
+                        }`}
+                    >
+                        {label}
+                    </button>
+                ))}
+            </div>
+
+            {/* Cancel Reason Filter */}
+            <div className="mb-6 flex flex-wrap gap-2 items-center">
+                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide mr-1">Cancel Reason:</span>
+                {[
+                    { key: 'ALL', label: 'All' },
+                    { key: 'CUSTOMER', label: '👤 By Customer' },
+                    { key: 'UNDELIVERABLE_PINCODE', label: '📍 Pincode Issue' },
+                    { key: 'SELLER', label: '🏪 By Seller' },
+                ].map(({ key, label }) => (
+                    <button
+                        key={key}
+                        onClick={() => setFilterCancel(key)}
+                        className={`px-3 py-1.5 rounded-lg font-medium text-sm transition-all ${
+                            filterCancel === key
+                                ? 'bg-rose-600 text-white shadow-md'
+                                : 'bg-gray-100 text-slate-700 hover:bg-gray-200'
+                        }`}
+                    >
+                        {label}
+                    </button>
+                ))}
+            </div>
+
+            <div className="mb-6 bg-white border border-gray-200 rounded-lg p-4">
+                <label className="text-xs text-slate-500">Search Orders</label>
+                <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search by AWB, Order ID, Order Number, or Email"
+                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                />
+            </div>
+
+            {isAwbSelectionFilter && filteredOrders.length > 0 && (
+                <div className="mb-4 flex flex-col gap-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                        <p className="text-sm font-semibold text-sky-900">{isAwbReferenceMissingFilter ? 'AWB Reference Missing Orders' : 'AWB Generated Orders'}</p>
+                        <p className="text-xs text-sky-700">{isAwbReferenceMissingFilter ? 'These orders have a generated AWB, but the order still has no saved AWB or reference number.' : 'This list shows AWBs generated but not downloaded yet, so you can bulk download them.'}</p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full border border-sky-200 bg-white px-3 py-1 text-xs font-semibold text-sky-800">
+                            {selectedAwbOrderIds.length} selected
+                        </span>
+                        <button
+                            type="button"
+                            onClick={() => setSelectedAwbOrderIds(paginatedOrders.map((order) => order._id))}
+                            className="px-3 py-2 rounded-lg text-sm font-medium bg-white text-sky-700 border border-sky-200 hover:bg-sky-100 transition"
+                        >
+                            Select Page
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setSelectedAwbOrderIds(filteredOrders.map((order) => order._id))}
+                            className="px-3 py-2 rounded-lg text-sm font-medium bg-white text-sky-700 border border-sky-200 hover:bg-sky-100 transition"
+                        >
+                            Select All Filtered
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setSelectedAwbOrderIds([])}
+                            disabled={selectedAwbOrderIds.length === 0}
+                            className={`px-3 py-2 rounded-lg text-sm font-medium transition ${
+                                selectedAwbOrderIds.length === 0
+                                    ? 'bg-sky-100 text-sky-300 cursor-not-allowed border border-sky-100'
+                                    : 'bg-white text-sky-700 border border-sky-200 hover:bg-sky-100'
+                            }`}
+                        >
+                            Clear
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => downloadSelectedAwbs(selectedAwbOrders)}
+                            disabled={selectedAwbOrders.length === 0 || bulkDownloadingAwbs}
+                            className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition ${
+                                selectedAwbOrders.length === 0 || bulkDownloadingAwbs
+                                    ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                                    : 'bg-sky-600 text-white hover:bg-sky-700 shadow-sm'
+                            }`}
+                        >
+                            <Download size={16} />
+                            <span>{bulkDownloadingAwbs ? 'Downloading...' : 'Download Selected AWBs'}</span>
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {/* Date Range Filters */}
             <div className="mb-6 bg-white border border-gray-200 rounded-lg p-4 flex flex-col gap-4">
@@ -1172,6 +1881,18 @@ export default function StoreOrders() {
                     </div>
                     <div className="sm:col-span-2 lg:col-span-2 flex flex-col sm:flex-row sm:items-end gap-3">
                         <div className="text-xs text-slate-500 sm:flex-1">Showing orders by date range</div>
+                        <div>
+                            <label className="text-xs text-slate-500">Rows Per Page</label>
+                            <select
+                                value={pageSize}
+                                onChange={(e) => setPageSize(Number(e.target.value))}
+                                className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                            >
+                                {[10, 20, 50, 100].map(size => (
+                                    <option key={size} value={size}>{size} / page</option>
+                                ))}
+                            </select>
+                        </div>
                         <button
                             type="button"
                             onClick={exportOrdersToCsv}
@@ -1192,10 +1913,12 @@ export default function StoreOrders() {
             {filteredOrders.length === 0 ? (
                 <p className="text-center py-8 text-slate-500">No orders found for this status</p>
             ) : (
-                <div className="overflow-x-auto w-full rounded-md shadow border border-gray-200">
+                <div className="w-full rounded-md shadow border border-gray-200 overflow-hidden">
+                    <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left text-gray-600">
                         <thead className="bg-gray-50 text-gray-700 text-xs uppercase tracking-wider">
                             <tr>
+                                {isAwbSelectionFilter && <th className="px-4 py-3">Select</th>}
                                 <th className="px-4 py-3">Sr. No.</th>
                                 <th className="px-4 py-3">Order No.</th>
                                 <th className="px-4 py-3">Customer</th>
@@ -1203,14 +1926,16 @@ export default function StoreOrders() {
                                 <th className="px-4 py-3">Total</th>
                                 <th className="px-4 py-3">Payment</th>
                                 <th className="px-4 py-3">Status</th>
-                                <th className="px-4 py-3">AWB Status</th>
                                 <th className="px-4 py-3">Need to Pick</th>
                                 <th className="px-4 py-3">Tracking</th>
-                                <th className="px-4 py-3">Date & Time</th>
+                                <th className="px-4 py-3">Exp. Delivery</th>
+                                <th className="px-4 py-3">Order Date</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
-                            {filteredOrders.map((order, index) => {
+                            {paginatedOrders.map((order, index) => {
+                                                                const awbPendingDownload = hasAwbPendingDownload(order);
+                                                                const awbReferenceMissing = hasGeneratedAwbMissingReference(order);
                                                                 // Show 'Yes' in Need to Pick if pickup is scheduled (from Delhivery events) and not yet picked up or delivered/cancelled
                                                                 let needToPick = false;
                                                                 let latestTrackingStatus = '';
@@ -1268,10 +1993,21 @@ export default function StoreOrders() {
                                 return (
                                   <tr
                                     key={order._id}
-                                    className="hover:bg-gray-50 transition-colors duration-150 cursor-pointer"
+                                                                                                                                                className={`${awbReferenceMissing ? 'bg-amber-50 hover:bg-amber-100' : awbPendingDownload ? 'bg-emerald-50 hover:bg-emerald-100' : 'hover:bg-gray-50'} transition-colors duration-150 cursor-pointer`}
                                     onClick={() => openModal(order)}
                                   >
-                                    <td className="pl-6 text-green-600 font-medium">{index + 1}</td>
+                                                                        {isAwbSelectionFilter && (
+                                                                                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                                                                                        <input
+                                                                                                type="checkbox"
+                                                                                                checked={selectedAwbOrderIds.includes(order._id)}
+                                                                                                onChange={() => toggleAwbSelection(order._id)}
+                                                                                                className="h-4 w-4 rounded border-gray-300 text-sky-600 focus:ring-sky-500"
+                                                                                                aria-label={`Select order ${getDisplayOrderNumber(order)} for AWB download`}
+                                                                                        />
+                                                                                </td>
+                                                                        )}
+                                    <td className="pl-6 text-green-600 font-medium">{startIndex + index + 1}</td>
                                     <td className="px-4 py-3 font-mono text-xs text-slate-700">{getDisplayOrderNumber(order)}</td>
                                     <td className="px-4 py-3">
                                         <div className="flex flex-col gap-1">
@@ -1320,7 +2056,21 @@ export default function StoreOrders() {
                                             <span className="text-slate-400 text-xs">—</span>
                                         )}
                                     </td>
-                                    <td className="px-4 py-3 font-medium text-slate-800">{currency}{order.total}</td>
+                                    <td className="px-4 py-3">
+                                        {(() => {
+                                            const refundedAmount = getReturnedRefundAmount(order);
+                                            const netAmount = getNetOrderAmount(order);
+                                            return refundedAmount > 0 ? (
+                                                <div className="flex flex-col gap-0.5">
+                                                    <span className="font-semibold text-slate-400 line-through">{currency}{order.total}</span>
+                                                    <span className="font-bold text-slate-800">{currency}{netAmount}</span>
+                                                    <span className="text-[10px] font-semibold text-cyan-700">Refunded: {currency}{refundedAmount}</span>
+                                                </div>
+                                            ) : (
+                                                <span className="font-medium text-slate-800">{currency}{order.total}</span>
+                                            );
+                                        })()}
+                                    </td>
                                     <td className="px-4 py-3">
                                         {(() => {
                                             const paymentStatusLabel = getPaymentStatus(order);
@@ -1339,21 +2089,23 @@ export default function StoreOrders() {
                                             // Use mapped status from tracking if available, else fallback to order.status
                                             const mappedStatus = mapDelhiveryStatusToOrderStatus(order.delhivery, order.status) || order.status;
                                             const mappedStatusLabel = STATUS_OPTIONS.find(s => s.value === mappedStatus)?.label || mappedStatus;
+                                            const cancelBadge = mappedStatus === 'CANCELLED' && order.cancelledBy ? (
+                                                <span className={`mt-1 block text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                                                    order.cancelledBy === 'CUSTOMER' ? 'bg-orange-100 text-orange-700' :
+                                                    order.cancelledBy === 'UNDELIVERABLE_PINCODE' ? 'bg-yellow-100 text-yellow-700' :
+                                                    'bg-slate-100 text-slate-600'
+                                                }`}>
+                                                    {order.cancelledBy === 'CUSTOMER' ? '👤 Customer' :
+                                                     order.cancelledBy === 'UNDELIVERABLE_PINCODE' ? '📍 Pincode' :
+                                                     order.cancelledBy === 'SELLER' ? '🏪 Seller' : order.cancelledBy}
+                                                </span>
+                                            ) : null;
                                             return (
-                                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(mappedStatus)}`}>{mappedStatusLabel}</span>
+                                                <div>
+                                                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(mappedStatus)}`}>{mappedStatusLabel}</span>
+                                                    {cancelBadge}
+                                                </div>
                                             );
-                                        })()}
-                                    </td>
-                                    <td className="px-4 py-3">
-                                        {(() => {
-                                            const status = awbStatus[order._id];
-                                            if (!status || !status.generated) {
-                                                return <span className="text-slate-400 text-xs">—</span>;
-                                            }
-                                            if (status.downloaded) {
-                                                return <span className="bg-green-100 text-green-700 text-xs px-2 py-1 rounded-full font-medium">✓ Downloaded</span>;
-                                            }
-                                            return <span className="bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded-full font-medium">📄 Generated</span>;
                                         })()}
                                     </td>
                                     <td className="px-4 py-3 font-bold text-orange-600">
@@ -1361,12 +2113,76 @@ export default function StoreOrders() {
                                     </td>
                                     <td className="px-4 py-3">
                                         {order.trackingId ? (
-                                            <span className="bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded-full font-medium">
-                                                {order.trackingId.substring(0, 8)}...
-                                            </span>
+                                            <div className="flex flex-col gap-1">
+                                                <span className="bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded-full font-medium w-fit">
+                                                    {order.trackingId.substring(0, 8)}...
+                                                </span>
+                                                {awbPendingDownload && (
+                                                    <span className="bg-emerald-100 text-emerald-700 text-[10px] px-2 py-1 rounded-full font-semibold w-fit">
+                                                        AWB Ready
+                                                    </span>
+                                                )}
+                                            </div>
+                                        ) : awbReferenceMissing ? (
+                                            <div className="flex flex-col gap-1">
+                                                <span className="text-amber-700 text-xs font-medium">AWB not saved</span>
+                                                <span className="bg-amber-100 text-amber-700 text-[10px] px-2 py-1 rounded-full font-semibold w-fit">
+                                                    Ref Missing
+                                                </span>
+                                            </div>
                                         ) : (
                                             <span className="text-slate-400 text-xs">Not shipped</span>
                                         )}
+                                    </td>
+                                    <td className="px-4 py-3 text-xs whitespace-nowrap">
+                                        {(() => {
+                                            const edd = order?.delhivery?.expected_delivery_date || order?.delhivery?.expected_return_date;
+                                            if (!edd) return <span className="text-slate-400">—</span>;
+                                            const today = new Date(); today.setHours(0,0,0,0);
+                                            const exp = new Date(edd); exp.setHours(0,0,0,0);
+                                            const diffDays = Math.round((exp - today) / 86400000);
+                                            const dateLabel = new Date(edd).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+
+                                            if (diffDays === 0) {
+                                                return (
+                                                    <div className="flex flex-col gap-1">
+                                                        <span className="bg-green-100 text-green-700 px-2 py-1 rounded-full font-bold w-fit">Today</span>
+                                                        <span className="text-slate-500 font-medium">{dateLabel}</span>
+                                                    </div>
+                                                );
+                                            }
+                                            if (diffDays === 1) {
+                                                return (
+                                                    <div className="flex flex-col gap-1">
+                                                        <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded-full font-bold w-fit">Tomorrow</span>
+                                                        <span className="text-slate-500 font-medium">{dateLabel}</span>
+                                                    </div>
+                                                );
+                                            }
+                                            if (diffDays === -1) {
+                                                return (
+                                                    <div className="flex flex-col gap-1">
+                                                        <span className="bg-orange-100 text-orange-700 px-2 py-1 rounded-full font-bold w-fit">Yesterday</span>
+                                                        <span className="text-slate-500 font-medium">{dateLabel}</span>
+                                                    </div>
+                                                );
+                                            }
+                                            if (diffDays < -1) {
+                                                return (
+                                                    <div className="flex flex-col gap-1">
+                                                        <span className="bg-red-100 text-red-700 px-2 py-1 rounded-full font-bold w-fit">{Math.abs(diffDays)}d late</span>
+                                                        <span className="text-slate-500 font-medium">{dateLabel}</span>
+                                                    </div>
+                                                );
+                                            }
+
+                                            return (
+                                                <div className="flex flex-col gap-1">
+                                                    <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full font-bold w-fit">Upcoming</span>
+                                                    <span className="text-slate-700 font-semibold">{dateLabel}</span>
+                                                </div>
+                                            );
+                                        })()}
                                     </td>
                                     <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{new Date(order.createdAt).toLocaleString()}</td>
                                   </tr>
@@ -1374,6 +2190,33 @@ export default function StoreOrders() {
                             })}
                         </tbody>
                     </table>
+                    </div>
+                    <div className="flex flex-col gap-3 border-t border-gray-200 bg-white px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+                        <p className="text-slate-500">
+                            Showing {startIndex + 1} to {Math.min(startIndex + pageSize, filteredOrders.length)} of {filteredOrders.length} orders
+                        </p>
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                                disabled={currentPage === 1}
+                                className={`px-3 py-2 rounded-lg font-medium transition ${currentPage === 1 ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-gray-100 text-slate-700 hover:bg-gray-200'}`}
+                            >
+                                Previous
+                            </button>
+                            <span className="px-3 py-2 text-slate-600 font-medium">
+                                Page {currentPage} of {totalPages}
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                                disabled={currentPage === totalPages}
+                                className={`px-3 py-2 rounded-lg font-medium transition ${currentPage === totalPages ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-gray-100 text-slate-700 hover:bg-gray-200'}`}
+                            >
+                                Next
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
             {isModalOpen && selectedOrder && (
@@ -1396,89 +2239,12 @@ export default function StoreOrders() {
                                         <span className="text-sm">Download</span>
                                     </button>
                                     <button
-                                        onClick={async () => {
-                                            try {
-                                                setGeneratingAwb(true)
-                                                // Always try to load latest store details so logo/return address stay correct.
-                                                let storeData = {}
-                                                const storeId = selectedOrder.storeId || selectedOrder.store || selectedOrder.sellerId || (selectedOrder.store && selectedOrder.store._id)
-                                                if (storeId) {
-                                                    const token = await getToken(true)
-                                                    const { data } = await axios.get(`/api/store/${storeId}`, {
-                                                        headers: { Authorization: `Bearer ${token}` }
-                                                    })
-                                                    storeData = data?.store || {}
-
-                                                    if (!storeContracts || storeContracts.length === 0) {
-                                                        let contracts = data?.store?.contractIds || []
-                                                        // If no contracts in DB, show sample contracts for testing
-                                                        if (!contracts || contracts.length === 0) {
-                                                            contracts = [
-                                                                { key: 'contract_1', label: 'BUSINESS_PARCEL', id: '41250721' },
-                                                                { key: 'contract_2', label: 'Normal', id: '41431600' },
-                                                                { key: 'contract_3', label: 'speed post', id: '41853808' }
-                                                            ]
-                                                        }
-                                                        setStoreContracts(contracts)
-                                                    }
-                                                }
-                                                // Build AWB details form
-                                                const awbDetails = {
-                                                    awbNumber: selectedOrder.trackingId || selectedOrder._id,
-                                                    orderId: getDisplayOrderNumber(selectedOrder),
-                                                    courier: selectedOrder.courier || '',
-                                                    date: new Date().toLocaleDateString(),
-                                                    senderName: resolveSellerName(selectedOrder, storeData),
-                                                    senderAddress: DEFAULT_SELLER_ADDRESS,
-                                                    senderPhone: '',
-                                                    receiverName: (selectedOrder.shippingAddress && selectedOrder.shippingAddress.name) || selectedOrder.guestName || '',
-                                                    receiverAddress: selectedOrder.shippingAddress ? [selectedOrder.shippingAddress.street, selectedOrder.shippingAddress.city, selectedOrder.shippingAddress.state, selectedOrder.shippingAddress.zip].filter(Boolean).join(', ') : '',
-                                                    receiverPhone: selectedOrder.shippingAddress?.phone || '',
-                                                    receiverPin: selectedOrder.shippingAddress?.zip || selectedOrder.shippingAddress?.pincode || '',
-                                                    contents: (selectedOrder.orderItems || []).map(i => `${i.quantity || 1} x ${(i.name || i.product?.name || '').substring(0,40)}`).join('; '),
-                                                    weight: Math.max(1, Math.ceil((selectedOrder.total || 0) / 100)),
-                                                    dimensions: (awbManifestData.dimensions || []).map(d => `${d.length_cm}x${d.width_cm}x${d.height_cm} cm`).join('; '),
-                                                    price: selectedOrder.total || selectedOrder.amount || '',
-                                                    shippingCharge: Number(selectedOrder.shippingFee ?? selectedOrder.shipping ?? selectedOrder.deliveryCharge ?? 0),
-                                                    paymentMethod: selectedOrder.paymentMethod || selectedOrder.payment_method || '',
-                                                    orderItems: (selectedOrder.orderItems || []).map(item => ({
-                                                        ...item,
-                                                        image: resolveOrderItemImage(item)
-                                                    })),
-                                                    storeLogo: storeData.logo || selectedOrder.storeLogo || selectedOrder.logo || '/logo/logo1.png',
-                                                    returnAddress: resolveReturnAddress(selectedOrder, storeData),
-                                                    customerId: selectedOrder.customerId || selectedOrder.userId || '',
-                                                    gst: storeData.gst || selectedOrder.gst || DEFAULT_GST,
-                                                    contractId: '',
-                                                    contractLabel: '',
-                                                    paymentType: (selectedOrder.paymentMethod || '').toUpperCase().includes('COD') ? 'COD' : 'Prepaid'
-                                                }
-                                                setAwbFormDetails(awbDetails)
-                                                setSelectedContract(null)
-                                                setAwbFormPreviewUrl('')
-                                                setAwbFormPreviewDoc(null)
-                                                
-                                                // Reset weight & dimensions form
-                                                setUseManualWeight(false)
-                                                setManualWeight('')
-                                                setPackageLength('10')
-                                                setPackageWidth('20')
-                                                setPackageHeight('20')
-                                                setAwbFormErrors({})
-                                                
-                                                setShowAwbGenerateModal(true)
-                                            } catch (err) {
-                                                console.error('Generate AWB error', err)
-                                                toast.error('Failed to open AWB form')
-                                            } finally {
-                                                setGeneratingAwb(false)
-                                            }
-                                        }}
+                                        onClick={() => openAwbEditor(selectedOrder)}
                                         className="flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors backdrop-blur-sm"
-                                        title="Generate AWB"
+                                        title={hasGeneratedAwb(selectedOrder) ? 'Edit AWB' : 'Generate AWB'}
                                     >
                                         <Download size={18} />
-                                        <span className="text-sm">Generate AWB</span>
+                                        <span className="text-sm">{hasGeneratedAwb(selectedOrder) ? 'Edit AWB' : 'Generate AWB'}</span>
                                     </button>
                                     <button
                                         onClick={() => printInvoice(selectedOrder)}
@@ -1518,8 +2284,17 @@ export default function StoreOrders() {
                                             </div>
                                             <div>
                                                 <p className="text-xs text-slate-500 mb-1">Track Order</p>
-                                                {selectedOrder.trackingUrl ? (
-                                                    <a href={selectedOrder.trackingUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-medium">
+                                                {selectedOrder.trackingId ? (
+                                                    <a
+                                                        href={
+                                                            (selectedOrder.courier || '').toLowerCase().includes('india post')
+                                                                ? `https://t.17track.net/en#nums=${encodeURIComponent(selectedOrder.trackingId)}`
+                                                                : selectedOrder.trackingUrl
+                                                        }
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="text-blue-600 hover:underline font-medium"
+                                                    >
                                                         View Tracking
                                                     </a>
                                                 ) : (
@@ -1679,13 +2454,145 @@ export default function StoreOrders() {
                                     </div>
                                 )}
 
-                                {/* ...existing code... */}
+                                {/* India Post Tracking Section */}
+                                <div className="mt-5 border border-red-200 rounded-xl overflow-hidden">
+                                    <div className="bg-gradient-to-r from-red-600 to-orange-500 px-4 py-3 flex items-center gap-2">
+                                        <span className="text-xl">📮</span>
+                                        <h4 className="text-white font-semibold text-sm">India Post Tracking</h4>
+                                        {selectedOrder?.courier?.toLowerCase().includes('india post') && (
+                                            <span className="ml-auto bg-white/20 text-white text-xs px-2 py-0.5 rounded-full font-medium">Active</span>
+                                        )}
+                                    </div>
+                                    <div className="bg-red-50 p-4 space-y-3">
+                                        <div className="flex gap-2">
+                                            <input
+                                                type="text"
+                                                value={indiaPostAwb}
+                                                onChange={e => setIndiaPostAwb(e.target.value)}
+                                                placeholder="Enter India Post AWB (e.g. EB468827991IN)"
+                                                className="flex-1 px-3 py-2 border border-red-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 text-sm bg-white"
+                                            />
+                                            <button
+                                                onClick={saveIndiaPostTracking}
+                                                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg text-sm transition-colors whitespace-nowrap"
+                                            >
+                                                Save &amp; Track
+                                            </button>
+                                        </div>
+
+                                        {/* If already India Post, show current AWB + refresh + link */}
+                                        {selectedOrder?.courier?.toLowerCase().includes('india post') && selectedOrder?.trackingId && (
+                                            <div className="space-y-3">
+                                                <div className="flex items-center justify-between bg-white border border-red-200 rounded-lg px-3 py-2">
+                                                    <div>
+                                                        <p className="text-xs text-slate-500">Current AWB</p>
+                                                        <p className="font-mono font-semibold text-slate-800 text-sm">{selectedOrder.trackingId}</p>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <button
+                                                            onClick={() => fetchIndiaPostTracking()}
+                                                            disabled={fetchingIndiaPostTracking}
+                                                            className="flex items-center gap-1 px-3 py-1.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white rounded-lg text-xs font-medium transition-colors"
+                                                        >
+                                                            {fetchingIndiaPostTracking ? '⏳ Fetching...' : '🔄 Refresh'}
+                                                        </button>
+                                                        <a
+                                                            href={`https://t.17track.net/en#nums=${selectedOrder.trackingId}`}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-medium transition-colors"
+                                                        >
+                                                            📦 17track
+                                                        </a>
+                                                    </div>
+                                                </div>
+
+                                                {/* Live tracking data from 17track */}
+                                                {indiaPostTracking && (
+                                                    <div className="space-y-2">
+                                                        {/* Current status */}
+                                                        <div className={`p-3 rounded-lg border ${indiaPostTracking.isDelivered ? 'bg-green-50 border-green-200' : 'bg-blue-50 border-blue-200'}`}>
+                                                            <p className="text-xs text-slate-500 font-semibold">Current Status</p>
+                                                            <p className={`font-bold text-lg mt-0.5 ${indiaPostTracking.isDelivered ? 'text-green-700' : 'text-blue-700'}`}>
+                                                                {indiaPostTracking.isDelivered ? '✅' : '📦'} {indiaPostTracking.statusLabel}
+                                                            </p>
+                                                        </div>
+
+                                                        {/* Official carrier message */}
+                                                        {indiaPostTracking.providerTips && (
+                                                            <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg">
+                                                                <p className="text-xs text-slate-500 font-semibold">Carrier Message</p>
+                                                                <p className="text-sm font-medium text-amber-800 mt-0.5">{indiaPostTracking.providerTips}</p>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Delivered time */}
+                                                        {indiaPostTracking.deliveredAt && (
+                                                            <div className="bg-green-50 border border-green-200 p-3 rounded-lg">
+                                                                <p className="text-xs text-slate-500 font-semibold">Delivered On</p>
+                                                                <p className="font-bold text-green-700 mt-0.5">{indiaPostTracking.deliveredAt}</p>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Current location */}
+                                                        {indiaPostTracking.currentLocation && (
+                                                            <div className="bg-gradient-to-r from-green-500 to-emerald-500 p-3 rounded-lg text-white">
+                                                                <p className="text-xs font-semibold opacity-90">📍 Current Location</p>
+                                                                <p className="font-bold text-base mt-0.5">{indiaPostTracking.currentLocation}</p>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Events timeline */}
+                                                        {indiaPostTracking.events && indiaPostTracking.events.length > 0 && (
+                                                            <div className="border-t border-red-200 pt-3">
+                                                                <p className="text-xs font-semibold text-slate-600 mb-2 flex items-center gap-1">📦 Tracking History ({indiaPostTracking.events.length} events)</p>
+                                                                <div className="space-y-2 max-h-72 overflow-y-auto">
+                                                                    {indiaPostTracking.events.map((evt, idx) => (
+                                                                        <div key={idx} className={`border-l-2 ${idx === 0 ? 'border-red-500' : 'border-red-200'} pl-3 py-1.5 bg-white rounded-r`}>
+                                                                            <div className="flex justify-between items-start gap-2">
+                                                                                <div className="flex-1">
+                                                                                    {evt.location && <div className="font-semibold text-slate-800 text-xs">📍 {evt.location}</div>}
+                                                                                    {evt.description && <div className={`text-xs mt-0.5 ${idx === 0 ? 'font-bold text-red-700' : 'text-slate-600'}`}>{evt.description}</div>}
+                                                                                </div>
+                                                                                <div className="text-xs text-slate-400 whitespace-nowrap">{evt.time}</div>
+                                                                            </div>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+
+                                                {/* Loading state */}
+                                                {fetchingIndiaPostTracking && !indiaPostTracking && (
+                                                    <div className="text-center py-4 text-sm text-slate-500">⏳ Fetching live tracking...</div>
+                                                )}
+
+                                                {/* No key configured */}
+                                                {!fetchingIndiaPostTracking && !indiaPostTracking && indiaPostNoKey && (
+                                                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 space-y-2">
+                                                        <p className="text-xs text-yellow-900">
+                                                            ℹ️ 17track API key is not configured.
+                                                        </p>
+                                                        <p className="text-[11px] text-slate-600">
+                                                            Go to Dashboard Settings and add your 17track API key.
+                                                        </p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
                             </div>
 
                             {/* Return/Replacement Request Section */}
                             {selectedOrder.returns && selectedOrder.returns.length > 0 && (
                                 <div className="bg-gradient-to-br from-pink-50 to-pink-100 border border-pink-200 rounded-xl p-5">
-                                    <h3 className="text-lg font-semibold text-pink-900 mb-4">Return/Replacement Requests</h3>
+                                    <h3 className="text-lg font-semibold text-pink-900 mb-1">Return/Replacement Request History</h3>
+                                    <p className="text-xs text-pink-700 mb-4">
+                                        This section shows what the customer originally requested. The live order lifecycle is the status selected below in Update Order Status.
+                                    </p>
                                     
                                     <div className="space-y-4">
                                         {selectedOrder.returns.map((returnRequest, idx) => (
@@ -1697,12 +2604,15 @@ export default function StoreOrders() {
                                                         {returnRequest.type}
                                                     </span>
                                                     <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                                                        returnRequest.status === 'REQUESTED' ? 'bg-yellow-100 text-yellow-700' :
-                                                        returnRequest.status === 'APPROVED' ? 'bg-green-100 text-green-700' :
-                                                        returnRequest.status === 'REJECTED' ? 'bg-red-100 text-red-700' :
+                                                        getReturnRequestStatusLabel(returnRequest) === 'REQUESTED' ? 'bg-yellow-100 text-yellow-700' :
+                                                        getReturnRequestStatusLabel(returnRequest) === 'APPROVED' ? 'bg-green-100 text-green-700' :
+                                                        getReturnRequestStatusLabel(returnRequest) === 'REJECTED' ? 'bg-red-100 text-red-700' :
+                                                        getReturnRequestStatusLabel(returnRequest) === 'REPLACEMENT_REQUESTED' ? 'bg-violet-100 text-violet-700' :
+                                                        getReturnRequestStatusLabel(returnRequest) === 'REPLACED' ? 'bg-emerald-100 text-emerald-700' :
+                                                        getReturnRequestStatusLabel(returnRequest) === 'RETURNED_REFUNDED' ? 'bg-cyan-100 text-cyan-700' :
                                                         'bg-slate-100 text-slate-700'
                                                     }`}>
-                                                        {returnRequest.status}
+                                                        {getReturnRequestStatusLabel(returnRequest).replace(/_/g, ' ')}
                                                     </span>
                                                     <span className="text-xs text-slate-500 ml-auto">{new Date(returnRequest.requestedAt).toLocaleString()}</span>
                                                 </div>
@@ -1717,6 +2627,16 @@ export default function StoreOrders() {
                                                         <div>
                                                             <p className="text-slate-600 font-medium">Description:</p>
                                                             <p className="text-slate-900">{returnRequest.description}</p>
+                                                        </div>
+                                                    )}
+
+                                                    {returnRequest.type === 'RETURN' && returnRequest.status === 'COMPLETED' && (
+                                                        <div>
+                                                            <p className="text-slate-600 font-medium">Refund Amount:</p>
+                                                            <p className="text-cyan-700 font-semibold">{currency}{(() => {
+                                                                const item = selectedOrder.orderItems?.[returnRequest.itemIndex];
+                                                                return Number(item?.price || 0) * Number(item?.quantity || 1);
+                                                            })()}</p>
                                                         </div>
                                                     )}
 
@@ -1914,7 +2834,19 @@ export default function StoreOrders() {
                                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm mb-4">
                                     <div>
                                         <p className="text-slate-500">Total Amount</p>
-                                        <p className="text-xl font-bold text-slate-900">{currency}{selectedOrder.total}</p>
+                                        {(() => {
+                                            const refundedAmount = getReturnedRefundAmount(selectedOrder);
+                                            const netAmount = getNetOrderAmount(selectedOrder);
+                                            return refundedAmount > 0 ? (
+                                                <div>
+                                                    <p className="text-sm font-medium text-slate-400 line-through">{currency}{selectedOrder.total}</p>
+                                                    <p className="text-xl font-bold text-slate-900">{currency}{netAmount}</p>
+                                                    <p className="text-xs font-semibold text-cyan-700">Refunded: {currency}{refundedAmount}</p>
+                                                </div>
+                                            ) : (
+                                                <p className="text-xl font-bold text-slate-900">{currency}{selectedOrder.total}</p>
+                                            );
+                                        })()}
                                     </div>
                                     <div>
                                         <p className="text-slate-500">Payment Method</p>
@@ -2058,6 +2990,13 @@ export default function StoreOrders() {
                                             value={selectedOrder.status}
                                             onChange={async (e) => {
                                                 const newStatus = e.target.value;
+                                                if (newStatus === 'CANCELLED') {
+                                                    setPendingCancelStatus(newStatus);
+                                                    setCancelModalBy('SELLER');
+                                                    setCancelModalReason('');
+                                                    setShowCancelModal(true);
+                                                    return;
+                                                }
                                                 try {
                                                     const token = await getToken(true);
                                                     if (!token) {
@@ -2088,6 +3027,50 @@ export default function StoreOrders() {
                                             {selectedOrder.status}
                                         </span>
                                     </div>
+
+                                    {/* Cancel reason editor — shown only when order is CANCELLED */}
+                                    {selectedOrder.status === 'CANCELLED' && (
+                                        <div className="mt-4 relative z-10 bg-red-50 border border-red-200 rounded-xl p-4 pointer-events-auto" onClick={(e) => e.stopPropagation()}>
+                                            <p className="text-sm font-semibold text-red-800 mb-3">🚫 Cancellation Details</p>
+                                            <div className="space-y-2 mb-3">
+                                                {[
+                                                    { value: 'SELLER', label: '🏪 Cancelled by Seller' },
+                                                    { value: 'CUSTOMER', label: '👤 Requested by Customer' },
+                                                    { value: 'UNDELIVERABLE_PINCODE', label: '📍 Pincode Not Deliverable' },
+                                                    { value: 'OTHER', label: '📝 Other' },
+                                                ].map(opt => (
+                                                    <label key={opt.value} className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition ${
+                                                        (selectedOrder.cancelledBy || 'SELLER') === opt.value ? 'border-red-500 bg-white' : 'border-transparent hover:bg-white'
+                                                    }`}>
+                                                        <input
+                                                            type="radio"
+                                                            name="editCancelBy"
+                                                            value={opt.value}
+                                                            checked={(selectedOrder.cancelledBy || 'SELLER') === opt.value}
+                                                            onChange={() => setSelectedOrder({...selectedOrder, cancelledBy: opt.value})}
+                                                            className="w-4 h-4 text-red-600"
+                                                        />
+                                                        <span className="text-sm font-medium text-slate-800">{opt.label}</span>
+                                                    </label>
+                                                ))}
+                                            </div>
+                                            <input
+                                                type="text"
+                                                value={selectedOrder.cancelReason || ''}
+                                                onChange={e => setSelectedOrder({...selectedOrder, cancelReason: e.target.value})}
+                                                placeholder="Cancel note (optional)"
+                                                className="w-full px-3 py-2 border border-red-300 rounded-lg text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-red-400"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={saveCancellationDetails}
+                                                disabled={savingCancellationDetails}
+                                                className={`w-full py-2 text-white font-semibold rounded-lg text-sm transition cursor-pointer ${savingCancellationDetails ? 'bg-red-300 cursor-wait' : 'bg-red-600 hover:bg-red-700'}`}
+                                            >
+                                                {savingCancellationDetails ? 'Saving...' : 'Save Cancellation Details'}
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 
@@ -2204,6 +3187,78 @@ export default function StoreOrders() {
             )}
 
             {/* New AWB Generation Form Modal */}
+            {showCancelModal && selectedOrder && (
+                <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[80] p-4" onClick={() => setShowCancelModal(false)}>
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-3 mb-6">
+                            <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center text-2xl">🚫</div>
+                            <div>
+                                <h3 className="text-xl font-bold text-slate-900">Cancel Order</h3>
+                                <p className="text-sm text-slate-500">Select why this order is being cancelled</p>
+                            </div>
+                        </div>
+
+                        <div className="mb-5 space-y-2">
+                            {[
+                                { value: 'SELLER', label: '🏪 Cancelled by Seller', desc: 'Stock issue, seller decision, etc.' },
+                                { value: 'CUSTOMER', label: '👤 Requested by Customer', desc: 'Customer asked to cancel' },
+                                { value: 'UNDELIVERABLE_PINCODE', label: '📍 Pincode Not Deliverable', desc: 'Delivery not available at this location' },
+                                { value: 'OTHER', label: '📝 Other Reason', desc: 'Specify below' },
+                            ].map(opt => (
+                                <label key={opt.value} className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition ${cancelModalBy === opt.value ? 'border-red-500 bg-red-50' : 'border-slate-200 hover:border-slate-300'}`}>
+                                    <input type="radio" name="cancelBy" value={opt.value} checked={cancelModalBy === opt.value} onChange={() => setCancelModalBy(opt.value)} className="w-4 h-4 text-red-600" />
+                                    <div>
+                                        <p className="font-semibold text-slate-900 text-sm">{opt.label}</p>
+                                        <p className="text-xs text-slate-500">{opt.desc}</p>
+                                    </div>
+                                </label>
+                            ))}
+                        </div>
+
+                        <div className="mb-6">
+                            <label className="block text-sm font-semibold text-slate-700 mb-2">Additional Note (optional)</label>
+                            <textarea
+                                value={cancelModalReason}
+                                onChange={e => setCancelModalReason(e.target.value)}
+                                placeholder="e.g. Customer called and requested cancellation"
+                                rows="3"
+                                className="w-full px-4 py-2 border-2 border-slate-300 rounded-xl focus:ring-2 focus:ring-red-500 focus:border-red-500 resize-none text-sm"
+                            />
+                        </div>
+
+                        <div className="flex gap-3">
+                            <button onClick={() => setShowCancelModal(false)} className="flex-1 px-4 py-3 bg-slate-200 text-slate-700 rounded-xl hover:bg-slate-300 transition font-semibold">
+                                Back
+                            </button>
+                            <button
+                                onClick={async () => {
+                                    try {
+                                        const token = await getToken(true);
+                                        if (!token) { toast.error('Authentication failed.'); return; }
+                                        await axios.post('/api/store/orders/update-status', {
+                                            orderId: selectedOrder._id,
+                                            status: 'CANCELLED',
+                                            cancelledBy: cancelModalBy,
+                                            cancelReason: cancelModalReason.trim() || cancelModalBy
+                                        }, { headers: { Authorization: `Bearer ${token}` } });
+                                        toast.success('Order cancelled');
+                                        setSelectedOrder({ ...selectedOrder, status: 'CANCELLED', cancelledBy: cancelModalBy, cancelReason: cancelModalReason.trim() });
+                                        setShowCancelModal(false);
+                                        fetchOrders();
+                                    } catch (error) {
+                                        toast.error(error?.response?.data?.error || 'Failed to cancel order');
+                                    }
+                                }}
+                                className="flex-1 px-4 py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 transition font-semibold shadow-lg shadow-red-600/30"
+                            >
+                                Confirm Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* New AWB Generation Form Modal */}
             {showAwbGenerateModal && selectedOrder && (
                 <div onClick={() => {
                     setUseManualWeight(false)
@@ -2217,7 +3272,7 @@ export default function StoreOrders() {
                     <div onClick={e => e.stopPropagation()} className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
                         {/* Header */}
                         <div className="sticky top-0 bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-6 rounded-t-2xl flex justify-between items-center">
-                            <h2 className="text-2xl font-bold">Generate AWB</h2>
+                            <h2 className="text-2xl font-bold">{awbModalMode === 'edit' ? 'Edit AWB' : 'Generate AWB'}</h2>
                             <button onClick={() => {
                                 setUseManualWeight(false)
                                 setManualWeight('')
@@ -2534,8 +3589,13 @@ export default function StoreOrders() {
                                             const doc = generateAwbBill(detailsWithContract)
                                             const blob = doc.output('blob')
                                             const url = URL.createObjectURL(blob)
+                                            setAwbFormDetails(detailsWithContract)
                                             setAwbFormPreviewDoc(doc)
                                             setAwbFormPreviewUrl(url)
+                                            setAwbDetailsByOrder(prev => ({
+                                                ...prev,
+                                                [selectedOrder._id]: detailsWithContract
+                                            }))
                                             // Mark AWB as generated for this order
                                             setAwbStatus(prev => ({
                                                 ...prev,

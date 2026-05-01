@@ -6,6 +6,7 @@ import Order from '@/models/Order';
 import User from '@/models/User';
 import { NextResponse } from "next/server";
 import admin from 'firebase-admin';
+import authSeller from '@/middlewares/authSeller';
 
 // Get store's return/replacement requests
 export async function GET(request) {
@@ -36,14 +37,12 @@ export async function GET(request) {
         }
         const userId = decodedToken.uid;
 
-        // Verify user has a store
-        const store = await Store.findOne({ userId }).lean();
-
-        if (!store) {
+        const storeId = await authSeller(userId);
+        if (!storeId) {
             return NextResponse.json({ error: "Store not found" }, { status: 404 });
         }
 
-        const requests = await ReturnRequest.find({ storeId: store._id.toString() })
+        const requests = await ReturnRequest.find({ storeId: String(storeId) })
             .populate('userId', 'name email')
             .sort({ createdAt: -1 })
             .lean();
@@ -94,9 +93,8 @@ export async function POST(request) {
         }
         const userId = decodedToken.uid;
 
-        // Verify user has a store
-        const store = await Store.findOne({ userId }).lean();
-        if (!store) {
+        const storeId = await authSeller(userId);
+        if (!storeId) {
             return NextResponse.json({ error: "Store not found" }, { status: 404 });
         }
 
@@ -115,6 +113,9 @@ export async function POST(request) {
         const order = await Order.findById(orderId).exec();
         if (!order) {
             return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+        }
+        if (String(order.storeId || '') !== String(storeId)) {
+            return NextResponse.json({ error: 'Not authorized for this order' }, { status: 403 });
         }
 
         // Check if return request exists

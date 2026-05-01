@@ -4,6 +4,7 @@ import Order from '@/models/Order';
 import Wallet from '@/models/Wallet';
 import authSeller from '@/middlewares/authSeller';
 import { getAuth } from '@/lib/firebase-admin';
+import { restockOrderItems } from '@/lib/orderInventory';
 
 export async function POST(request) {
     try {
@@ -30,7 +31,7 @@ export async function POST(request) {
         }
 
         // Get request body
-        const { orderId, status } = await request.json();
+        const { orderId, status, cancelledBy, cancelReason } = await request.json();
 
         if (!orderId || !status) {
             return NextResponse.json({ error: 'Missing orderId or status' }, { status: 400 });
@@ -39,7 +40,8 @@ export async function POST(request) {
         // Validate status
         const validStatuses = [
             'ORDER_PLACED', 'PROCESSING', 'MANIFESTED', 'PICKUP_SCHEDULED', 'SHIPPED', 'DELIVERED', 'CANCELLED', 
-            'PAYMENT_FAILED', 'RTO', 'RETURNED', 'RETURN_INITIATED', 'RETURN_APPROVED',
+            'PAYMENT_FAILED', 'RTO', 'RETURNED', 'RETURN_INITIATED', 'RETURN_APPROVED', 'RETURN_REJECTED',
+            'REPLACEMENT_REQUESTED', 'REPLACEMENT_APPROVED', 'REPLACEMENT_SHIPPED', 'REPLACEMENT_OUT_FOR_DELIVERY', 'REPLACEMENT_DELIVERED', 'REPLACED', 'RETURNED_REFUNDED',
             'RETURN_REQUESTED', 'PICKUP_REQUESTED', 'WAITING_FOR_PICKUP', 
             'PICKED_UP', 'WAREHOUSE_RECEIVED', 'OUT_FOR_DELIVERY',
             // Lowercase variants for compatibility
@@ -77,15 +79,31 @@ export async function POST(request) {
         }
 
         // Update order status
-
+        const previousStatus = String(order.status || '').toUpperCase();
         order.status = status;
         const normalizedStatus = String(status || '').toUpperCase();
         const paymentMethod = (order.paymentMethod || '').toLowerCase();
+        if (!order.inventoryRestock) {
+            order.inventoryRestock = { cancelled: false, returned: false };
+        }
 
         // Cancel/revert payment if order is cancelled or payment failed
         if (normalizedStatus === 'CANCELLED' || normalizedStatus === 'PAYMENT_FAILED') {
             order.isPaid = false;
             order.paymentStatus = (normalizedStatus === 'CANCELLED') ? 'CANCELLED' : 'FAILED';
+            if (normalizedStatus === 'CANCELLED') {
+                if (cancelledBy) order.cancelledBy = cancelledBy;
+                if (cancelReason) order.cancelReason = cancelReason;
+                if (previousStatus !== 'CANCELLED' && !order.inventoryRestock.cancelled) {
+                    await restockOrderItems(order.orderItems || []);
+                    order.inventoryRestock.cancelled = true;
+                }
+            }
+        }
+
+        if (normalizedStatus === 'RETURNED' && previousStatus !== 'RETURNED' && !order.inventoryRestock.returned) {
+            await restockOrderItems(order.orderItems || []);
+            order.inventoryRestock.returned = true;
         }
 
         // Auto-mark COD orders as PAID when delivered
@@ -133,7 +151,9 @@ export async function POST(request) {
             message: 'Order status updated and email sent',
             order: {
                 _id: order._id,
-                status: order.status
+                status: order.status,
+                cancelledBy: order.cancelledBy || null,
+                cancelReason: order.cancelReason || ''
             }
         });
 

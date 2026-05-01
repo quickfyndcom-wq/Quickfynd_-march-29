@@ -18,8 +18,10 @@ const UserSchema = new mongoose.Schema({
   _id: { type: String, required: true }, // Firebase UID as string
   firebaseUid: { type: String, unique: true, sparse: true }, // Firebase UID reference
   name: String,
-  email: { type: String, unique: true, sparse: true },
-  phone: String,
+  email: { type: String, trim: true, lowercase: true, default: null },
+  phone: { type: String, trim: true, default: null },
+  emailVerifiedAt: { type: Date, default: null },
+  phoneVerifiedAt: { type: Date, default: null },
   image: String,
   cart: {
     type: Map,
@@ -60,6 +62,25 @@ const UserSchema = new mongoose.Schema({
   }
   // Add other fields as needed
 }, { timestamps: true, _id: false }); // Disable auto ObjectId generation
+
+UserSchema.index(
+  { email: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      email: { $type: 'string', $nin: ['', null] }
+    }
+  }
+);
+UserSchema.index(
+  { phone: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      phone: { $type: 'string', $nin: ['', null] }
+    }
+  }
+);
 
 if (process.env.NODE_ENV === "development" && mongoose.models.User) {
   delete mongoose.models.User;

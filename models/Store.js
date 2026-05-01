@@ -38,6 +38,15 @@ const StoreSchema = new mongoose.Schema({
       },
     ],
   },
+  integrations: {
+    seventeentrack: {
+      // Hidden by default from regular store fetches.
+      baseUrl: { type: String, default: '', select: false },
+      apiKey: { type: String, default: '', select: false },
+      publicKey: { type: String, default: '', select: false },
+      secretKey: { type: String, default: '', select: false },
+    },
+  },
 }, { timestamps: true });
 
 // username already has unique index via schema field definition

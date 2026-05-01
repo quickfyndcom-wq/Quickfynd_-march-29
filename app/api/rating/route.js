@@ -22,11 +22,19 @@ export async function POST(request){
             return NextResponse.json({ error: "Product already rated" }, { status: 400 });
          }
 
-         const response = await Rating.create({
-            userId, productId, rating, review, orderId
-         });
+            const response = await Rating.create({
+                userId,
+                productId,
+                rating,
+                review,
+                orderId,
+                approved: true
+            });
 
-         return NextResponse.json({message: "Rating added successfully", rating: response});
+            return NextResponse.json({
+                message: "Rating added successfully",
+                rating: response
+            });
 
       
     } catch (error) {

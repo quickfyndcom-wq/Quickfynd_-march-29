@@ -34,6 +34,15 @@ export default function SettingsPage() {
     const [storeZip, setStoreZip] = useState("");
     const [storeDescription, setStoreDescription] = useState("");
     const [businessType, setBusinessType] = useState("");
+    const [seventeenTrackBaseUrl, setSeventeenTrackBaseUrl] = useState("");
+    const [seventeenTrackApiKey, setSeventeenTrackApiKey] = useState("");
+    const [seventeenTrackPublicKey, setSeventeenTrackPublicKey] = useState("");
+    const [seventeenTrackSecretKey, setSeventeenTrackSecretKey] = useState("");
+    const [seventeenTrackConfigured, setSeventeenTrackConfigured] = useState(false);
+    const [seventeenTrackMaskedApiKey, setSeventeenTrackMaskedApiKey] = useState("");
+    const [seventeenTrackMaskedPublicKey, setSeventeenTrackMaskedPublicKey] = useState("");
+    const [seventeenTrackMaskedSecretKey, setSeventeenTrackMaskedSecretKey] = useState("");
+    const [savingCourierKeys, setSavingCourierKeys] = useState(false);
     
     // Settings fields
     const [emailNotifications, setEmailNotifications] = useState(true);
@@ -63,6 +72,72 @@ export default function SettingsPage() {
         setEmail(user?.email || "");
         setImage(user?.photoURL || user?.image || "");
     }, [user]);
+
+    useEffect(() => {
+        if (!user) return;
+        const loadCourierKeys = async () => {
+            try {
+                const token = await getToken();
+                if (!token) return;
+                const res = await axios.get('/api/store/integrations/seventeentrack', {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+                if (res.data?.success) {
+                    setSeventeenTrackBaseUrl(res.data.baseUrl || '');
+                    setSeventeenTrackConfigured(!!res.data.configured);
+                    setSeventeenTrackMaskedApiKey(res.data.maskedApiKey || '');
+                    setSeventeenTrackMaskedPublicKey(res.data.maskedPublicKey || '');
+                    setSeventeenTrackMaskedSecretKey(res.data.maskedSecretKey || '');
+                }
+            } catch {
+                // Keep settings page functional even if integration status fetch fails
+            }
+        };
+        loadCourierKeys();
+    }, [user, getToken]);
+
+    const handleSaveCourierKeys = async () => {
+        setSavingCourierKeys(true);
+        setMessage('');
+        try {
+            const token = await getToken();
+            if (!token) {
+                setMessage('Authentication failed. Please sign in again.');
+                return;
+            }
+            const res = await axios.post('/api/store/integrations/seventeentrack', {
+                baseUrl: seventeenTrackBaseUrl.trim(),
+                apiKey: seventeenTrackApiKey.trim(),
+                publicKey: seventeenTrackPublicKey.trim(),
+                secretKey: seventeenTrackSecretKey.trim(),
+            }, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+
+            if (res.data?.success) {
+                setSeventeenTrackBaseUrl('');
+                setSeventeenTrackApiKey('');
+                setSeventeenTrackPublicKey('');
+                setSeventeenTrackSecretKey('');
+                setSeventeenTrackConfigured(!!res.data.configured);
+                setMessage('Courier API key saved successfully!');
+                const statusRes = await axios.get('/api/store/integrations/seventeentrack', {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+                if (statusRes.data?.success) {
+                    setSeventeenTrackBaseUrl(statusRes.data.baseUrl || '');
+                    setSeventeenTrackConfigured(!!statusRes.data.configured);
+                    setSeventeenTrackMaskedApiKey(statusRes.data.maskedApiKey || '');
+                    setSeventeenTrackMaskedPublicKey(statusRes.data.maskedPublicKey || '');
+                    setSeventeenTrackMaskedSecretKey(statusRes.data.maskedSecretKey || '');
+                }
+            }
+        } catch (err) {
+            setMessage(err?.response?.data?.error || 'Failed to save courier API key');
+        } finally {
+            setSavingCourierKeys(false);
+        }
+    };
     
     // Fetch team members when Dashboard Access tab is active
     useEffect(() => {
@@ -279,6 +354,77 @@ export default function SettingsPage() {
                                         <span className="text-sm text-slate-700">ZIP Code</span>
                                         <input type="text" value={storeZip} onChange={e => setStoreZip(e.target.value)} className="border border-slate-300 p-2.5 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="123456" />
                                     </label>
+                                </div>
+                            </div>
+
+                            <div className="border-t border-slate-200 pt-4">
+                                <h3 className="font-medium text-slate-700 mb-3">Courier Tracking API Keys</h3>
+                                <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 space-y-3">
+                                    <p className="text-sm text-orange-900">
+                                        Add courier API keys here. This works from Store Settings, no need to edit .env.
+                                    </p>
+
+                                    <label className="flex flex-col gap-1.5">
+                                        <span className="text-sm text-slate-700">Tracking API Base URL</span>
+                                        <input
+                                            type="url"
+                                            value={seventeenTrackBaseUrl}
+                                            onChange={e => setSeventeenTrackBaseUrl(e.target.value)}
+                                            className="border border-slate-300 p-2.5 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                                            placeholder="https://api.17track.net/track/v2.2"
+                                        />
+                                    </label>
+
+                                    <label className="flex flex-col gap-1.5">
+                                        <span className="text-sm text-slate-700">India Post Tracking (17track API Key)</span>
+                                        <input
+                                            type="password"
+                                            value={seventeenTrackApiKey}
+                                            onChange={e => setSeventeenTrackApiKey(e.target.value)}
+                                            className="border border-slate-300 p-2.5 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                                            placeholder="Paste 17track API key"
+                                        />
+                                    </label>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                        <label className="flex flex-col gap-1.5">
+                                            <span className="text-sm text-slate-700">Public Key</span>
+                                            <input
+                                                type="password"
+                                                value={seventeenTrackPublicKey}
+                                                onChange={e => setSeventeenTrackPublicKey(e.target.value)}
+                                                className="border border-slate-300 p-2.5 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                                                placeholder="Public key"
+                                            />
+                                        </label>
+                                        <label className="flex flex-col gap-1.5">
+                                            <span className="text-sm text-slate-700">Secret Key</span>
+                                            <input
+                                                type="password"
+                                                value={seventeenTrackSecretKey}
+                                                onChange={e => setSeventeenTrackSecretKey(e.target.value)}
+                                                className="border border-slate-300 p-2.5 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                                                placeholder="Secret key"
+                                            />
+                                        </label>
+                                    </div>
+
+                                    {seventeenTrackConfigured && (
+                                        <div className="text-xs text-green-700 bg-green-50 border border-green-200 rounded px-2 py-2 space-y-1">
+                                            {seventeenTrackMaskedApiKey && <p>Saved API key: <span className="font-mono">{seventeenTrackMaskedApiKey}</span></p>}
+                                            {seventeenTrackMaskedPublicKey && <p>Saved public key: <span className="font-mono">{seventeenTrackMaskedPublicKey}</span></p>}
+                                            {seventeenTrackMaskedSecretKey && <p>Saved secret key: <span className="font-mono">{seventeenTrackMaskedSecretKey}</span></p>}
+                                        </div>
+                                    )}
+
+                                    <button
+                                        type="button"
+                                        onClick={handleSaveCourierKeys}
+                                        disabled={savingCourierKeys}
+                                        className="w-full md:w-auto bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg font-medium transition disabled:opacity-50"
+                                    >
+                                        {savingCourierKeys ? 'Saving credentials...' : 'Save Courier Credentials'}
+                                    </button>
                                 </div>
                             </div>
                         </div>

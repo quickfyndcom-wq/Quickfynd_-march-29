@@ -15,10 +15,13 @@ import PersonalizedOffer from '@/models/PersonalizedOffer';
 import OrderCounter from '@/models/OrderCounter';
 import { sendOrderConfirmationEmail, sendGuestAccountCreationEmail } from '@/lib/email';
 import { fetchNormalizedDelhiveryTracking } from '@/lib/delhivery';
+import { fetchSeventeenTrackInfo } from '@/lib/seventeentrack';
+import { fetchNormalizedIndiaPostTracking } from '@/lib/indiaPost';
+import { getDisplayOrderNumber } from '@/lib/orderNumber';
 import { getAuth } from '@/lib/firebase-admin';
 
 const ORDER_NUMBER_SEQUENCE_KEY = 'short_order_number';
-const ORDER_NUMBER_START = 55234;
+const ORDER_NUMBER_START = 52300;
 
 function hasValidShortOrderNumber(value) {
     if (value === null || value === undefined) return false;
@@ -35,7 +38,13 @@ const PaymentMethod = {
 };
 
 async function getNextShortOrderNumber() {
-    // 1) Fast path: increment existing counter atomically.
+    // 1) Auto-reset counter if it's on the old range (pre-523xx migration)
+    await OrderCounter.updateOne(
+        { key: ORDER_NUMBER_SEQUENCE_KEY, value: { $gte: 55000 } },
+        { $set: { value: ORDER_NUMBER_START } }
+    );
+
+    // 2) Fast path: increment existing counter atomically.
     const incremented = await OrderCounter.findOneAndUpdate(
         { key: ORDER_NUMBER_SEQUENCE_KEY },
         { $inc: { value: 1 } },
@@ -70,25 +79,69 @@ async function getNextShortOrderNumber() {
 function normalizeOrderSource(value) {
     const normalized = String(value || '').trim().toLowerCase();
     if (!normalized) return null;
-    if (['app', 'mobile', 'android', 'ios', 'react-native', 'reactnative'].includes(normalized)) return 'APP';
-    if (['web', 'website', 'browser'].includes(normalized)) return 'WEB';
+    if (
+        ['app', 'mobile', 'android', 'ios', 'react-native', 'reactnative', 'flutter', 'dart', 'expo'].includes(normalized) ||
+        normalized.includes('app') ||
+        normalized.includes('android') ||
+        normalized.includes('ios') ||
+        normalized.includes('reactnative') ||
+        normalized.includes('react-native') ||
+        normalized.includes('flutter') ||
+        normalized.includes('dart')
+    ) {
+        return 'APP';
+    }
+    if (['web', 'website', 'browser'].includes(normalized) || normalized.includes('web')) return 'WEB';
     return null;
 }
 
+function isTruthyFlag(value) {
+    if (value === true) return true;
+    if (typeof value === 'number') return value === 1;
+    const normalized = String(value || '').trim().toLowerCase();
+    return ['true', '1', 'yes', 'y'].includes(normalized);
+}
+
 function inferOrderSource(request, body = {}) {
+    const nested = body?.meta && typeof body.meta === 'object' ? body.meta : {};
+
+    const appHint =
+        normalizeOrderSource(body?.appId) ||
+        normalizeOrderSource(body?.clientApp) ||
+        normalizeOrderSource(body?.client) ||
+        normalizeOrderSource(body?.channel) ||
+        normalizeOrderSource(body?.deviceType) ||
+        normalizeOrderSource(body?.device) ||
+        normalizeOrderSource(body?.appName) ||
+        normalizeOrderSource(nested?.appId) ||
+        normalizeOrderSource(nested?.clientApp) ||
+        normalizeOrderSource(nested?.platform);
+
+    if (isTruthyFlag(body?.isApp) || isTruthyFlag(body?.isMobileApp) || isTruthyFlag(nested?.isApp)) return 'APP';
+    if (appHint) return 'APP';
+
     const explicitSource =
         normalizeOrderSource(body?.orderSource) ||
         normalizeOrderSource(body?.source) ||
         normalizeOrderSource(body?.platform) ||
+        normalizeOrderSource(nested?.orderSource) ||
+        normalizeOrderSource(nested?.source) ||
+        normalizeOrderSource(nested?.platform) ||
         normalizeOrderSource(request.headers.get('x-order-source')) ||
         normalizeOrderSource(request.headers.get('x-client-platform')) ||
+        normalizeOrderSource(request.headers.get('x-app-platform')) ||
+        normalizeOrderSource(request.headers.get('x-mobile-platform')) ||
         normalizeOrderSource(request.headers.get('x-platform')) ||
-        normalizeOrderSource(request.headers.get('x-app-source'));
+        normalizeOrderSource(request.headers.get('x-app-source')) ||
+        normalizeOrderSource(request.headers.get('x-app-id')) ||
+        normalizeOrderSource(request.headers.get('x-device-type')) ||
+        normalizeOrderSource(request.headers.get('x-mobile-app')) ||
+        normalizeOrderSource(request.headers.get('x-client'));
 
     if (explicitSource) return explicitSource;
 
     const userAgent = String(request.headers.get('user-agent') || '').toLowerCase();
-    const appSignatures = ['okhttp', 'cfnetwork', 'dalvik', 'reactnative', 'react-native', 'expo'];
+    const appSignatures = ['okhttp', 'cfnetwork', 'dalvik', 'reactnative', 'react-native', 'expo', 'flutter', 'dart'];
     if (appSignatures.some((signature) => userAgent.includes(signature))) {
         return 'APP';
     }
@@ -1062,7 +1115,16 @@ export async function POST(request) {
         if (!createdOrder) {
             return NextResponse.json({ error: 'Order creation failed. No order returned from database.' }, { status: 500 });
         }
-        return NextResponse.json({ message: 'Orders Placed Successfully', order: createdOrder, id: createdOrder._id.toString(), orderId: createdOrder._id.toString() });
+        const createdOrderNumber = getDisplayOrderNumber(createdOrder);
+        createdOrder.displayOrderNumber = createdOrderNumber;
+        createdOrder.orderNumber = createdOrderNumber;
+        return NextResponse.json({
+            message: 'Orders Placed Successfully',
+            order: createdOrder,
+            id: createdOrder._id.toString(),
+            orderId: createdOrder._id.toString(),
+            orderNumber: createdOrderNumber,
+        });
     } catch (error) {
         console.error(error);
         const message = typeof error?.message === 'string' && error.message.trim()
@@ -1103,7 +1165,11 @@ export async function GET(request) {
                 }
 
                 console.log('GET /api/orders: Order found, isGuest:', order.isGuest);
-                return NextResponse.json({ order: order.toObject() });
+                const orderObj = order.toObject();
+                const orderNumber = getDisplayOrderNumber(orderObj);
+                orderObj.displayOrderNumber = orderNumber;
+                orderObj.orderNumber = orderNumber;
+                return NextResponse.json({ order: orderObj, orderNumber });
             } catch (err) {
                 console.error('GET /api/orders: Error fetching order:', err, 'orderId:', orderId);
                 return NextResponse.json({ error: 'Invalid orderId format or internal error.' }, { status: 400 });
@@ -1164,6 +1230,42 @@ export async function GET(request) {
             guestIdentityQuery.push({ guestPhone: `+${tokenPhone}` });
             guestIdentityQuery.push({ 'shippingAddress.phone': tokenPhone });
             guestIdentityQuery.push({ 'shippingAddress.phone': `+${tokenPhone}` });
+
+            // Fallback: match last 10 digits to handle +91/spaces/dashes formatting differences.
+            const last10 = tokenPhone.slice(-10);
+            if (last10 && last10.length >= 10) {
+                guestIdentityQuery.push({ guestPhone: { $regex: `${last10}$` } });
+                guestIdentityQuery.push({ 'shippingAddress.phone': { $regex: `${last10}$` } });
+            }
+        }
+
+        // Auto-link guest orders to this account so they appear in history after login.
+        if (guestIdentityQuery.length > 0) {
+            try {
+                await Order.updateMany(
+                    {
+                        isGuest: true,
+                        $and: [
+                            { $or: guestIdentityQuery },
+                            {
+                                $or: [
+                                    { userId: { $exists: false } },
+                                    { userId: null },
+                                    { userId: '' }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        $set: {
+                            userId,
+                            isGuest: false
+                        }
+                    }
+                );
+            } catch (linkError) {
+                console.error('Guest order auto-link failed:', linkError?.message || linkError);
+            }
         }
 
         if (guestIdentityQuery.length > 0) {
@@ -1183,13 +1285,43 @@ export async function GET(request) {
         .limit(limit)
         .skip(offset);
 
+        const seventeenTrackConfigCache = new Map();
+        const getSeventeenTrackConfigForStore = async (storeId) => {
+            const key = String(storeId || '').trim();
+            if (!key) return {};
+            if (seventeenTrackConfigCache.has(key)) {
+                return seventeenTrackConfigCache.get(key);
+            }
+
+            const storeOr = [{ userId: key }];
+            if (/^[a-fA-F0-9]{24}$/.test(key)) {
+                storeOr.unshift({ _id: key });
+            }
+
+            const store = await Store.findOne({ $or: storeOr })
+                .select('+integrations.seventeentrack.baseUrl +integrations.seventeentrack.apiKey +integrations.seventeentrack.publicKey +integrations.seventeentrack.secretKey')
+                .lean();
+            const cfg = store?.integrations?.seventeentrack || {};
+            const normalized = {
+                baseUrl: String(cfg.baseUrl || '').trim(),
+                apiKey: String(cfg.apiKey || '').trim(),
+                publicKey: String(cfg.publicKey || '').trim(),
+                secretKey: String(cfg.secretKey || '').trim(),
+            };
+
+            seventeenTrackConfigCache.set(key, normalized);
+            return normalized;
+        };
+
+        const hasIndiaPostCreds = !!(process.env.INDIAPOST_USERNAME?.trim() && process.env.INDIAPOST_PASSWORD?.trim());
+
         // Ensure all orders have shortOrderNumber calculated
         const enrichedOrders = [];
         for (const orderDoc of orders) {
             const order = orderDoc.toObject();
 
             const paymentMethod = String(order?.paymentMethod || '').toUpperCase();
-            const status = String(order?.status || '').toUpperCase();
+            let status = String(order?.status || '').toUpperCase();
             const paymentStatus = String(order?.paymentStatus || '').toUpperCase();
 
             if (paymentMethod === 'COD') {
@@ -1203,6 +1335,82 @@ export async function GET(request) {
                 }
             }
 
+            // Fetch live India Post tracking for customer-visible orders
+            const isIndiaPost = (order.courier || '').toLowerCase().includes('india post');
+            const hasAwb = !!(order.trackingId || order.awb);
+            const isActive = !['CANCELLED', 'ORDER_PLACED'].includes(status);
+            if (isIndiaPost && hasAwb && isActive) {
+                try {
+                    const awb = (order.trackingId || order.awb).trim();
+                    let ipTracking = null;
+
+                    // 1) Prefer India Post direct API when credentials are configured
+                    if (hasIndiaPostCreds) {
+                        try {
+                            const ipDirect = await fetchNormalizedIndiaPostTracking(awb);
+                            if (ipDirect?.indiapost?.tracking_details?.length > 0) {
+                                const events = ipDirect.indiapost.tracking_details.map((e) => ({
+                                    time: `${e.date || ''} ${e.time || ''}`.trim(),
+                                    description: e.event || '',
+                                    location: e.office || '',
+                                    country: 'IN',
+                                }));
+                                const isDelivered = (ipDirect.indiapost.current_status || '').toLowerCase().includes('delivered');
+                                ipTracking = {
+                                    awb,
+                                    statusCode: isDelivered ? 40 : 10,
+                                    statusLabel: isDelivered ? 'Delivered' : 'In Transit',
+                                    isDelivered,
+                                    deliveredAt: isDelivered ? ipDirect.indiapost.current_status_time : null,
+                                    currentLocation: ipDirect.indiapost.current_status_location || null,
+                                    latestEvent: events[events.length - 1] || null,
+                                    events: events.slice().reverse(),
+                                    source: 'indiapost',
+                                };
+                            }
+                        } catch (directErr) {
+                            console.error('India Post direct tracking failed for order', order._id, ':', directErr?.message || directErr);
+                        }
+                    }
+
+                    // 2) Fallback to 17track
+                    if (!ipTracking) {
+                        const storeConfig = await getSeventeenTrackConfigForStore(order.storeId);
+                        ipTracking = await fetchSeventeenTrackInfo(awb, storeConfig);
+                    }
+
+                    if (ipTracking) {
+                        order.indiaPost = ipTracking;
+                        // Sync status if delivered/in-transit and persist to DB
+                        if (ipTracking.isDelivered && status !== 'DELIVERED') {
+                            order.status = 'DELIVERED';
+                            status = 'DELIVERED';
+                            await Order.updateOne(
+                                { _id: order._id, status: { $ne: 'DELIVERED' } },
+                                { $set: { status: 'DELIVERED' } }
+                            );
+                        } else if (ipTracking.statusCode === 10 && status === 'PROCESSING') {
+                            order.status = 'SHIPPED';
+                            status = 'SHIPPED';
+                            await Order.updateOne(
+                                { _id: order._id, status: 'PROCESSING' },
+                                { $set: { status: 'SHIPPED' } }
+                            );
+                        }
+
+                        if (paymentMethod === 'COD' && status === 'DELIVERED') {
+                            order.isPaid = true;
+                        }
+                    }
+                } catch (ipErr) {
+                    // Don't fail the whole list if tracking fetch fails
+                    console.error('India Post tracking fetch failed for order', order._id, ':', ipErr?.message);
+                }
+            }
+
+            const orderNumber = getDisplayOrderNumber(order);
+            order.displayOrderNumber = orderNumber;
+            order.orderNumber = orderNumber;
             enrichedOrders.push(order);
         }
 

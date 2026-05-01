@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/lib/useAuth';
 import axios from 'axios';
 import toast from 'react-hot-toast';
-import { FiTrash2, FiPlus, FiEdit2, FiX, FiSearch } from 'react-icons/fi';
+import { FiTrash2, FiPlus, FiEdit2, FiX, FiSearch, FiMenu } from 'react-icons/fi';
 import Loading from '@/components/Loading';
 
 export default function CategorySliderPage() {
@@ -16,6 +16,8 @@ export default function CategorySliderPage() {
   const [editingIdx, setEditingIdx] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showAllSliders, setShowAllSliders] = useState(false);
+  const dragItemRef = useRef(null);
+  const dragOverItemRef = useRef(null);
 
   const [formData, setFormData] = useState({
     title: '',
@@ -264,6 +266,40 @@ export default function CategorySliderPage() {
     }
   };
 
+  const handleDragStart = (index) => {
+    dragItemRef.current = index;
+  };
+
+  const handleDragEnter = (index) => {
+    dragOverItemRef.current = index;
+    // Live visual reorder while dragging
+    if (dragItemRef.current === null || dragItemRef.current === index) return;
+    const reordered = [...sliders];
+    const dragged = reordered.splice(dragItemRef.current, 1)[0];
+    reordered.splice(index, 0, dragged);
+    dragItemRef.current = index;
+    setSliders(reordered);
+  };
+
+  const handleDragEnd = async () => {
+    dragItemRef.current = null;
+    dragOverItemRef.current = null;
+    // Persist the new order
+    try {
+      const token = await getToken();
+      const orderedIds = sliders.map((s) => normalizeId(s.id || s._id));
+      await axios.post(
+        '/api/store/category-slider/reorder',
+        { orderedIds },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Order saved!');
+    } catch (err) {
+      console.error('Failed to save order:', err);
+      toast.error('Failed to save order');
+    }
+  };
+
   const toggleProductSelection = (productId) => {
     if (!productId) return; // Safety check
     
@@ -339,30 +375,50 @@ export default function CategorySliderPage() {
                 </button>
               </div>
             ) : (
-              <div className="space-y-4">
-                {sliders.map((slider) => {
-                  // When in "My Sliders Only" mode the API already scoped results to this seller,
-                  // so every returned slider is editable. Only mark "Other Store" in the public view.
+              <div>
+                <p className="text-xs text-gray-400 mb-3 flex items-center gap-1">
+                  <FiMenu size={12} /> Drag the <FiMenu size={12} className="inline" /> handle on any slider to reorder
+                </p>
+                <div className="space-y-4">
+                {sliders.map((slider, index) => {
                   const isOwnSlider = !showAllSliders || !slider.storeId || slider.storeId === user?.uid;
                   return (
-                  <div key={slider.id} className={`bg-white rounded-xl shadow-sm p-6 hover:shadow-md transition border-l-4 ${isOwnSlider ? 'border-blue-500' : 'border-orange-500'}`}>
+                  <div
+                    key={slider.id}
+                    draggable={isOwnSlider}
+                    onDragStart={() => handleDragStart(index)}
+                    onDragEnter={() => handleDragEnter(index)}
+                    onDragEnd={handleDragEnd}
+                    onDragOver={(e) => e.preventDefault()}
+                    className={`bg-white rounded-xl shadow-sm p-6 hover:shadow-md transition border-l-4 ${isOwnSlider ? 'border-blue-500 cursor-default' : 'border-orange-500'}`}
+                  >
                     <div className="flex justify-between items-start mb-4">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <h3 className="text-xl font-bold text-gray-900">{slider.title}</h3>
-                          {!isOwnSlider && (
-                            <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded-full font-semibold">
-                              Other Store
-                            </span>
+                      <div className="flex items-start gap-3 flex-1">
+                        {isOwnSlider && (
+                          <div
+                            className="mt-1 cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600 flex-shrink-0"
+                            title="Drag to reorder"
+                          >
+                            <FiMenu size={18} />
+                          </div>
+                        )}
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <h3 className="text-xl font-bold text-gray-900">{slider.title}</h3>
+                            {!isOwnSlider && (
+                              <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded-full font-semibold">
+                                Other Store
+                              </span>
+                            )}
+                          </div>
+                          {slider.subtitle && slider.subtitle.trim() !== '' && (
+                            <p className="text-sm text-gray-600 mb-2 italic">"{slider.subtitle}"</p>
+                          )}
+                          <p className="text-sm text-gray-500 mt-1">📦 {slider.productIds?.length || 0} products</p>
+                          {slider.storeId && showAllSliders && (
+                            <p className="text-xs text-gray-400 mt-1">Store ID: {slider.storeId.substring(0, 8)}...</p>
                           )}
                         </div>
-                        {slider.subtitle && slider.subtitle.trim() !== '' && (
-                          <p className="text-sm text-gray-600 mb-2 italic">"{slider.subtitle}"</p>
-                        )}
-                        <p className="text-sm text-gray-500 mt-1">📦 {slider.productIds?.length || 0} products</p>
-                        {slider.storeId && showAllSliders && (
-                          <p className="text-xs text-gray-400 mt-1">Store ID: {slider.storeId.substring(0, 8)}...</p>
-                        )}
                       </div>
                       <div className="flex gap-2">
                         <button
@@ -408,6 +464,7 @@ export default function CategorySliderPage() {
                     </div>
                   </div>
                 )})}
+                </div>
               </div>
             )}
           </div>

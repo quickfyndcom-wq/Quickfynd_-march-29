@@ -22,7 +22,7 @@ export async function GET(req) {
 
     const decoded = await getAuth().verifyIdToken(token);
     // Seller sees all sliders regardless of which storeId they were saved under
-    const sliders = await CategorySlider.find({}).lean();
+    const sliders = await CategorySlider.find({}).sort({ sortOrder: 1, createdAt: 1 }).lean();
     
     // Ensure all fields including subtitle are present
     const slidersWithDefaults = sliders.map(slider => ({

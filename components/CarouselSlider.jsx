@@ -152,6 +152,7 @@ export default function CarouselSlider() {
       padding: '40px 0',
       marginTop: 0,
       position: 'relative',
+      overflowX: 'hidden',
     }}>
       {/* Container for carousel and banner */}
       <div ref={containerRef} className="carousel-container" style={{
@@ -279,6 +280,8 @@ export default function CarouselSlider() {
                   (rawImage && typeof rawImage === 'object' && (rawImage.url || rawImage.src)) ||
                   product.image ||
                   'https://ik.imagekit.io/jrstupuke/placeholder.png';
+                const ratingValue = Math.round(product.averageRating || product.rating || 0);
+                const reviewCount = product.ratingCount || product.reviewCount || product.reviews || 0;
                 return (
                   <Link
                     key={product.slug || product.id || product.name}
@@ -396,6 +399,34 @@ export default function CarouselSlider() {
                         lineHeight: 1.3,
                       }}>
                         {product.name}
+                      </div>
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 2,
+                        width: '100%',
+                        marginBottom: 6,
+                      }}>
+                        {[...Array(5)].map((_, index) => (
+                          <span
+                            key={index}
+                            style={{
+                              fontSize: 10,
+                              color: index < ratingValue ? '#facc15' : '#d1d5db',
+                              lineHeight: 1,
+                            }}
+                          >
+                            ★
+                          </span>
+                        ))}
+                        <span style={{
+                          fontSize: 10,
+                          color: '#7a7a7a',
+                          marginLeft: 4,
+                        }}>
+                          ({reviewCount})
+                        </span>
                       </div>
                       <div style={{
                         fontSize: 12,
@@ -594,8 +625,9 @@ export default function CarouselSlider() {
             display: none !important;
           }
           
+          .prev-arrow-button,
           .next-arrow-button {
-            right: -15px !important;
+            display: none !important;
           }
         }
 

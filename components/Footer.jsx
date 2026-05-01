@@ -2,8 +2,23 @@
 import Link from "next/link";
 import Image from "next/image";
 import Logo from "../assets/logo/logo2.png";
+import PlayStoreBadge from "../assets/play/gpalaystore.png";
+import AppStoreBadge from "../assets/play/appstore.png";
+import toast from "react-hot-toast";
 
 const Footer = () => {
+    const appStoreToastId = 'app-store-coming-soon';
+
+    const handlePlayStoreClick = () => {
+        window.open('https://play.google.com/store/apps/details?id=com.quickfynd', '_blank', 'noopener,noreferrer');
+    };
+
+    const handleAppStoreClick = () => {
+        toast('App is coming soon on the App Store', {
+            id: appStoreToastId,
+            duration: 2500,
+        });
+    };
 
     const MailIcon = () => (<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"> <path d="M14.6654 4.66699L8.67136 8.48499C8.46796 8.60313 8.23692 8.66536 8.0017 8.66536C7.76647 8.66536 7.53544 8.60313 7.33203 8.48499L1.33203 4.66699M2.66536 2.66699H13.332C14.0684 2.66699 14.6654 3.26395 14.6654 4.00033V12.0003C14.6654 12.7367 14.0684 13.3337 13.332 13.3337H2.66536C1.92898 13.3337 1.33203 12.7367 1.33203 12.0003V4.00033C1.33203 3.26395 1.92898 2.66699 2.66536 2.66699Z" stroke="#90A1B9" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /> </svg>)
     const PhoneIcon = () => (<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"> <path d="M9.22003 11.045C9.35772 11.1082 9.51283 11.1227 9.65983 11.086C9.80682 11.0493 9.93692 10.9636 10.0287 10.843L10.2654 10.533C10.3896 10.3674 10.5506 10.233 10.7357 10.1404C10.9209 10.0479 11.125 9.99967 11.332 9.99967H13.332C13.6857 9.99967 14.0248 10.1402 14.2748 10.3902C14.5249 10.6402 14.6654 10.9794 14.6654 11.333V13.333C14.6654 13.6866 14.5249 14.0258 14.2748 14.2758C14.0248 14.5259 13.6857 14.6663 13.332 14.6663C10.1494 14.6663 7.09719 13.4021 4.84675 11.1516C2.59631 8.90119 1.33203 5.84894 1.33203 2.66634C1.33203 2.31272 1.47251 1.97358 1.72256 1.72353C1.9726 1.47348 2.31174 1.33301 2.66536 1.33301H4.66536C5.01899 1.33301 5.35812 1.47348 5.60817 1.72353C5.85822 1.97358 5.9987 2.31272 5.9987 2.66634V4.66634C5.9987 4.87333 5.9505 5.07749 5.85793 5.26263C5.76536 5.44777 5.63096 5.60881 5.46536 5.73301L5.15336 5.96701C5.03098 6.06046 4.94471 6.1934 4.90923 6.34324C4.87374 6.49308 4.89122 6.65059 4.9587 6.78901C5.86982 8.63959 7.36831 10.1362 9.22003 11.045Z" stroke="#90A1B9" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /> </svg>)
@@ -61,6 +76,44 @@ const Footer = () => {
         { icon: InstagramIcon, link: "https://www.instagram.com/quickfynd/" },
     ];
 
+    const appDownloadSection = (wrapperClassName = "") => (
+        <div className={wrapperClassName}>
+            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                Get The App
+            </p>
+            <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                    type="button"
+                    onClick={handlePlayStoreClick}
+                    className="shrink-0 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-600 focus:ring-offset-2 focus:ring-offset-black"
+                    aria-label="Open Quickfynd on Play Store"
+                >
+                    <Image
+                        src={PlayStoreBadge}
+                        alt="Get it on Google Play"
+                        width={960}
+                        height={284}
+                        className="h-[34px] w-auto object-contain"
+                    />
+                </button>
+                <button
+                    type="button"
+                    onClick={handleAppStoreClick}
+                    className="shrink-0 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-600 focus:ring-offset-2 focus:ring-offset-black"
+                    aria-label="App Store coming soon"
+                >
+                    <Image
+                        src={AppStoreBadge}
+                        alt="Download on the App Store"
+                        width={2048}
+                        height={616}
+                        className="h-[34px] w-auto object-contain"
+                    />
+                </button>
+            </div>
+        </div>
+    );
+
     return (
         <footer className="bg-black text-slate-200 border-t border-slate-800 pt-0 lg:pt-12">
             <div className="max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8">
@@ -94,6 +147,7 @@ const Footer = () => {
                                 <span className="text-slate-400">kerala</span>
                             </div>
                         </div>
+                        {appDownloadSection("mt-3 hidden max-w-xs lg:block")}
                         {/* Social Icons removed from brand section to avoid duplication */}
                     </div>
                     {/* Link Sections - Each takes 1 column */}
@@ -115,6 +169,8 @@ const Footer = () => {
                         </div>
                     ))}
                 </div>
+
+                {appDownloadSection("border-t border-slate-800 pt-5 pb-1 lg:hidden")}
 
                 {/* Bottom Bar - Normal flow, always at bottom of footer */}
                 <div className="border-t border-slate-800 py-8 mt-4 w-full flex flex-col items-center justify-end">

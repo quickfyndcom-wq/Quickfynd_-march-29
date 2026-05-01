@@ -16,6 +16,7 @@ const OrderItem = ({ order: initialOrder }) => {
     const [expanded, setExpanded] = useState(false);
     const [order, setOrder] = useState(initialOrder);
     const [refreshing, setRefreshing] = useState(false);
+    const [showIndiaPostHistory, setShowIndiaPostHistory] = useState(false);
 
     const getImageSrc = (image) => {
         if (typeof image === 'string' && image.trim()) return image;
@@ -321,7 +322,7 @@ const OrderItem = ({ order: initialOrder }) => {
                                 </div>
 
                                 {/* Current Location - Prominent Green Box */}
-                                {order.delhivery?.current_status_location && (
+                                {(order.delhivery?.current_status_location || order.indiaPost?.currentLocation) && (
                                     <div className="bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-xl p-5 shadow-lg">
                                         <div className="flex items-start gap-3">
                                             <svg className="w-6 h-6 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 24 24">
@@ -329,7 +330,7 @@ const OrderItem = ({ order: initialOrder }) => {
                                             </svg>
                                             <div className="flex-1">
                                                 <p className="text-sm font-semibold opacity-90 mb-1">📍 Current Location</p>
-                                                <p className="text-lg font-bold">{order.delhivery.current_status_location}</p>
+                                                <p className="text-lg font-bold">{order.delhivery?.current_status_location || order.indiaPost?.currentLocation}</p>
                                             </div>
                                         </div>
                                     </div>
@@ -338,13 +339,23 @@ const OrderItem = ({ order: initialOrder }) => {
                                 {/* Status Section */}
                                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
                                     <p className="text-xs font-semibold text-slate-500 mb-2">Status</p>
-                                    <p className="text-2xl font-bold text-blue-600">
-                                        {order.delhivery?.current_status || order.status || 'Processing'}
+                                    <p className={`text-2xl font-bold ${order.indiaPost?.isDelivered ? 'text-green-600' : 'text-blue-600'}`}>
+                                        {order.indiaPost?.statusLabel || order.delhivery?.current_status || order.status || 'Processing'}
                                     </p>
-                                    {order.delhivery?.current_status && order.delhivery.current_status_remarks && (
+                                    {order.indiaPost?.deliveredAt && (
+                                        <p className="text-sm text-green-700 font-semibold mt-1">✅ Delivered on {order.indiaPost.deliveredAt}</p>
+                                    )}
+                                    {!order.indiaPost && order.delhivery?.current_status && order.delhivery.current_status_remarks && (
                                         <p className="text-sm text-slate-600 mt-2 italic">{order.delhivery.current_status_remarks}</p>
                                     )}
                                 </div>
+
+                                {order.indiaPost?.providerTips && (
+                                    <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg">
+                                        <p className="text-xs text-slate-500 font-semibold">Carrier Message</p>
+                                        <p className="text-sm font-medium text-amber-800 mt-0.5">{order.indiaPost.providerTips}</p>
+                                    </div>
+                                )}
 
                                 {/* Expected Delivery Section */}
                                 {order.delhivery?.expected_delivery_date && (
@@ -451,11 +462,96 @@ const OrderItem = ({ order: initialOrder }) => {
                                     </div>
                                 )}
 
-                                {!order.delhivery?.events && !order.delhivery?.current_status_location && (
+                                {!order.delhivery?.events && !order.delhivery?.current_status_location && !order.indiaPost && (
                                     <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-center">
                                         <p className="text-sm text-yellow-800">
                                             ⏳ Tracking information will be available once your order is shipped by the courier
                                         </p>
+                                    </div>
+                                )}
+
+                                {/* India Post Tracking Timeline */}
+                                {order.indiaPost && (
+                                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                                        <div className="px-4 py-3 border-b border-slate-200 flex items-center gap-2 bg-slate-50">
+                                            <span className="text-base">📮</span>
+                                            <p className="text-sm font-semibold text-slate-800">India Post Tracking</p>
+                                            <span className={`ml-auto text-xs px-2 py-0.5 rounded-full font-semibold ${order.indiaPost.isDelivered ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
+                                                {order.indiaPost.statusLabel}
+                                            </span>
+                                        </div>
+
+                                        <div className="p-4 space-y-3">
+                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm">
+                                                <div className="rounded-lg border border-slate-200 px-3 py-2 bg-slate-50">
+                                                    <p className="text-[11px] text-slate-500">AWB</p>
+                                                    <p className="font-mono font-semibold text-slate-800">{order.trackingId}</p>
+                                                </div>
+                                                <div className="rounded-lg border border-slate-200 px-3 py-2 bg-slate-50">
+                                                    <p className="text-[11px] text-slate-500">Status</p>
+                                                    <p className="font-semibold text-slate-800">{order.indiaPost.statusLabel}</p>
+                                                </div>
+                                                <div className="rounded-lg border border-slate-200 px-3 py-2 bg-slate-50">
+                                                    <p className="text-[11px] text-slate-500">Current Location</p>
+                                                    <p className="font-semibold text-slate-800">{order.indiaPost.currentLocation || 'NA'}</p>
+                                                </div>
+                                            </div>
+
+                                            {order.indiaPost.providerTips && (
+                                                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                                                    <p className="text-[11px] text-slate-500">Carrier Message</p>
+                                                    <p className="text-sm text-amber-800">{order.indiaPost.providerTips}</p>
+                                                </div>
+                                            )}
+
+                                            {order.indiaPost.events?.length > 0 && (
+                                                <div className="rounded-lg border border-slate-200 overflow-hidden">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setShowIndiaPostHistory(prev => !prev)}
+                                                        className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-slate-700 bg-slate-50 hover:bg-slate-100"
+                                                    >
+                                                        <span>Tracking History ({order.indiaPost.events.length})</span>
+                                                        {showIndiaPostHistory ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                                                    </button>
+
+                                                    {showIndiaPostHistory && (
+                                                        <div className="space-y-2 max-h-72 overflow-y-auto p-3 bg-white">
+                                                            {order.indiaPost.events.map((evt, idx) => (
+                                                                <div key={idx} className={`border-l-2 ${idx === 0 ? 'border-blue-500' : 'border-slate-200'} pl-3 py-1.5`}>
+                                                                    <div className="flex justify-between items-start gap-2">
+                                                                        <div className="flex-1">
+                                                                            {evt.location && <div className="font-semibold text-slate-800 text-xs">{evt.location}</div>}
+                                                                            {evt.description && <div className={`text-xs mt-0.5 ${idx === 0 ? 'font-semibold text-slate-900' : 'text-slate-600'}`}>{evt.description}</div>}
+                                                                        </div>
+                                                                        <div className="text-xs text-slate-400 whitespace-nowrap shrink-0">{evt.time}</div>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            <div className="flex gap-2">
+                                                <a
+                                                    href={`https://www.indiapost.gov.in/VAS/Pages/trackconsignment.aspx`}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold rounded-lg transition-colors"
+                                                >
+                                                    India Post
+                                                </a>
+                                                <a
+                                                    href={`https://t.17track.net/en#nums=${order.trackingId}`}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors"
+                                                >
+                                                    17track
+                                                </a>
+                                            </div>
+                                        </div>
                                     </div>
                                 )}
                             </div>

@@ -3,6 +3,11 @@ import dbConnect from "@/lib/mongodb";
 import User from "@/models/User";
 import { getAuth } from "@/lib/firebase-admin";
 
+function normalizeEmail(value) {
+  if (value === null || value === undefined) return "";
+  return String(value).trim().toLowerCase();
+}
+
 export async function POST(request) {
   try {
     const authHeader = request.headers.get('authorization');
@@ -13,14 +18,58 @@ export async function POST(request) {
     const decodedToken = await getAuth().verifyIdToken(idToken);
     const userId = decodedToken.uid;
     await dbConnect();
-    const { name, image, email } = await request.json();
+
+    const body = await request.json();
+    const name = String(body?.name || "").trim();
+    const image = String(body?.image || "").trim();
+    const email = normalizeEmail(body?.email || "");
+
+    if (email) {
+      const existingEmailUser = await User.findOne({
+        _id: { $ne: userId },
+        email,
+      })
+        .select("_id")
+        .lean();
+      if (existingEmailUser) {
+        return NextResponse.json(
+          {
+            error: {
+              code: "EMAIL_ALREADY_IN_USE",
+              message: "Email is already linked to another account.",
+            },
+          },
+          { status: 409 }
+        );
+      }
+    }
+
     await User.findOneAndUpdate(
-      { firebaseUid: userId },
-      { name, image, email },
-      { upsert: true }
+      { _id: userId },
+      {
+        $setOnInsert: { _id: userId },
+        $set: {
+          firebaseUid: userId,
+          name,
+          image,
+          ...(email ? { email } : {}),
+        },
+      },
+      { upsert: true, setDefaultsOnInsert: true }
     );
     return NextResponse.json({ message: 'Profile updated' });
   } catch (error) {
+    if (error?.code === 11000) {
+      return NextResponse.json(
+        {
+          error: {
+            code: "EMAIL_ALREADY_IN_USE",
+            message: "Email is already linked to another account.",
+          },
+        },
+        { status: 409 }
+      );
+    }
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 }

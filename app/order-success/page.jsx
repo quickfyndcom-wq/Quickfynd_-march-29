@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import Loading from '@/components/Loading';
 import { useAuth } from '@/lib/useAuth';
 import { trackCustomerBehaviorEvent, getOrCreateSessionId, getOrCreateVisitorId, detectTrafficSource } from '@/lib/customerBehaviorTracking';
+import { getDisplayOrderNumber } from '@/lib/orderNumber';
 
 export default function OrderSuccess() {
   return (
@@ -70,10 +71,7 @@ function OrderSuccessContent() {
 
   const order = orders && orders.length > 0 ? orders[0] : null;
   function getOrderNumber(orderObj) {
-    if (!orderObj) return '';
-    if (orderObj.shortOrderNumber) return String(orderObj.shortOrderNumber).padStart(5, '0');
-    if (orderObj._id) return String(orderObj._id).slice(0, 8).toUpperCase();
-    return '';
+    return getDisplayOrderNumber(orderObj);
   }
   // Calculate totals
   const products = order && order.orderItems ? order.orderItems : [];

@@ -23,6 +23,10 @@ const CategorySliderSchema = new mongoose.Schema(
       required: true,
       default: [],
     },
+    sortOrder: {
+      type: Number,
+      default: 0,
+    },
   },
   { timestamps: true }
 );

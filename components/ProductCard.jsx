@@ -72,12 +72,55 @@ const getMrpPrice = (product) => parseAmount(
     product.regularPrice ?? product.regular_price
 )
 
+const getProductId = (product) => {
+    if (!product) return ''
+
+    if (typeof product._id === 'string' && product._id) return product._id
+    if (typeof product.id === 'string' && product.id) return product.id
+    if (typeof product.productId === 'string' && product.productId) return product.productId
+    if (product.productId && typeof product.productId === 'object') {
+        if (typeof product.productId._id === 'string' && product.productId._id) return product.productId._id
+        if (typeof product.productId.id === 'string' && product.productId.id) return product.productId.id
+    }
+
+    return ''
+}
+
+const getProductAverageRating = (product, reviews) => {
+    if (Array.isArray(reviews) && reviews.length > 0) {
+        return reviews.reduce((sum, review) => sum + Number(review?.rating || 0), 0) / reviews.length
+    }
+
+    const averageRating = Number(product?.averageRating)
+    if (Number.isFinite(averageRating) && averageRating > 0) return averageRating
+
+    const rating = Number(product?.rating)
+    if (Number.isFinite(rating) && rating > 0) return rating
+
+    if (Array.isArray(product?.rating) && product.rating.length > 0) {
+        return product.rating.reduce((sum, value) => sum + Number(value || 0), 0) / product.rating.length
+    }
+
+    return 0
+}
+
+const getProductReviewCount = (product, reviews) => {
+    if (Array.isArray(reviews) && reviews.length > 0) return reviews.length
+    const ratingCount = Number(product?.ratingCount)
+    if (Number.isFinite(ratingCount) && ratingCount >= 0) return ratingCount
+    const reviewCount = Number(product?.reviewCount)
+    if (Number.isFinite(reviewCount) && reviewCount >= 0) return reviewCount
+    if (Array.isArray(product?.reviews)) return product.reviews.length
+    return 0
+}
+
 const ProductCard = ({ product }) => {
     const currency = process.env.NEXT_PUBLIC_CURRENCY_SYMBOL || '₹'
     const dispatch = useDispatch()
     const { getToken } = useAuth()
     const cartItems = useSelector(state => state.cart.cartItems)
-    const itemQuantity = cartItems[product._id] || 0
+    const productId = getProductId(product)
+    const itemQuantity = cartItems[productId] || cartItems[String(productId)] || 0
 
     const [reviews, setReviews] = useState([])
     const [hovered, setHovered] = useState(false)
@@ -87,9 +130,14 @@ const ProductCard = ({ product }) => {
 
     useEffect(() => {
         const fetchReviews = async () => {
+            if (!productId) {
+                setReviews([])
+                return
+            }
+
             try {
                 setLoadingReviews(true)
-                const { data } = await import('axios').then(ax => ax.default.get(`/api/review?productId=${product._id}`))
+                const { data } = await import('axios').then(ax => ax.default.get(`/api/review?productId=${encodeURIComponent(productId)}`))
                 setReviews(data.reviews || [])
             } catch (error) {
                 // silent fail
@@ -98,15 +146,11 @@ const ProductCard = ({ product }) => {
             }
         }
         fetchReviews()
-    }, [product._id])
+    }, [productId])
 
-    const averageRating = reviews.length > 0
-        ? Math.round(reviews.reduce((acc, curr) => acc + (curr.rating || 0), 0) / reviews.length)
-        : Math.round(product.averageRating || 0)
+    const averageRating = Math.round(getProductAverageRating(product, reviews))
 
-    const ratingCount = reviews.length > 0
-        ? reviews.length
-        : (typeof product.ratingCount === 'number' ? product.ratingCount : 0)
+    const ratingCount = getProductReviewCount(product, reviews)
 
     let priceNum = getSalePrice(product)
     let mrpNum = getMrpPrice(product)
@@ -147,7 +191,7 @@ const ProductCard = ({ product }) => {
             return
         }
         dispatch(addToCart({ 
-            productId: product._id,
+            productId,
             price: priceNum > 0 ? priceNum : undefined
         }))
         dispatch(uploadCart({ getToken }))
@@ -177,7 +221,7 @@ const ProductCard = ({ product }) => {
 
     return (
         <Link
-            href={`/product/${product.slug || product._id || ''}`}
+            href={`/product/${product.slug || productId || ''}`}
             className="group w-full"
             onMouseEnter={() => setHovered(true)}
             onMouseLeave={() => setHovered(false)}

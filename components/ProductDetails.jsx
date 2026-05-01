@@ -64,6 +64,9 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
   const nextActionRef = useRef('viewing');
   const lastTrackedProductIdRef = useRef('');
   const exitSentRef = useRef(false);
+  const touchStartXRef = useRef(null);
+  const touchStartYRef = useRef(null);
+  const suppressQuickViewRef = useRef(false);
 
   const emitBehaviorEvent = (eventType, extra = {}) => {
     const storeId = String(product?.storeId || '').trim();
@@ -620,7 +623,59 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
     return firstImage || fallback;
   };
   const activeMedia = mainImage || mediaList[0] || PLACEHOLDER_IMAGE;
+  const activeMediaIndex = Math.max(mediaList.indexOf(activeMedia), 0);
   const isMainVideo = isVideoUrl(activeMedia);
+
+  const showMediaAtIndex = (index) => {
+    if (!mediaList.length) return;
+    const normalizedIndex = (index + mediaList.length) % mediaList.length;
+    setMainImage(mediaList[normalizedIndex] || PLACEHOLDER_IMAGE);
+  };
+
+  const handleMainMediaTouchStart = (event) => {
+    const touch = event.touches?.[0];
+    if (!touch) return;
+
+    touchStartXRef.current = touch.clientX;
+    touchStartYRef.current = touch.clientY;
+    suppressQuickViewRef.current = false;
+  };
+
+  const handleMainMediaTouchEnd = (event) => {
+    const touch = event.changedTouches?.[0];
+    const startX = touchStartXRef.current;
+    const startY = touchStartYRef.current;
+
+    touchStartXRef.current = null;
+    touchStartYRef.current = null;
+
+    if (!touch || startX === null || startY === null || mediaList.length <= 1) return;
+
+    const deltaX = touch.clientX - startX;
+    const deltaY = touch.clientY - startY;
+
+    if (Math.abs(deltaX) < 40 || Math.abs(deltaX) <= Math.abs(deltaY)) {
+      return;
+    }
+
+    suppressQuickViewRef.current = true;
+
+    if (deltaX < 0) {
+      showMediaAtIndex(activeMediaIndex + 1);
+      return;
+    }
+
+    showMediaAtIndex(activeMediaIndex - 1);
+  };
+
+  const handleMainMediaClick = () => {
+    if (suppressQuickViewRef.current) {
+      suppressQuickViewRef.current = false;
+      return;
+    }
+
+    openQuickView();
+  };
 
   useEffect(() => {
     const initialMedia = mediaList[0] || PLACEHOLDER_IMAGE;
@@ -1183,7 +1238,12 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
                   </button>
                 </div>
 
-                <div className={`w-full h-full ${isMainVideo ? '' : 'cursor-zoom-in'}`} onClick={openQuickView}>
+                <div
+                  className={`w-full h-full ${isMainVideo ? '' : 'cursor-zoom-in'}`}
+                  onClick={handleMainMediaClick}
+                  onTouchStart={handleMainMediaTouchStart}
+                  onTouchEnd={handleMainMediaTouchEnd}
+                >
                   {isMainVideo ? (
                     <video
                       src={activeMedia}

@@ -9,7 +9,9 @@
     "start": "node .next/standalone/server.js || next start",
     "start:standalone": "node .next/standalone/server.js",
     "start:legacy": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "migrate:user-identity-indexes": "node scripts/migrateUserIdentityIndexes.js",
+    "migrate:user-identity-indexes:apply": "node scripts/migrateUserIdentityIndexes.js --apply"
   },
   "dependencies": {
     "@emailjs/nodejs": "^5.0.2",

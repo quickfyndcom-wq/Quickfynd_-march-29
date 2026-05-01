@@ -157,15 +157,25 @@ export async function DELETE(request, { params }) {
         }
         const userId = decodedToken.uid;
         const storeId = await authSeller(userId);
+        if (!storeId) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+        }
         const { orderId } = await params;
 
-        // Verify the order belongs to this store
-        const existingOrder = await Order.findOne({
-            _id: orderId,
-            storeId: storeId
-        }).lean();
+        // Verify the order belongs to this store (check top-level storeId OR item-level storeId)
+        const existingOrder = await Order.findById(orderId).lean();
 
         if (!existingOrder) {
+            return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+        }
+
+        const topLevelMatch = String(existingOrder.storeId || '') === String(storeId);
+        const itemLevelMatch = Array.isArray(existingOrder.items) &&
+            existingOrder.items.some(item => String(item.storeId || '') === String(storeId));
+        const orderItemsMatch = Array.isArray(existingOrder.orderItems) &&
+            existingOrder.orderItems.some(item => String(item.storeId || '') === String(storeId));
+
+        if (!topLevelMatch && !itemLevelMatch && !orderItemsMatch) {
             return NextResponse.json({ error: 'Order not found or unauthorized' }, { status: 404 });
         }
 

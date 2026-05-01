@@ -52,7 +52,17 @@ const HorizontalSlider = ({ section, router, allProducts }) => {
   const [loading, setLoading] = useState(true)
   const [isDragging, setIsDragging] = useState(false)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
-  const dragStateRef = useRef({ isDragging: false, startX: 0, scrollLeft: 0, rafId: null, hasMoved: false })
+  const dragStateRef = useRef({
+    isDragging: false,
+    startX: 0,
+    scrollLeft: 0,
+    rafId: null,
+    hasMoved: false,
+    lastX: 0,
+    lastTime: 0,
+    velocity: 0,
+    momentumId: null,
+  })
   
   const dispatch = useDispatch()
   const { getToken } = useAuth() || {}
@@ -60,6 +70,23 @@ const HorizontalSlider = ({ section, router, allProducts }) => {
 
   const getCurrentPrice = (product) => product.basePrice ?? product.price ?? product.salePrice
   const getRegularPrice = (product) => product.originalPrice ?? product.mrp ?? product.regularPrice ?? product.price
+  const getAverageRating = (product) => {
+    if (typeof product?.averageRating === 'number') return product.averageRating
+    if (typeof product?.rating === 'number') return product.rating
+    if (Array.isArray(product?.rating) && product.rating.length > 0) {
+      const sum = product.rating.reduce((acc, value) => acc + (Number(value) || 0), 0)
+      return sum / product.rating.length
+    }
+    return 0
+  }
+  const getReviewCount = (product) => {
+    if (typeof product?.ratingCount === 'number') return product.ratingCount
+    if (typeof product?.reviewCount === 'number') return product.reviewCount
+    if (typeof product?.reviews === 'number') return product.reviews
+    if (Array.isArray(product?.reviews)) return product.reviews.length
+    if (Array.isArray(product?.rating)) return product.rating.length
+    return 0
+  }
   const getDiscountPercent = (regular, current) => {
     if (!regular || !current || regular <= current) return null
     return Math.round(((regular - current) / regular) * 100)
@@ -140,22 +167,31 @@ const HorizontalSlider = ({ section, router, allProducts }) => {
     return () => container.removeEventListener('scroll', updateScrollState)
   }, [sectionProducts, loading])
 
-  // Mouse drag handlers
+  // Mouse drag handlers with momentum/inertia
   const handlePointerDown = (e) => {
     const container = scrollRef.current
     if (!container) return
 
-    // Don't start dragging if clicking on interactive elements (buttons, links, inputs)
     const target = e.target
-    if (target.closest('button') || target.closest('a') || target.closest('input') || target.closest('select')) {
+    if (target.closest('button') || target.closest('input') || target.closest('select') || target.closest('textarea')) {
       return
+    }
+
+    // Cancel any ongoing momentum
+    if (dragStateRef.current.momentumId) {
+      cancelAnimationFrame(dragStateRef.current.momentumId)
+      dragStateRef.current.momentumId = null
     }
 
     container.setPointerCapture?.(e.pointerId)
     container.style.scrollBehavior = 'auto'
+    container.style.scrollSnapType = 'none'
     dragStateRef.current.isDragging = true
     dragStateRef.current.startX = e.clientX
+    dragStateRef.current.lastX = e.clientX
+    dragStateRef.current.lastTime = performance.now()
     dragStateRef.current.scrollLeft = container.scrollLeft
+    dragStateRef.current.velocity = 0
     dragStateRef.current.hasMoved = false
     setIsDragging(true)
   }
@@ -164,10 +200,17 @@ const HorizontalSlider = ({ section, router, allProducts }) => {
     const container = scrollRef.current
     if (!container || !dragStateRef.current.isDragging) return
 
-    const walk = (e.clientX - dragStateRef.current.startX) * 1.0
-    
-    // Mark as moved if movement exceeds threshold
-    if (Math.abs(walk) > 12) {
+    const now = performance.now()
+    const dx = e.clientX - dragStateRef.current.lastX
+    const dt = now - dragStateRef.current.lastTime || 1
+
+    // Track instantaneous velocity (px/ms)
+    dragStateRef.current.velocity = dx / dt
+    dragStateRef.current.lastX = e.clientX
+    dragStateRef.current.lastTime = now
+
+    const walk = e.clientX - dragStateRef.current.startX
+    if (Math.abs(walk) > 6) {
       dragStateRef.current.hasMoved = true
       e.preventDefault()
     }
@@ -175,7 +218,6 @@ const HorizontalSlider = ({ section, router, allProducts }) => {
     if (dragStateRef.current.rafId) {
       cancelAnimationFrame(dragStateRef.current.rafId)
     }
-
     dragStateRef.current.rafId = requestAnimationFrame(() => {
       container.scrollLeft = dragStateRef.current.scrollLeft - walk
     })
@@ -188,24 +230,61 @@ const HorizontalSlider = ({ section, router, allProducts }) => {
       cancelAnimationFrame(dragStateRef.current.rafId)
       dragStateRef.current.rafId = null
     }
-    if (container) {
-      container.style.scrollBehavior = 'smooth'
-      if (e?.pointerId != null) {
-        container.releasePointerCapture?.(e.pointerId)
-      }
+    if (e?.pointerId != null) {
+      container?.releasePointerCapture?.(e.pointerId)
     }
     setIsDragging(false)
+
+    if (!container) return
+
+    // Apply momentum inertia
+    let velocity = dragStateRef.current.velocity * -18 // scale px/ms → px/frame
+    const friction = 0.88
+    const minVelocity = 0.5
+
+    const momentumScroll = () => {
+      if (Math.abs(velocity) < minVelocity) {
+        // Re-enable snap after momentum settles
+        container.style.scrollSnapType = ''
+        container.style.scrollBehavior = 'smooth'
+        return
+      }
+      container.scrollLeft += velocity
+      velocity *= friction
+      dragStateRef.current.momentumId = requestAnimationFrame(momentumScroll)
+    }
+
+    if (dragStateRef.current.hasMoved && Math.abs(velocity) > minVelocity) {
+      dragStateRef.current.momentumId = requestAnimationFrame(momentumScroll)
+    } else {
+      container.style.scrollSnapType = ''
+      container.style.scrollBehavior = 'smooth'
+    }
+  }
+
+  const getScrollStep = () => {
+    const container = scrollRef.current
+    if (!container) return 300
+
+    const firstCard = container.querySelector('.product-card-item')
+    if (!firstCard) return 300
+
+    const cardWidth = firstCard.getBoundingClientRect().width
+    const styles = window.getComputedStyle(container)
+    const gap = parseFloat(styles.columnGap || styles.gap || '0') || 0
+
+    return Math.round(cardWidth + gap)
   }
 
   const scrollLeftBtn = () => {
     if (scrollRef.current) {
-      scrollRef.current.scrollBy({ left: -300, behavior: 'smooth' })
+      scrollRef.current.scrollBy({ left: -getScrollStep(), behavior: 'smooth' })
     }
   }
 
   const scrollRightBtn = () => {
     if (scrollRef.current) {
-      scrollRef.current.scrollBy({ left: 300, behavior: 'smooth' })
+      scrollRef.current.scrollBy({ left: getScrollStep(), behavior: 'smooth' })
     }
   }
 
@@ -250,13 +329,17 @@ const HorizontalSlider = ({ section, router, allProducts }) => {
           onPointerUp={endDragging}
           onPointerLeave={endDragging}
           onPointerCancel={endDragging}
-          className={`flex gap-3 sm:gap-4 overflow-x-auto scrollbar-hide pb-2 ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
-          style={{ scrollBehavior: 'smooth', touchAction: 'pan-y' }}
+          className={`flex gap-3 sm:gap-4 overflow-x-auto scrollbar-hide pb-2 snap-x snap-proximity ${isDragging ? 'cursor-grabbing select-none' : 'cursor-grab'}`}
+          style={{ scrollBehavior: 'smooth', touchAction: 'pan-y', WebkitOverflowScrolling: 'touch', willChange: 'scroll-position' }}
         >
           {loading ? (
             <SkeletonLoader />
           ) : (
-            sectionProducts.map((product) => (
+            sectionProducts.map((product) => {
+              const averageRating = getAverageRating(product)
+              const reviewCount = getReviewCount(product)
+
+              return (
               <Link
                 key={product._id || product.id}
                 href={`/product/${encodeURIComponent(String(product.slug || product._id || product.id || ''))}`}
@@ -270,7 +353,7 @@ const HorizontalSlider = ({ section, router, allProducts }) => {
                 }}
                 onDragStart={(e) => e.preventDefault()}
                 draggable="false"
-                className="product-card-item flex-shrink-0 w-56 sm:w-64 bg-white rounded-xl overflow-hidden group cursor-pointer transition-all duration-300 select-none border border-gray-100 hover:border-gray-200 hover:shadow-lg"
+                className="product-card-item snap-start flex-shrink-0 w-56 sm:w-64 bg-white rounded-xl overflow-hidden group cursor-pointer transition-all duration-300 select-none border border-gray-100 hover:border-gray-200 hover:shadow-lg"
               >
                 {/* Product Image */}
                 <div className="relative w-full h-56 sm:h-64 bg-gray-50 overflow-hidden">
@@ -314,13 +397,13 @@ const HorizontalSlider = ({ section, router, allProducts }) => {
                       {[...Array(5)].map((_, i) => (
                         <span 
                           key={i} 
-                          className={`${i < Math.floor(product.rating || product.averageRating || 0) ? 'text-yellow-400' : 'text-gray-300'} text-xs`}
+                          className={`${i < Math.floor(averageRating) ? 'text-yellow-400' : 'text-gray-300'} text-xs`}
                         >
                           ★
                         </span>
                       ))}
                       <span className="text-xs text-gray-600 ml-0.5 truncate">
-                        ({product.reviews || product.reviewCount || product.ratingCount || 0})
+                        ({reviewCount})
                       </span>
                     </div>
                   </div>
@@ -408,7 +491,7 @@ const HorizontalSlider = ({ section, router, allProducts }) => {
                   </div>
                 </div>
               </Link>
-            ))
+            )})
           )}
         </div>
 

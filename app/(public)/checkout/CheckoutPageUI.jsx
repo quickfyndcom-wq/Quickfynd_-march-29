@@ -99,6 +99,7 @@ export default function CheckoutPage() {
   const checkoutVisitTrackedRef = useRef(false);
   const identityTrackTimerRef = useRef(null);
   const lastIdentitySnapshotRef = useRef("");
+  const lastPincodeLookupRef = useRef("");
 
   const cleanDigits = (value) => (value ? String(value).replace(/\D/g, '') : '');
   const sanitizePincode = (value) => cleanDigits(value).trim();
@@ -1314,6 +1315,62 @@ export default function CheckoutPage() {
       // Keep pincode numeric-only to avoid bad values
       const numeric = String(value || '').replace(/\D/g, '').slice(0, 10);
       setForm(f => ({ ...f, pincode: numeric }));
+
+      // Auto-fetch location from pincode without blocking checkout on lookup failure.
+      const isIndia = (form.country || 'India') === 'India';
+      const shouldLookup = isIndia && numeric.length === 6 && /^\d{6}$/.test(numeric);
+      if (!shouldLookup || lastPincodeLookupRef.current === numeric) return;
+      lastPincodeLookupRef.current = numeric;
+
+      (async () => {
+        try {
+          let postOffice = null;
+
+          try {
+            const internalRes = await fetch(`/api/indiapost/pincode?pincode=${encodeURIComponent(numeric)}&limit=1`);
+            const internalData = await internalRes.json();
+            const firstOffice = internalData?.data?.[0] || internalData?.offices?.[0] || null;
+            if (firstOffice) {
+              postOffice = {
+                Name: firstOffice?.office_name || firstOffice?.name || '',
+                Region: firstOffice?.region_name || '',
+                Division: firstOffice?.division_name || '',
+                District: firstOffice?.district_name || firstOffice?.district || '',
+                State: firstOffice?.state_name || firstOffice?.state || ''
+              };
+            }
+          } catch (_) {
+            // Fall through to public API fallback.
+          }
+
+          if (!postOffice) {
+            const response = await fetch(`https://api.postalpincode.in/pincode/${numeric}`);
+            const data = await response.json();
+            if (data[0]?.Status === 'Success' && data[0]?.PostOffice?.length > 0) {
+              postOffice = data[0].PostOffice[0];
+            }
+          }
+
+          if (!postOffice) return;
+
+          setForm((f) => ({
+            ...f,
+            pincode: numeric,
+            city: f.city || postOffice.Name || postOffice.Region || postOffice.Division || '',
+            district: f.district || postOffice.District || '',
+            state: f.state || postOffice.State || '',
+            country: f.country || 'India'
+          }));
+
+          const stateValue = postOffice.State || '';
+          if (stateValue) {
+            const stateObj = indiaStatesAndDistricts.find((s) => s.state === stateValue);
+            if (stateObj) setDistricts(stateObj.districts);
+          }
+        } catch (_) {
+          // Lookup failures should not block checkout.
+        }
+      })();
     } else {
       setForm(f => ({ ...f, [name]: value }));
     }

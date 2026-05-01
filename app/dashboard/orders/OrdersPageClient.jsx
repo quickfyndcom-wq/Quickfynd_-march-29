@@ -8,9 +8,10 @@ import Link from 'next/link'
 import axios from 'axios'
 import toast from 'react-hot-toast'
 import DashboardSidebar from '@/components/DashboardSidebar'
-import { downloadInvoice, downloadAwb } from '@/lib/generateInvoice'
+import { downloadInvoice } from '@/lib/generateInvoice'
 import ReviewForm from '@/components/ReviewForm'
 import { useSearchParams } from 'next/navigation'
+import { getDisplayOrderNumber } from '@/lib/orderNumber'
 
 export default function DashboardOrdersPage() {
   const searchParams = useSearchParams()
@@ -80,6 +81,9 @@ export default function DashboardOrdersPage() {
     const status = String(order?.status || '').toUpperCase();
     const paymentStatus = String(order?.paymentStatus || '').toLowerCase();
 
+    // Cancelled / returned orders — no money changes hands, return null (not pending, not paid)
+    if (['CANCELLED', 'RETURNED', 'RTO', 'PAYMENT_FAILED'].includes(status)) return null;
+
     if (paymentMethod === 'cod') {
       if (status === 'DELIVERED') return true;
       if (order?.delhivery?.payment?.is_cod_recovered) return true;
@@ -95,10 +99,6 @@ export default function DashboardOrdersPage() {
     return !!order?.isPaid;
   }
 
-  const getDisplayOrderNumber = (order) => {
-    if (order?.shortOrderNumber) return String(order.shortOrderNumber).padStart(5, '0')
-    return String(order?._id || order?.id || '').slice(0, 8).toUpperCase()
-  }
 
   const canCancelOrder = (order) => {
     const status = String(order?.status || '').toUpperCase()
@@ -520,6 +520,7 @@ export default function DashboardOrdersPage() {
                 let updatedOrder = {
                   ...order,
                   delhivery: response.data.order.delhivery,
+                  indiaPost: response.data.order.indiaPost,
                   status: response.data.order.status || order.status,
                   trackingUrl: response.data.order.trackingUrl || order.trackingUrl
                 };
@@ -928,9 +929,13 @@ export default function DashboardOrdersPage() {
                         </div>
                         <div>
                           <p className="text-[11px] text-slate-500">Payment</p>
-                          <span className={`inline-block px-2 py-0.5 text-[11px] font-medium rounded ${getPaymentStatus(order) ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-                            {getPaymentStatus(order) ? 'Paid' : 'Pending'}
-                          </span>
+                          {getPaymentStatus(order) === null ? (
+                            <span className="inline-block px-2 py-0.5 text-[11px] font-medium rounded bg-gray-100 text-gray-500">N/A</span>
+                          ) : (
+                            <span className={`inline-block px-2 py-0.5 text-[11px] font-medium rounded ${getPaymentStatus(order) ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                              {getPaymentStatus(order) ? 'Paid' : 'Pending'}
+                            </span>
+                          )}
                         </div>
                       </div>
 
@@ -1246,14 +1251,14 @@ export default function DashboardOrdersPage() {
                                     </p>
                                   </div>
                                   <span className={`inline-block px-3 py-1.5 text-xs font-bold rounded-full whitespace-nowrap ${
-                                    getPaymentStatus(order) ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
+                                    getPaymentStatus(order) === null ? 'bg-gray-100 text-gray-500' : getPaymentStatus(order) ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
                                   }`}>
-                                    {getPaymentStatus(order) ? '✓ PAID' : '⏳ PENDING'}
+                                    {getPaymentStatus(order) === null ? '— N/A' : getPaymentStatus(order) ? '✓ PAID' : '⏳ PENDING'}
                                   </span>
                                 </div>
                                 
                                 {/* COD Status Details */}
-                                {(order.paymentMethod === 'cod' || order.paymentMethod === 'COD') && (
+                                {(order.paymentMethod === 'cod' || order.paymentMethod === 'COD') && !['CANCELLED','RETURNED','RTO'].includes(String(order.status||'').toUpperCase()) && (
                                   <div className="p-3 bg-amber-50 rounded-lg border border-amber-200">
                                     <p className="text-xs text-amber-700 font-medium">
                                       {getPaymentStatus(order) ? '✓ Payment collected from customer' : '⏳ Awaiting payment at delivery'}
@@ -1313,56 +1318,6 @@ export default function DashboardOrdersPage() {
                                   <line x1="12" y1="15" x2="12" y2="3"></line>
                                 </svg>
                                 Download Invoice
-                              </button>
-                              {/* Contract selection (if seller has contractIds) */}
-                              {loadingStoreContracts ? (
-                                <div className="flex items-center px-4 py-2 text-sm text-slate-600">Loading contracts...</div>
-                              ) : (storeContracts && storeContracts.length > 0) ? (
-                                <div className="flex items-center gap-2">
-                                  <label className="text-sm text-slate-600 mr-2">Contract:</label>
-                                  <select
-                                    value={selectedContract?.key || ''}
-                                    onChange={(e) => {
-                                      const key = e.target.value
-                                      const c = storeContracts.find(s => s.key === key) || null
-                                      setSelectedContract(c)
-                                    }}
-                                    className="px-2 py-1 border rounded"
-                                  >
-                                    <option value="">Select contract</option>
-                                    {storeContracts.map((c) => (
-                                      <option key={c.key} value={c.key}>{c.label || c.key}</option>
-                                    ))}
-                                  </select>
-                                  <label className="text-sm text-slate-600 ml-3 mr-1">Payment:</label>
-                                  <select
-                                    value={selectedPaymentType}
-                                    onChange={(e) => setSelectedPaymentType(e.target.value)}
-                                    className="px-2 py-1 border rounded"
-                                  >
-                                    <option value="COD">COD</option>
-                                    <option value="Prepaid">Prepaid</option>
-                                  </select>
-                                </div>
-                              ) : null}
-
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  if (storeContracts && storeContracts.length > 0 && !selectedContract) {
-                                    toast.error('Please select a contract before downloading AWB')
-                                    return
-                                  }
-                                  const opts = selectedContract ? { contractId: selectedContract.id, contractLabel: selectedContract.label, contract: selectedContract, paymentType: selectedPaymentType } : {}
-                                  downloadAwb(order, opts)
-                                }}
-                                className="px-4 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-sm font-medium flex items-center gap-2"
-                              >
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                                  <path d="M3 9h18M9 21V9" />
-                                </svg>
-                                Download AWB
                               </button>
                               {!order.deliveryReview?.reviewed && (
                                 <button
@@ -1773,11 +1728,105 @@ export default function DashboardOrdersPage() {
                               </div>
                             )}
 
-                            {!order.delhivery?.events && !order.delhivery?.current_status_location && (
+                            {!order.delhivery?.events && !order.delhivery?.current_status_location && !order.indiaPost && !order.courier?.toLowerCase().includes('india post') && (
                               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-center">
                                 <p className="text-sm text-yellow-800">
                                   ⏳ Tracking information will be available once your order is shipped by the courier
                                 </p>
+                              </div>
+                            )}
+
+                            {/* India Post — show tracking link to India Post website */}
+                            {order.courier?.toLowerCase().includes('india post') && order.trackingId && (
+                              <div className="bg-white rounded-xl shadow-sm border border-red-200 overflow-hidden">
+                                <div className="bg-gradient-to-r from-red-600 to-orange-500 px-4 py-3 flex items-center gap-2">
+                                  <span className="text-lg">📮</span>
+                                  <p className="text-sm font-bold text-white">India Post Tracking</p>
+                                  {order.indiaPost?.statusLabel && (
+                                    <span className={`ml-auto text-xs px-2 py-0.5 rounded-full font-semibold ${order.indiaPost.isDelivered ? 'bg-green-500 text-white' : 'bg-white/20 text-white'}`}>
+                                      {order.indiaPost.statusLabel}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="p-3.5 md:p-5 space-y-3">
+                                  {/* AWB */}
+                                  <div className="bg-red-50 rounded-lg p-3 border border-red-100 text-sm">
+                                    <p className="text-xs text-slate-500 mb-1">AWB Number</p>
+                                    <p className="font-mono font-semibold text-slate-800">{order.trackingId}</p>
+                                  </div>
+
+                                  {/* Status */}
+                                  {order.indiaPost?.statusLabel && (
+                                    <div className={`p-3 rounded-lg border ${order.indiaPost.isDelivered ? 'bg-green-50 border-green-200' : 'bg-blue-50 border-blue-200'}`}>
+                                      <p className="text-xs text-slate-500 font-semibold">Status</p>
+                                      <p className={`font-bold text-lg mt-0.5 ${order.indiaPost.isDelivered ? 'text-green-700' : 'text-blue-700'}`}>
+                                        {order.indiaPost.isDelivered ? '✅' : '📦'} {order.indiaPost.statusLabel}
+                                      </p>
+                                    </div>
+                                  )}
+
+                                  {order.indiaPost?.providerTips && (
+                                    <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg">
+                                      <p className="text-xs text-slate-500 font-semibold">Carrier Message</p>
+                                      <p className="text-sm font-medium text-amber-800 mt-0.5">{order.indiaPost.providerTips}</p>
+                                    </div>
+                                  )}
+
+                                  {/* Delivered time */}
+                                  {order.indiaPost?.deliveredAt && (
+                                    <div className="bg-green-50 border border-green-200 p-3 rounded-lg">
+                                      <p className="text-xs text-slate-500 font-semibold">Delivered On</p>
+                                      <p className="font-bold text-green-700">{order.indiaPost.deliveredAt}</p>
+                                    </div>
+                                  )}
+
+                                  {/* Current location */}
+                                  {order.indiaPost?.currentLocation && (
+                                    <div className="bg-gradient-to-r from-red-500 to-orange-500 p-3 rounded-lg text-white">
+                                      <p className="text-xs font-semibold opacity-90">📍 Current Location</p>
+                                      <p className="font-bold text-base mt-0.5">{order.indiaPost.currentLocation}</p>
+                                    </div>
+                                  )}
+
+                                  {/* Events timeline */}
+                                  {order.indiaPost?.events?.length > 0 && (
+                                    <div>
+                                      <p className="text-xs font-semibold text-slate-600 mb-2">📦 Tracking History</p>
+                                      <div className="space-y-2 max-h-72 overflow-y-auto">
+                                        {order.indiaPost.events.map((evt, idx) => (
+                                          <div key={idx} className={`border-l-2 ${idx === 0 ? 'border-red-500' : 'border-red-200'} pl-3 py-1.5 bg-red-50 rounded-r`}>
+                                            <div className="flex justify-between items-start gap-2">
+                                              <div className="flex-1">
+                                                {evt.location && <div className="font-semibold text-slate-800 text-xs">📍 {evt.location}</div>}
+                                                {evt.description && <div className={`text-xs mt-0.5 ${idx === 0 ? 'font-bold text-red-700' : 'text-slate-600'}`}>{evt.description}</div>}
+                                              </div>
+                                              <div className="text-xs text-slate-400 whitespace-nowrap">{evt.time}</div>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  <div className="flex gap-2">
+                                    <a
+                                      href={`https://www.indiapost.gov.in/VAS/Pages/trackconsignment.aspx`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-orange-600 hover:bg-orange-700 text-white text-sm font-semibold rounded-lg transition-colors"
+                                    >
+                                      📮 India Post
+                                    </a>
+                                    <a
+                                      href={`https://t.17track.net/en#nums=${order.trackingId}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors"
+                                    >
+                                      📦 17track
+                                    </a>
+                                  </div>
+                                </div>
                               </div>
                             )}
                           </div>
@@ -1812,7 +1861,7 @@ export default function DashboardOrdersPage() {
 
           {/* Return/Replacement Modal */}
           {showReturnModal && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onClick={() => setShowReturnModal(false)}>
+            <div className="fixed inset-0 bg-slate-900/25 backdrop-blur-[2px] z-50 flex items-center justify-center p-4" onClick={() => setShowReturnModal(false)}>
               <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-xl font-bold text-slate-800">Return/Replacement Request</h2>

@@ -11,6 +11,18 @@ For product description UI parity with dashboard/web, follow:
 
 This is mandatory for correct rendering of rich description content on mobile.
 
+## Order History + Tracking + Account (New)
+
+For full mobile implementation details (COD + prepaid source tagging, guest order auto-link after login, tracking timeline with delivered time/current location, and account profile/address APIs), follow:
+
+- `MOBILE_ORDER_HISTORY_TRACKING_ACCOUNT_GUIDE.md`
+
+## Google Sign-In + Profile + Order Tracking (Standalone)
+
+For a dedicated app implementation document focused on sign-in (including Google), profile, order history, and tracking:
+
+- `MOBILE_AUTH_PROFILE_ORDER_TRACKING_IMPLEMENTATION_GUIDE.md`
+
 ## 1) Base Setup
 
 - **Base URL (Production):** `https://quickfynd.com`
@@ -29,32 +41,42 @@ Authorization: Bearer <FIREBASE_ID_TOKEN>
 > Important: In this backend, sign-in and sign-out are handled by **Firebase Auth SDK** (client side), not by custom `/api/signin` or `/api/signout` endpoints.
 
 ### 2.1 Email/Password Sign-In (Firebase)
+
 Use Firebase Auth in mobile app:
+
 - `signInWithEmailAndPassword(...)`
 
 After sign-in:
+
 1. Get ID token from Firebase user
 2. Send token in `Authorization` header for protected APIs
 
 ### 2.2 Google Sign-In (Firebase)
+
 Use Firebase Auth + Google provider:
+
 - `signInWithPopup(...)` on web
 - For mobile (Android/iOS), use native Google sign-in + Firebase credential flow
 
 After Google sign-in:
+
 1. Get Firebase ID token
 2. Use the same bearer token for backend APIs
 
 ### 2.3 Sign-Out
+
 Use Firebase SDK sign-out on app side:
+
 - `auth.signOut()`
 
 Optional notification API after login/logout:
 
 #### POST `/api/send-login-email` (Protected)
+
 Send login alert email to user.
 
 Request body:
+
 ```json
 {
   "email": "user@example.com",
@@ -63,6 +85,7 @@ Request body:
 ```
 
 Response:
+
 ```json
 {
   "success": true,
@@ -71,9 +94,11 @@ Response:
 ```
 
 #### POST `/api/send-signout-email` (Optional protected)
+
 Send sign-out alert email.
 
 Request body:
+
 ```json
 {
   "email": "user@example.com",
@@ -87,9 +112,11 @@ Request body:
 ## 3) Wallet APIs
 
 ### GET `/api/wallet` (Protected)
+
 Returns wallet summary.
 
 Response:
+
 ```json
 {
   "coins": 120,
@@ -106,12 +133,15 @@ Response:
 ```
 
 Errors:
+
 - `401 Unauthorized`
 
 ### POST `/api/wallet/bonus` (Protected)
+
 Claims one-time welcome bonus (20 coins).
 
 Response (new claim):
+
 ```json
 {
   "message": "Welcome bonus added",
@@ -120,6 +150,7 @@ Response (new claim):
 ```
 
 Response (already claimed):
+
 ```json
 {
   "message": "Welcome bonus already claimed",
@@ -132,16 +163,22 @@ Response (already claimed):
 ## 4) Order APIs
 
 ### POST `/api/orders`
+
 Create a new order (supports logged-in + guest checkout).
 
 Common body fields:
+
 ```json
 {
   "addressId": "<address_id>",
-  "addressData": { "street": "", "city": "", "state": "", "country": "", "pincode": "" },
-  "items": [
-    { "id": "<product_id>", "quantity": 1 }
-  ],
+  "addressData": {
+    "street": "",
+    "city": "",
+    "state": "",
+    "country": "",
+    "pincode": ""
+  },
+  "items": [{ "id": "<product_id>", "quantity": 1 }],
   "couponCode": "NEW10",
   "paymentMethod": "COD",
   "isGuest": false,
@@ -150,6 +187,7 @@ Common body fields:
 ```
 
 Guest-specific body fields:
+
 ```json
 {
   "isGuest": true,
@@ -167,36 +205,45 @@ Guest-specific body fields:
 ```
 
 Notes:
+
 - If `isGuest !== true`, bearer token is required.
 - Validates stock, address, coupon, and payment combinations.
 - COD is blocked for personalized-offer items.
 
 ### GET `/api/orders?orderId=<id>`
+
 Fetch single order by ID (supports guest use case for order success page).
 
 Response:
+
 ```json
 {
-  "order": { "_id": "...", "shortOrderNumber": 123456, "status": "ORDER_PLACED" }
+  "order": {
+    "_id": "...",
+    "shortOrderNumber": 123456,
+    "status": "ORDER_PLACED"
+  }
 }
 ```
 
 ### GET `/api/orders?limit=20&offset=0` (Protected)
+
 Fetch logged-in user order list.
 
 Response:
+
 ```json
 {
-  "orders": [
-    { "_id": "...", "status": "DELIVERED", "isPaid": true }
-  ]
+  "orders": [{ "_id": "...", "status": "DELIVERED", "isPaid": true }]
 }
 ```
 
 ### POST `/api/orders/cancel` (Protected)
+
 Cancel a cancellable order status.
 
 Request:
+
 ```json
 {
   "orderId": "<order_id>",
@@ -205,6 +252,7 @@ Request:
 ```
 
 Response:
+
 ```json
 {
   "success": true,
@@ -214,9 +262,11 @@ Response:
 ```
 
 ### POST `/api/orders/return-request` (Protected)
+
 Submit return/replacement request for delivered order.
 
 Request:
+
 ```json
 {
   "orderId": "<order_id>",
@@ -229,9 +279,11 @@ Request:
 ```
 
 ### GET `/api/orders/return-request` (Protected)
+
 Get all return requests for authenticated user.
 
 ### GET `/api/orders/check-razorpay-settlement?orderId=<id>` (Protected)
+
 Checks Razorpay capture/settlement and auto-updates order payment status.
 
 ---
@@ -239,14 +291,19 @@ Checks Razorpay capture/settlement and auto-updates order payment status.
 ## 5) Tracking + Guest Linking
 
 ### GET `/api/track-order?awb=<awb>`
+
 ### GET `/api/track-order?orderId=<id_or_short_number>`
+
 ### GET `/api/track-order?phone=<phone>`
+
 Public tracking endpoint. Returns order/tracking data (Delhivery fallback enabled).
 
 ### POST `/api/user/link-guest-orders` (Protected)
+
 Use after signup/login to link previous guest orders.
 
 Request:
+
 ```json
 {
   "email": "user@example.com",
@@ -255,6 +312,7 @@ Request:
 ```
 
 Response:
+
 ```json
 {
   "message": "Successfully linked 2 guest order(s) to your account",
@@ -283,6 +341,7 @@ Share these securely (1Password/Bitwarden/Secret Manager), **not in chat**.
 ### 6.2 Do NOT share to mobile app
 
 These are backend-only secrets:
+
 - `FIREBASE_SERVICE_ACCOUNT_KEY`
 - `FIREBASE_PRIVATE_KEY`
 - `RESEND_API_KEY`
@@ -314,12 +373,14 @@ These are backend-only secrets:
 ## 8) cURL Smoke Tests
 
 ### Wallet
+
 ```bash
 curl -X GET "https://quickfynd.com/api/wallet" \
   -H "Authorization: Bearer <ID_TOKEN>"
 ```
 
 ### Create Order
+
 ```bash
 curl -X POST "https://quickfynd.com/api/orders" \
   -H "Content-Type: application/json" \
@@ -333,6 +394,7 @@ curl -X POST "https://quickfynd.com/api/orders" \
 ```
 
 ### Track Order
+
 ```bash
 curl -X GET "https://quickfynd.com/api/track-order?orderId=<ORDER_ID_OR_SHORT_NUMBER>"
 ```
