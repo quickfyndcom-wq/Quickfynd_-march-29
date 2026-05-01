@@ -52,6 +52,7 @@ const HorizontalSlider = ({ section, router, allProducts }) => {
   const [loading, setLoading] = useState(true)
   const [isDragging, setIsDragging] = useState(false)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
+  const suppressNextClickRef = useRef(false)
   const dragStateRef = useRef({
     isDragging: false,
     startX: 0,
@@ -193,6 +194,7 @@ const HorizontalSlider = ({ section, router, allProducts }) => {
     dragStateRef.current.scrollLeft = container.scrollLeft
     dragStateRef.current.velocity = 0
     dragStateRef.current.hasMoved = false
+    suppressNextClickRef.current = false
     setIsDragging(true)
   }
 
@@ -210,8 +212,9 @@ const HorizontalSlider = ({ section, router, allProducts }) => {
     dragStateRef.current.lastTime = now
 
     const walk = e.clientX - dragStateRef.current.startX
-    if (Math.abs(walk) > 6) {
+    if (Math.abs(walk) > 10) {
       dragStateRef.current.hasMoved = true
+      suppressNextClickRef.current = true
       e.preventDefault()
     }
 
@@ -324,12 +327,7 @@ const HorizontalSlider = ({ section, router, allProducts }) => {
         {/* Products Scroll Container */}
         <div
           ref={scrollRef}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={endDragging}
-          onPointerLeave={endDragging}
-          onPointerCancel={endDragging}
-          className={`flex gap-3 sm:gap-4 overflow-x-auto scrollbar-hide pb-2 snap-x snap-proximity ${isDragging ? 'cursor-grabbing select-none' : 'cursor-grab'}`}
+          className="flex gap-3 sm:gap-4 overflow-x-auto scrollbar-hide pb-2 snap-x snap-proximity"
           style={{ scrollBehavior: 'smooth', touchAction: 'pan-y', WebkitOverflowScrolling: 'touch', willChange: 'scroll-position' }}
         >
           {loading ? (
@@ -343,14 +341,6 @@ const HorizontalSlider = ({ section, router, allProducts }) => {
               <Link
                 key={product._id || product.id}
                 href={`/product/${encodeURIComponent(String(product.slug || product._id || product.id || ''))}`}
-                onClick={(e) => {
-                  // Only navigate if there was no significant dragging
-                  if (dragStateRef.current.hasMoved) {
-                    e.preventDefault()
-                  }
-                  // Reset hasMoved flag immediately after click
-                  dragStateRef.current.hasMoved = false
-                }}
                 onDragStart={(e) => e.preventDefault()}
                 draggable="false"
                 className="product-card-item snap-start flex-shrink-0 w-56 sm:w-64 bg-white rounded-xl overflow-hidden group cursor-pointer transition-all duration-300 select-none border border-gray-100 hover:border-gray-200 hover:shadow-lg"
