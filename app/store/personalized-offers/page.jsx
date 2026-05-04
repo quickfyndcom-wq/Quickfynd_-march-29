@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { format } from "date-fns";
 import toast from "react-hot-toast";
-import { Trash2, Copy, RefreshCw, Clock, CheckCircle, XCircle, Eye } from "lucide-react";
+import { Trash2, Copy, RefreshCw, Clock, CheckCircle, XCircle, Eye, Mail } from "lucide-react";
 import axios from "axios";
 import { useAuth } from "@/lib/useAuth";
 
@@ -18,6 +18,7 @@ export default function PersonalizedOffersAdmin() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [selectedCart, setSelectedCart] = useState(null);
+  const [sendingOfferEmailId, setSendingOfferEmailId] = useState(null);
   
   const [newOffer, setNewOffer] = useState({
     customerEmail: '',
@@ -217,6 +218,24 @@ export default function PersonalizedOffersAdmin() {
       fetchOffers();
     } catch (error) {
       toast.error("Failed to delete offer");
+    }
+  };
+
+  const handleSendOfferEmail = async (offerId) => {
+    if (!offerId || sendingOfferEmailId) return;
+    try {
+      setSendingOfferEmailId(offerId);
+      const token = await getToken();
+      await axios.post(
+        '/api/personalized-offers/send',
+        { offerId },
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+      );
+      toast.success('Offer email sent to customer');
+    } catch (error) {
+      toast.error(error?.response?.data?.error || 'Failed to send offer email');
+    } finally {
+      setSendingOfferEmailId(null);
     }
   };
 
@@ -546,6 +565,14 @@ export default function PersonalizedOffersAdmin() {
                 </div>
 
                 <div className="flex gap-2 ml-4">
+                  <button
+                    onClick={() => handleSendOfferEmail(offer._id)}
+                    disabled={sendingOfferEmailId === offer._id}
+                    className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed"
+                    title="Send offer email"
+                  >
+                    <Mail size={18} />
+                  </button>
                   <button
                     onClick={() => copyOfferUrl(offer.offerToken, offer.product?.slug)}
                     className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition"

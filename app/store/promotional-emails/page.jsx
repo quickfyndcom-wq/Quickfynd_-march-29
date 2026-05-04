@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { Mail, AlertCircle, CheckCircle, Clock, Users } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { useAuth } from '@/lib/useAuth';
 import Loading from '@/components/Loading';
 
@@ -13,6 +14,7 @@ export default function PromotionalEmailsPage() {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [statusFilter, setStatusFilter] = useState('all');
+  const [clearingHistory, setClearingHistory] = useState(false);
   
   // Manual send
   const [templates, setTemplates] = useState([]);
@@ -160,6 +162,43 @@ export default function PromotionalEmailsPage() {
       setSendStatus(msg || 'Failed to send promotional emails.');
     } finally {
       setSending(false);
+    }
+  };
+
+  const handleClearHistory = async () => {
+    const scopeText = statusFilter === 'all'
+      ? 'all promotional email history'
+      : `${statusFilter} promotional email history`;
+    if (!window.confirm(`Are you sure you want to delete ${scopeText}? This cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      setClearingHistory(true);
+      const token = await getToken();
+      const statusQuery = statusFilter !== 'all' ? `&status=${statusFilter}` : '';
+      const { data } = await axios.delete(
+        `/api/store/email-history?type=promotional${statusQuery}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      const deletedCount = Number(data?.deletedCount || 0);
+      toast.success(
+        deletedCount > 0
+          ? `Deleted ${deletedCount} history record${deletedCount === 1 ? '' : 's'}`
+          : 'No history records to delete'
+      );
+
+      await loadHistory(1);
+    } catch (error) {
+      console.error('Error clearing promotional email history:', error);
+      toast.error(error?.response?.data?.error || 'Failed to clear history');
+    } finally {
+      setClearingHistory(false);
     }
   };
 
@@ -352,6 +391,13 @@ export default function PromotionalEmailsPage() {
               className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
             >
               Refresh
+            </button>
+            <button
+              onClick={handleClearHistory}
+              disabled={clearingHistory}
+              className="px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {clearingHistory ? 'Clearing...' : 'Clear History'}
             </button>
           </div>
         </div>
