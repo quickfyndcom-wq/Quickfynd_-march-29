@@ -5,7 +5,7 @@ const SpinSliceSchema = new mongoose.Schema({
   weight: { type: Number, required: true, min: 0 }, // probability weight (all slices sum interpreted proportionally)
   rewardType: {
     type: String,
-    enum: ['coupon_percent', 'coupon_flat', 'no_win'],
+    enum: ['coupon_percent', 'coupon_flat', 'free_shipping', 'no_win'],
     default: 'no_win',
   },
   discountValue: { type: Number, default: 0 },   // 10 for 10% or 50 for ₹50

@@ -53,6 +53,7 @@ export async function GET(request) {
           description: coupon.description,
           discountType: coupon.discountType,
           discountValue: coupon.discountValue || coupon.discount,
+          freeShipping: coupon.discountType === 'free_shipping' || !!coupon.freeShipping,
           minOrderValue: coupon.minOrderValue || coupon.minPrice || 0,
           maxDiscount: coupon.maxDiscount,
           badgeColor: coupon.badgeColor || '#10B981',
@@ -180,6 +181,8 @@ export async function POST(request) {
       }
     } else if (coupon.discountType === "fixed") {
       discountAmount = coupon.discountValue || coupon.discount || 0;
+    } else if (coupon.discountType === "free_shipping") {
+      discountAmount = 0;
     }
 
     discountAmount = Number(discountAmount.toFixed(2));
@@ -194,6 +197,7 @@ export async function POST(request) {
         discountType: coupon.discountType,
         discountValue: coupon.discountValue || coupon.discount,
         discountAmount,
+        freeShipping: coupon.discountType === 'free_shipping' || !!coupon.freeShipping,
       },
     });
   } catch (error) {

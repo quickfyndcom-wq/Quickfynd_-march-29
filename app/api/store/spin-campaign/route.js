@@ -68,7 +68,7 @@ export async function POST(req) {
     const sanitizedSlices = slices.map((s) => ({
       label: String(s.label || '').trim().slice(0, 50),
       weight: Math.max(0, Number(s.weight) || 0),
-      rewardType: ['coupon_percent', 'coupon_flat', 'no_win'].includes(s.rewardType) ? s.rewardType : 'no_win',
+      rewardType: ['coupon_percent', 'coupon_flat', 'free_shipping', 'no_win'].includes(s.rewardType) ? s.rewardType : 'no_win',
       discountValue: Math.max(0, Number(s.discountValue) || 0),
       minOrderValue: Math.max(0, Number(s.minOrderValue) || 0),
       expiryHours: Math.max(1, Number(s.expiryHours) || 48),

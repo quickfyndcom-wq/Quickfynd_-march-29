@@ -5,7 +5,7 @@ const CouponSchema = new mongoose.Schema({
   title: { type: String, required: true }, // e.g., "10% Off", "₹50 Off"
   description: { type: String, required: true }, // e.g., "Get 10% off on orders above ₹500"
   storeId: String,
-  discountType: { type: String, enum: ["percentage", "fixed"], required: true }, // percentage or fixed
+  discountType: { type: String, enum: ["percentage", "fixed", "free_shipping"], required: true }, // percentage, fixed, or free_shipping
   discountValue: { type: Number, required: true }, // 10 for 10% or 50 for ₹50
   minOrderValue: { type: Number, default: 0 }, // Minimum order value to apply
   maxDiscount: { type: Number }, // Max discount cap for percentage type
@@ -28,6 +28,7 @@ const CouponSchema = new mongoose.Schema({
   oneTimePerUser: { type: Boolean, default: false },
   usageLimit: { type: Number },
   isPublic: { type: Boolean, default: true },
+  freeShipping: { type: Boolean, default: false },
 }, { timestamps: true });
 
 export default mongoose.models.Coupon || mongoose.model("Coupon", CouponSchema);

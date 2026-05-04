@@ -46,9 +46,10 @@ function generateCode(prefix) {
  * Returns:
  * {
  *   sliceLabel: string,
- *   rewardType: 'coupon_percent' | 'coupon_flat' | 'no_win',
+ *   rewardType: 'coupon_percent' | 'coupon_flat' | 'free_shipping' | 'no_win',
  *   couponCode: string | null,
  *   discountValue: number,
+ *   freeShipping: boolean,
  *   minOrderValue: number,
  *   expiresAt: ISO string | null,
  *   message: string
@@ -106,8 +107,12 @@ export async function POST(req) {
     let expiresAt = null;
 
     // Issue coupon if reward type requires one
-    if (slice.rewardType === 'coupon_percent' || slice.rewardType === 'coupon_flat') {
-      const discountType = slice.rewardType === 'coupon_percent' ? 'percentage' : 'fixed';
+    if (slice.rewardType === 'coupon_percent' || slice.rewardType === 'coupon_flat' || slice.rewardType === 'free_shipping') {
+      const discountType = slice.rewardType === 'coupon_percent'
+        ? 'percentage'
+        : slice.rewardType === 'coupon_flat'
+        ? 'fixed'
+        : 'free_shipping';
       const prefix = campaign.couponPrefix || 'SPIN';
       const hours = slice.expiryHours || 48;
       expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000);
@@ -128,10 +133,13 @@ export async function POST(req) {
         return NextResponse.json({ error: 'Failed to generate coupon code, please try again' }, { status: 500 });
       }
 
-      const discountVal = slice.discountValue || 0;
+      const discountVal = slice.rewardType === 'free_shipping' ? 0 : (slice.discountValue || 0);
+      const title = slice.rewardType === 'free_shipping'
+        ? 'Free Shipping (Spin Reward)'
+        : `${discountVal}${discountType === 'percentage' ? '%' : '₹'} Off (Spin Reward)`;
       await Coupon.create({
         code: couponCode,
-        title: `${discountVal}${discountType === 'percentage' ? '%' : '₹'} Off (Spin Reward)`,
+        title,
         description: `You won this coupon by spinning! Use it on your next order.`,
         storeId,
         discountType,
@@ -145,6 +153,7 @@ export async function POST(req) {
         oneTimePerUser: true,
         isPublic: false,
         isActive: true,
+        freeShipping: slice.rewardType === 'free_shipping',
         expiresAt,
       });
     }
@@ -164,10 +173,13 @@ export async function POST(req) {
       rewardType: slice.rewardType,
       couponCode,
       discountValue: slice.discountValue || 0,
+      freeShipping: slice.rewardType === 'free_shipping',
       minOrderValue: slice.minOrderValue || 0,
       expiresAt: expiresAt ? expiresAt.toISOString() : null,
       message: couponCode
-        ? `Congratulations! You won: ${slice.label}. Use code ${couponCode} at checkout.`
+        ? slice.rewardType === 'free_shipping'
+          ? `Congratulations! You won Free Shipping. Use code ${couponCode} at checkout.`
+          : `Congratulations! You won: ${slice.label}. Use code ${couponCode} at checkout.`
         : slice.rewardType === 'no_win'
         ? "Better luck next time! You can spin again tomorrow."
         : `You won: ${slice.label}!`,
