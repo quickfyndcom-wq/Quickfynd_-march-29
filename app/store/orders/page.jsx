@@ -61,10 +61,9 @@ const updateTrackingDetails = async (orderId, trackingId, trackingUrl, courier, 
 };
 
 export default function StoreOrders() {
-    const DEFAULT_RETURN_ADDRESS = [
-        'Nilaas shop, MLA ROAD NEAR POLICE STATION',
-        'AMBALAMUKKU KUNNAMNAGALAM KOZHIKODE-673571, INDIA'
-    ].join('\n')
+    const AWB_STATUS_STORAGE_KEY = 'store-orders-awb-status-v1'
+    const AWB_DETAILS_STORAGE_KEY = 'store-orders-awb-details-v1'
+    const DEFAULT_RETURN_ADDRESS = 'Nilaas Shop, MLA Road, Near Police Station, Ambalamukku, Kunnamangalam, Kozhikode - 673571, Kerala, India'
     const DEFAULT_SELLER_NAME = 'Quickfynd'
     const DEFAULT_SELLER_ADDRESS = [
         '14/380 Kunnamangalam MLA ROAD, Peruvayal,',
@@ -196,7 +195,7 @@ export default function StoreOrders() {
         start_time: '',
         expected_package_count: 1
     });
-    const [ltlLabelSize, setLtlLabelSize] = useState('std');
+    const [ltlLabelSize, setLtlLabelSize] = useState('thermal_4x6');
     const [ltlLoading, setLtlLoading] = useState(false);
     const [awbManifestData, setAwbManifestData] = useState({
         pickup_location_name: '',
@@ -229,10 +228,29 @@ export default function StoreOrders() {
     const [awbFormErrors, setAwbFormErrors] = useState({});
     
     // NEW: Track AWB status (generated/downloaded) per order
-    const [awbStatus, setAwbStatus] = useState({}); // { orderId: { generated: true, downloaded: true } }
-    const [awbDetailsByOrder, setAwbDetailsByOrder] = useState({});
+    const [awbStatus, setAwbStatus] = useState(() => {
+        if (typeof window === 'undefined') return {};
+        try {
+            const raw = window.localStorage.getItem('store-orders-awb-status-v1');
+            if (!raw) return {};
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+        } catch {}
+        return {};
+    }); // { orderId: { generated: true, downloaded: true } }
+    const [awbDetailsByOrder, setAwbDetailsByOrder] = useState(() => {
+        if (typeof window === 'undefined') return {};
+        try {
+            const raw = window.localStorage.getItem('store-orders-awb-details-v1');
+            if (!raw) return {};
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+        } catch {}
+        return {};
+    });
     const [selectedAwbOrderIds, setSelectedAwbOrderIds] = useState([]);
     const [bulkDownloadingAwbs, setBulkDownloadingAwbs] = useState(false);
+    const [bulkLabelsPerPage, setBulkLabelsPerPage] = useState(4);
     
     const storeSettingsCacheRef = useRef(undefined);
     const refreshIntervalRef = useRef(null);
@@ -250,11 +268,20 @@ export default function StoreOrders() {
     };
 
     const hasGeneratedAwb = (order) => {
-        return Boolean(awbStatus?.[order?._id]?.generated);
+        const localGenerated = Boolean(awbStatus?.[order?._id]?.generated);
+        const orderStatus = String(order?.orderStatus || '').toUpperCase();
+        const courierQueued = Boolean(order?.sentToDelhivery || orderStatus === 'PENDING_ASSIGNMENT');
+        return Boolean(localGenerated || courierQueued);
     };
 
     const hasGeneratedAwbMissingReference = (order) => {
         return Boolean(hasGeneratedAwb(order) && !getOrderAwbNumber(order));
+    };
+
+    const hasAwbQueuedWithoutReference = (order) => {
+        const orderStatus = String(order?.orderStatus || '').toUpperCase();
+        const courierQueued = Boolean(order?.sentToDelhivery || orderStatus === 'PENDING_ASSIGNMENT');
+        return Boolean(courierQueued && !getOrderAwbNumber(order));
     };
 
     const hasReturnWithStatus = (order, status) => {
@@ -445,6 +472,7 @@ export default function StoreOrders() {
 
     const buildAwbDetails = (order, storeData = {}) => ({
         awbNumber: getOrderAwbNumber(order) || order?._id,
+        labelSize: ltlLabelSize,
         orderId: getDisplayOrderNumber(order),
         courier: order?.courier || '',
         date: new Date().toLocaleDateString(),
@@ -496,9 +524,14 @@ export default function StoreOrders() {
 
             for (const order of ordersToDownload) {
                 try {
+                    const perOrderDetails = awbDetailsByOrder?.[order._id] || {};
                     awbDetailsList.push({
                         ...buildAwbDetails(order, storeData),
-                        ...(awbDetailsByOrder?.[order._id] || {})
+                        ...perOrderDetails,
+                        // Fall back to the currently selected contract if this order
+                        // hasn't had an individual AWB preview generated yet
+                        contractId: perOrderDetails.contractId || selectedContract?.id || selectedContract?.key || '',
+                        contractLabel: perOrderDetails.contractLabel || selectedContract?.label || '',
                     });
                 } catch (error) {
                     console.error('Bulk AWB generation failed:', order?._id, error);
@@ -510,7 +543,7 @@ export default function StoreOrders() {
                 return;
             }
 
-            const combinedDoc = generateCombinedAwbBill(awbDetailsList);
+            const combinedDoc = generateCombinedAwbBill(awbDetailsList, { labelsPerPage: bulkLabelsPerPage });
             combinedDoc.save(`AWB_bulk_${new Date().getTime()}.pdf`);
 
             setAwbStatus((prev) => {
@@ -1466,6 +1499,24 @@ export default function StoreOrders() {
     }, [authLoading, user]);
 
     useEffect(() => {
+        if (typeof window === 'undefined') return
+        try {
+            window.localStorage.setItem(AWB_STATUS_STORAGE_KEY, JSON.stringify(awbStatus || {}))
+        } catch (error) {
+            console.error('Failed to persist AWB status cache:', error)
+        }
+    }, [awbStatus]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return
+        try {
+            window.localStorage.setItem(AWB_DETAILS_STORAGE_KEY, JSON.stringify(awbDetailsByOrder || {}))
+        } catch (error) {
+            console.error('Failed to persist AWB details cache:', error)
+        }
+    }, [awbDetailsByOrder]);
+
+    useEffect(() => {
         setCurrentPage(1);
     }, [filterStatus, filterDelivery, filterCancel, searchQuery, datePreset, fromDate, toDate, pageSize]);
 
@@ -1783,7 +1834,7 @@ export default function StoreOrders() {
                 <div className="mb-4 flex flex-col gap-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                         <p className="text-sm font-semibold text-sky-900">{isAwbReferenceMissingFilter ? 'AWB Reference Missing Orders' : 'AWB Generated Orders'}</p>
-                        <p className="text-xs text-sky-700">{isAwbReferenceMissingFilter ? 'These orders have a generated AWB, but the order still has no saved AWB or reference number.' : 'This list shows AWBs generated but not downloaded yet, so you can bulk download them.'}</p>
+                        <p className="text-xs text-sky-700">{isAwbReferenceMissingFilter ? 'These orders are AWB queued or generated, but still have no saved AWB/reference number.' : 'This list shows AWBs generated but not downloaded yet, so you can bulk download them.'}</p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                         <span className="rounded-full border border-sky-200 bg-white px-3 py-1 text-xs font-semibold text-sky-800">
@@ -1815,6 +1866,23 @@ export default function StoreOrders() {
                         >
                             Clear
                         </button>
+                        <div className="flex items-center gap-1 border border-sky-200 rounded-lg overflow-hidden">
+                            <span className="px-2 text-xs text-sky-600 font-medium">Per page:</span>
+                            <button
+                                type="button"
+                                onClick={() => setBulkLabelsPerPage(2)}
+                                className={`px-3 py-2 text-sm font-semibold transition ${
+                                    bulkLabelsPerPage === 2 ? 'bg-sky-600 text-white' : 'bg-white text-sky-700 hover:bg-sky-50'
+                                }`}
+                            >2</button>
+                            <button
+                                type="button"
+                                onClick={() => setBulkLabelsPerPage(4)}
+                                className={`px-3 py-2 text-sm font-semibold transition ${
+                                    bulkLabelsPerPage === 4 ? 'bg-sky-600 text-white' : 'bg-white text-sky-700 hover:bg-sky-50'
+                                }`}
+                            >4</button>
+                        </div>
                         <button
                             type="button"
                             onClick={() => downloadSelectedAwbs(selectedAwbOrders)}
@@ -1826,7 +1894,7 @@ export default function StoreOrders() {
                             }`}
                         >
                             <Download size={16} />
-                            <span>{bulkDownloadingAwbs ? 'Downloading...' : 'Download Selected AWBs'}</span>
+                            <span>{bulkDownloadingAwbs ? 'Downloading...' : `Download (${bulkLabelsPerPage}/page)`}</span>
                         </button>
                     </div>
                 </div>
@@ -1936,6 +2004,7 @@ export default function StoreOrders() {
                             {paginatedOrders.map((order, index) => {
                                                                 const awbPendingDownload = hasAwbPendingDownload(order);
                                                                 const awbReferenceMissing = hasGeneratedAwbMissingReference(order);
+                                                                const awbQueuedWithoutReference = hasAwbQueuedWithoutReference(order);
                                                                 // Show 'Yes' in Need to Pick if pickup is scheduled (from Delhivery events) and not yet picked up or delivered/cancelled
                                                                 let needToPick = false;
                                                                 let latestTrackingStatus = '';
@@ -2125,9 +2194,9 @@ export default function StoreOrders() {
                                             </div>
                                         ) : awbReferenceMissing ? (
                                             <div className="flex flex-col gap-1">
-                                                <span className="text-amber-700 text-xs font-medium">AWB not saved</span>
+                                                <span className="text-amber-700 text-xs font-medium">{awbQueuedWithoutReference ? 'AWB queued' : 'AWB generated'}</span>
                                                 <span className="bg-amber-100 text-amber-700 text-[10px] px-2 py-1 rounded-full font-semibold w-fit">
-                                                    Ref Missing
+                                                    Queued / Ref Missing
                                                 </span>
                                             </div>
                                         ) : (
@@ -3576,8 +3645,9 @@ export default function StoreOrders() {
                                             setAwbPreviewGenerating(true)
                                             const detailsWithContract = {
                                                 ...awbFormDetails,
-                                                contractId: selectedContract.id,
-                                                contractLabel: selectedContract.label,
+                                                labelSize: ltlLabelSize,
+                                                contractId: selectedContract.id || selectedContract.key || '',
+                                                contractLabel: selectedContract.label || '',
                                                 weight: useManualWeight ? parseInt(manualWeight) : 500,
                                                 isManualWeight: useManualWeight,
                                                 dimensions: {

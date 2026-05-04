@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import dbConnect from '@/lib/mongodb';
 import Order from '@/models/Order';
+import User from '@/models/User';
 import Wallet from '@/models/Wallet';
 import authSeller from '@/middlewares/authSeller';
 import { getAuth } from '@/lib/firebase-admin';
@@ -60,6 +61,23 @@ export async function POST(request) {
             .exec();
         if (!order) {
             return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+        }
+
+        // Ensure email/name fallback exists even when userId is a plain Firebase UID string.
+        if (!order.email && order?.shippingAddress?.email) {
+            order.email = String(order.shippingAddress.email).trim();
+        }
+        if (!order.name && order?.shippingAddress?.name) {
+            order.name = String(order.shippingAddress.name).trim();
+        }
+        if (!order.email && typeof order.userId === 'string') {
+            const userDoc = await User.findById(order.userId).select('email name').lean();
+            if (userDoc?.email) {
+                order.email = String(userDoc.email).trim();
+            }
+            if (!order.name && userDoc?.name) {
+                order.name = String(userDoc.name).trim();
+            }
         }
 
         // Verify that this order belongs to the seller's store

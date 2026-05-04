@@ -2105,17 +2105,18 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
 
       {/* Frequently Bought Together Section */}
       {fbtEnabled && fbtProducts.length > 0 && (
-        <div className="max-w-[1450px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="bg-white rounded-lg border border-gray-200 p-6">
-            <div className="flex items-center justify-between mb-6">
+        <div className="max-w-[1450px] mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8">
+          <div className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6 shadow-sm">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-4 sm:mb-6">
               <div>
-                <h2 className="text-2xl font-bold text-gray-900">Frequently bought together</h2>
-                <p className="text-sm text-gray-500">Select addons to bundle</p>
+                <h2 className="text-base sm:text-2xl font-bold text-gray-900">Frequently bought together</h2>
+                <p className="text-xs sm:text-sm text-gray-500 mt-0.5">Select addons to bundle</p>
               </div>
-              <span className="text-xl font-semibold text-green-700">{currency}{bundleTotal.toFixed(2)}</span>
+              <span className="text-base sm:text-xl font-bold text-green-700">{currency}{bundleTotal.toFixed(2)}</span>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 items-start">
               {/* Products carousel */}
               <div className="lg:col-span-9">
                 <div className="relative">
@@ -2156,16 +2157,16 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
                       }))].map((item, index, array) => (
                         <div key={item._id} className="flex items-center gap-2 shrink-0">
                           {item.isMain ? (
-                            <div className="w-[190px] p-3 rounded-xl border border-gray-200 bg-gray-50 shadow-sm">
-                              <div className="mb-2">
+                            <div className="w-[120px] sm:w-[190px] p-2 sm:p-3 rounded-xl border border-gray-200 bg-gray-50 shadow-sm">
+                              <div className="mb-1.5 sm:mb-2">
                                 <input
                                   type="checkbox"
                                   checked
                                   readOnly
-                                  className="w-5 h-5 accent-purple-600 border-gray-300 rounded"
+                                  className="w-4 h-4 sm:w-5 sm:h-5 accent-purple-600 border-gray-300 rounded"
                                 />
                               </div>
-                              <div className="w-full h-24 relative border border-gray-200 rounded-lg overflow-hidden bg-white mb-2">
+                              <div className="w-full h-20 sm:h-24 relative border border-gray-200 rounded-lg overflow-hidden bg-white mb-1.5 sm:mb-2">
                                 <Image
                                   src={item.image}
                                   alt={item.name}
@@ -2174,28 +2175,28 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
                                   className="object-cover"
                                 />
                               </div>
-                              <p className="text-sm font-semibold text-gray-900 line-clamp-1">{item.name}</p>
-                              <p className="text-emerald-700 font-bold">{currency}{item.price.toFixed(0)}</p>
+                              <p className="text-xs sm:text-sm font-semibold text-gray-900 line-clamp-2 leading-tight">{item.name}</p>
+                              <p className="text-emerald-700 font-bold text-sm sm:text-base mt-0.5">{currency}{item.price.toFixed(0)}</p>
                             </div>
                           ) : (
                             <button
                               type="button"
                               onClick={() => toggleFbtProduct(item._id)}
-                              className={`w-[190px] p-3 text-left rounded-xl border shadow-sm transition ${
+                              className={`w-[120px] sm:w-[190px] p-2 sm:p-3 text-left rounded-xl border shadow-sm transition ${
                                 selectedFbtProducts[item._id]
                                   ? 'border-emerald-300 bg-emerald-50/30'
                                   : 'border-gray-200 bg-white hover:border-gray-300'
                               }`}
                             >
-                              <div className="mb-2">
+                              <div className="mb-1.5 sm:mb-2">
                                 <input
                                   type="checkbox"
                                   checked={selectedFbtProducts[item._id] || false}
                                   onChange={() => toggleFbtProduct(item._id)}
-                                  className="w-5 h-5 accent-purple-600 border-gray-300 rounded cursor-pointer"
+                                  className="w-4 h-4 sm:w-5 sm:h-5 accent-purple-600 border-gray-300 rounded cursor-pointer"
                                 />
                               </div>
-                              <div className="w-full h-24 relative border border-gray-200 rounded-lg overflow-hidden bg-white mb-2">
+                              <div className="w-full h-20 sm:h-24 relative border border-gray-200 rounded-lg overflow-hidden bg-white mb-1.5 sm:mb-2">
                                 <Image
                                   src={item.image}
                                   alt={item.name}
@@ -2204,13 +2205,13 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
                                   className="object-cover"
                                 />
                               </div>
-                              <p className="text-sm font-semibold text-gray-900 line-clamp-2">{item.name}</p>
-                              <p className="text-emerald-700 font-bold">{currency}{item.price.toFixed(0)}</p>
+                              <p className="text-xs sm:text-sm font-semibold text-gray-900 line-clamp-2 leading-tight">{item.name}</p>
+                              <p className="text-emerald-700 font-bold text-sm sm:text-base mt-0.5">{currency}{item.price.toFixed(0)}</p>
                             </button>
                           )}
 
                           {index < array.length - 1 && (
-                            <span className="text-xl font-bold text-gray-400 select-none">+</span>
+                            <span className="text-lg sm:text-xl font-bold text-gray-400 select-none">+</span>
                           )}
                         </div>
                       ))}
@@ -2221,29 +2222,33 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
 
               {/* Summary */}
               <div className="lg:col-span-3">
-                <div className="bg-gray-50 rounded-lg p-5 border border-gray-200 space-y-3">
-                  <div className="flex justify-between text-sm text-gray-700">
-                    <span>Items selected</span>
-                    <span className="font-semibold text-gray-900">{totalBundleItems}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-gray-700">Bundle total</span>
-                    <span className="text-2xl font-bold text-green-700">{currency}{bundleTotal.toFixed(2)}</span>
-                  </div>
-                  {bundleSavings > 0 && (
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-600">You save</span>
-                      <span className="text-red-500 font-semibold">{currency}{bundleSavings.toFixed(2)}</span>
+                <div className="rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="bg-gray-50 px-4 py-3 space-y-2 border-b border-gray-200">
+                    <div className="flex justify-between text-sm text-gray-600">
+                      <span>Items selected</span>
+                      <span className="font-semibold text-gray-900">{totalBundleItems}</span>
                     </div>
-                  )}
-                  <button
-                    onClick={handleAddBundleToCart}
-                    disabled={selectedAddonProducts.length === 0}
-                    className="w-full bg-orange-500 hover:bg-orange-600 text-white py-3 px-4 rounded-lg font-semibold text-base transition disabled:bg-gray-300 disabled:cursor-not-allowed"
-                  >
-                    BUY {totalBundleItems} TOGETHER FOR {currency}{bundleTotal.toFixed(2)}
-                  </button>
-                  <p className="text-xs text-gray-500 text-center">Select addons you want to include</p>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-gray-600">Bundle total</span>
+                      <span className="text-xl font-bold text-green-700">{currency}{bundleTotal.toFixed(2)}</span>
+                    </div>
+                    {bundleSavings > 0 && (
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-500">You save</span>
+                        <span className="text-red-500 font-bold">{currency}{bundleSavings.toFixed(2)}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-3">
+                    <button
+                      onClick={handleAddBundleToCart}
+                      disabled={selectedAddonProducts.length === 0}
+                      className="w-full bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white py-3 px-4 rounded-xl font-bold text-sm sm:text-base transition disabled:bg-gray-300 disabled:cursor-not-allowed shadow-sm"
+                    >
+                      BUY {totalBundleItems} TOGETHER FOR {currency}{bundleTotal.toFixed(2)}
+                    </button>
+                    <p className="text-xs text-gray-400 text-center mt-2">Select addons you want to include</p>
+                  </div>
                 </div>
               </div>
             </div>

@@ -109,9 +109,9 @@ export async function POST(request) {
       );
     }
 
-    if (categories.length > 10) {
+    if (categories.length > 30) {
       return NextResponse.json(
-        { error: 'Maximum 10 categories allowed' },
+        { error: 'Maximum 30 categories allowed' },
         { status: 400 }
       );
     }

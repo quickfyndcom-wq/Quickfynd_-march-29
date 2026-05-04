@@ -46,6 +46,7 @@ export async function POST(request) {
       email: customerEmail,
       name: customerName,
       orderId: order._id,
+      shortOrderNumber: order.shortOrderNumber,
       trackingId: order.trackingId,
       trackingUrl: order.trackingUrl,
       courier: order.courier

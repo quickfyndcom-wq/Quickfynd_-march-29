@@ -327,8 +327,14 @@ const HorizontalSlider = ({ section, router, allProducts }) => {
         {/* Products Scroll Container */}
         <div
           ref={scrollRef}
-          className="flex gap-3 sm:gap-4 overflow-x-auto scrollbar-hide pb-2 snap-x snap-proximity"
-          style={{ scrollBehavior: 'smooth', touchAction: 'pan-y', WebkitOverflowScrolling: 'touch', willChange: 'scroll-position' }}
+          className={`flex gap-3 sm:gap-4 overflow-x-auto scrollbar-hide pb-2 snap-x snap-proximity${isDragging ? ' cursor-grabbing' : ' cursor-grab'}`}
+          style={{ scrollBehavior: 'smooth', touchAction: 'pan-x pan-y', WebkitOverflowScrolling: 'touch', willChange: 'scroll-position', userSelect: 'none' }}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={endDragging}
+          onPointerLeave={endDragging}
+          onPointerCancel={endDragging}
+          onClick={(e) => { if (suppressNextClickRef.current) { e.preventDefault(); e.stopPropagation(); suppressNextClickRef.current = false; } }}
         >
           {loading ? (
             <SkeletonLoader />
