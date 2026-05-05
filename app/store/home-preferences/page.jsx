@@ -31,7 +31,8 @@ export default function HomePreferences() {
         sitemapCategories: { enabled: true, columnsPerRow: 4 },
         homeMenuCategories: { enabled: true, style: "grid", itemsPerRow: 5 },
         navbarMenu: { enabled: true, position: "top", style: "horizontal" },
-        desktopAppPromotion: { enabled: true }
+        desktopAppPromotion: { enabled: true },
+        referralProgram: { enabled: true, inviterRewardCoins: 25 }
     })
 
     // Fetch all products and settings
@@ -80,6 +81,21 @@ export default function HomePreferences() {
                 }))
             } catch (err) {
                 console.log('Using default app download promotion settings')
+            }
+
+            try {
+                const { data: referralProgramData } = await axios.get('/api/store/referral-program', {
+                    headers: { Authorization: `Bearer ${token}` }
+                })
+                setDesignSettings(prev => ({
+                    ...prev,
+                    referralProgram: {
+                        enabled: referralProgramData?.enabled !== false,
+                        inviterRewardCoins: Number(referralProgramData?.inviterRewardCoins ?? 25),
+                    },
+                }))
+            } catch (err) {
+                console.log('Using default referral settings')
             }
         } catch (error) {
             toast.error('Failed to load data')
@@ -134,6 +150,14 @@ export default function HomePreferences() {
 
             await axios.post('/api/store/app-download-promotion',
                 { enabled: desktopAppPromotion.enabled },
+                { headers: { Authorization: `Bearer ${token}` } }
+            )
+
+            await axios.post('/api/store/referral-program',
+                {
+                    enabled: designSettings.referralProgram.enabled,
+                    inviterRewardCoins: Number(designSettings.referralProgram.inviterRewardCoins || 0),
+                },
                 { headers: { Authorization: `Bearer ${token}` } }
             )
 
@@ -582,6 +606,51 @@ export default function HomePreferences() {
                             </div>
                             <p className="text-sm text-slate-600">
                                 When enabled, desktop visitors see the app download promotion bar for 10 seconds on customer-facing pages.
+                            </p>
+                        </div>
+
+                        <div className="bg-white border border-slate-200 rounded-lg p-6">
+                            <div className="flex items-center justify-between mb-4">
+                                <div>
+                                    <h3 className="font-semibold text-slate-900">Referral Reward Program</h3>
+                                    <p className="text-sm text-slate-500">When an invited customer places and receives their first order, inviter gets wallet credit.</p>
+                                </div>
+                                <label className="relative inline-flex items-center cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={designSettings.referralProgram.enabled}
+                                        onChange={e => setDesignSettings({
+                                            ...designSettings,
+                                            referralProgram: { ...designSettings.referralProgram, enabled: e.target.checked }
+                                        })}
+                                        className="sr-only peer"
+                                    />
+                                    <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                                </label>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-2">Inviter Wallet Reward (coins/INR)</label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        max="100000"
+                                        value={designSettings.referralProgram.inviterRewardCoins}
+                                        onChange={e => setDesignSettings({
+                                            ...designSettings,
+                                            referralProgram: {
+                                                ...designSettings.referralProgram,
+                                                inviterRewardCoins: Math.max(0, Number(e.target.value || 0)),
+                                            }
+                                        })}
+                                        className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                </div>
+                            </div>
+
+                            <p className="text-sm text-slate-600 mt-3">
+                                Default is 25. This bonus is credited only once per invited customer for this store.
                             </p>
                         </div>
 

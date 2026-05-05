@@ -478,12 +478,13 @@ export default function StoreOrders() {
         date: new Date().toLocaleDateString(),
         senderName: resolveSellerName(order, storeData),
         senderAddress: DEFAULT_SELLER_ADDRESS,
-        senderPhone: '',
+        senderPhone: storeData.phone || order?.storePhone || '9526367551',
         receiverName: order?.shippingAddress?.name || order?.guestName || '',
         receiverAddress: order?.shippingAddress
             ? [order.shippingAddress.street, order.shippingAddress.city, order.shippingAddress.state, order.shippingAddress.zip].filter(Boolean).join(', ')
             : '',
-        receiverPhone: order?.shippingAddress?.phone || '',
+        receiverPhone: order?.shippingAddress?.phone || order?.guestPhone || order?.phone || '',
+        alternatePhone: order?.alternatePhone || order?.shippingAddress?.alternatePhone || '',
         receiverPin: order?.shippingAddress?.zip || order?.shippingAddress?.pincode || '',
         contents: (order?.orderItems || []).map(i => `${i.quantity || 1} x ${(i.name || i.product?.name || '').substring(0, 40)}`).join('; '),
         weight: Math.max(1, Math.ceil((order?.total || 0) / 100)),

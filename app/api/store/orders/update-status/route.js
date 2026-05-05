@@ -3,6 +3,8 @@ import dbConnect from '@/lib/mongodb';
 import Order from '@/models/Order';
 import User from '@/models/User';
 import Wallet from '@/models/Wallet';
+import CustomerReferral from '@/models/CustomerReferral';
+import ReferralProgramSettings from '@/models/ReferralProgramSettings';
 import authSeller from '@/middlewares/authSeller';
 import { getAuth } from '@/lib/firebase-admin';
 import { restockOrderItems } from '@/lib/orderInventory';
@@ -151,6 +153,59 @@ export async function POST(request) {
 
             order.coinsEarned = coinsEarned;
             order.rewardsCredited = true;
+
+            // Referral reward: invited customer's first delivered order credits inviter wallet.
+            // Check if an unrewarded referral exists first — avoids fetching settings on every order.
+            const pendingReferral = order.userId
+                ? await CustomerReferral.findOne({
+                      storeId: String(order.storeId || ''),
+                      invitedUserId: String(order.userId || ''),
+                      rewardedAt: null,
+                  }).lean()
+                : null;
+
+            if (pendingReferral?.inviterUserId) {
+                const referralSettings = await ReferralProgramSettings.findOne({ storeId: String(order.storeId || '') }).lean();
+                const referralEnabled = referralSettings?.enabled !== false;
+                const inviterRewardCoins = Math.max(0, Number(referralSettings?.inviterRewardCoins ?? 25));
+
+                if (referralEnabled && inviterRewardCoins > 0) {
+                    // Atomic mark-as-rewarded — guards against double-credit
+                    const marked = await CustomerReferral.findOneAndUpdate(
+                        {
+                            _id: pendingReferral._id,
+                            rewardedAt: null,
+                        },
+                        {
+                            $set: {
+                                rewardedAt: new Date(),
+                                rewardCoins: inviterRewardCoins,
+                                rewardedOrderId: order._id.toString(),
+                            },
+                        },
+                        { new: true }
+                    ).lean();
+
+                    if (marked) {
+                        await Wallet.findOneAndUpdate(
+                            { userId: String(pendingReferral.inviterUserId) },
+                            {
+                                $inc: { coins: inviterRewardCoins },
+                                $push: {
+                                    transactions: {
+                                        type: 'BONUS',
+                                        coins: inviterRewardCoins,
+                                        rupees: Number((inviterRewardCoins * 1).toFixed(2)),
+                                        orderId: order._id.toString(),
+                                        description: `Referral bonus for invited customer order ${order.shortOrderNumber || order._id.toString()}`,
+                                    },
+                                },
+                            },
+                            { upsert: true, new: true }
+                        );
+                    }
+                }
+            }
         }
 
         await order.save();
