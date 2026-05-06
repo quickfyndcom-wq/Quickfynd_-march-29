@@ -1111,6 +1111,12 @@ export default function StoreOrders() {
             });
             if (data.success && data.tracking) {
                 setIndiaPostTracking(data.tracking);
+                // Write tracking back into orders list so the Latest Update column shows
+                if (selectedOrder?._id) {
+                    setOrders(prev => prev.map(o =>
+                        o._id === selectedOrder._id ? { ...o, indiaPost: data.tracking } : o
+                    ));
+                }
                 // Auto-update order status in DB if delivered
                 if (data.tracking.isDelivered && selectedOrder?.status !== 'DELIVERED') {
                     const token = await getToken();
@@ -1995,7 +2001,7 @@ export default function StoreOrders() {
                                 <th className="px-4 py-3">Total</th>
                                 <th className="px-4 py-3">Payment</th>
                                 <th className="px-4 py-3">Status</th>
-                                <th className="px-4 py-3">Need to Pick</th>
+                                <th className="px-4 py-3">Latest Update</th>
                                 <th className="px-4 py-3">Tracking</th>
                                 <th className="px-4 py-3">Exp. Delivery</th>
                                 <th className="px-4 py-3">Order Date</th>
@@ -2009,14 +2015,34 @@ export default function StoreOrders() {
                                                                 // Show 'Yes' in Need to Pick if pickup is scheduled (from Delhivery events) and not yet picked up or delivered/cancelled
                                                                 let needToPick = false;
                                                                 let latestTrackingStatus = '';
-                                                                if (!['DELIVERED', 'CANCELLED'].includes(order.status)) {
+                                                                let latestTrackingTime = '';
+                                                                {
                                                                     if (order.delhivery && Array.isArray(order.delhivery.events) && order.delhivery.events.length > 0) {
                                                                         // Get the latest event (by time)
                                                                         const sortedEvents = [...order.delhivery.events].sort((a, b) => new Date(b.time) - new Date(a.time));
-                                                                        latestTrackingStatus = sortedEvents[0]?.status || '';
+                                                                        const latestDelhiveryEvent = sortedEvents[0];
+                                                                        latestTrackingStatus = latestDelhiveryEvent?.status || '';
+                                                                        if (latestDelhiveryEvent?.time) {
+                                                                            latestTrackingTime = new Date(latestDelhiveryEvent.time).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+                                                                        }
                                                                         const scheduledEvent = order.delhivery.events.find(e => (e.status || '').toLowerCase().includes('pickup scheduled'));
                                                                         const pickedEvent = order.delhivery.events.find(e => (e.status || '').toLowerCase().includes('picked up'));
                                                                         needToPick = !!scheduledEvent && !pickedEvent;
+                                                                    } else if (order.indiaPost) {
+                                                                        // India Post: events[0] is newest (sorted desc), latestEvent may have empty strings
+                                                                        const ip = order.indiaPost;
+                                                                        const ipEvents = Array.isArray(ip.events) ? ip.events : [];
+                                                                        // Pick the best event source: prefer events[0] (freshest), fall back to latestEvent
+                                                                        const bestEvt = ipEvents.find(e => (e.description || e.location || e.status))
+                                                                            || (ip.latestEvent?.description || ip.latestEvent?.location ? ip.latestEvent : null);
+                                                                        if (bestEvt) {
+                                                                            const ipLoc = (bestEvt.location || '').trim();
+                                                                            const ipDesc = (bestEvt.description || bestEvt.status || '').trim();
+                                                                            latestTrackingStatus = ipLoc && ipDesc ? `${ipLoc}, ${ipDesc}` : (ipDesc || ipLoc || ip.statusLabel || '');
+                                                                            latestTrackingTime = (bestEvt.time || '').trim();
+                                                                        } else {
+                                                                            latestTrackingStatus = [ip.currentLocation, ip.statusLabel].filter(Boolean).join(', ');
+                                                                        }
                                                                     } else {
                                                                         needToPick = !order.trackingId;
                                                                     }
@@ -2178,8 +2204,17 @@ export default function StoreOrders() {
                                             );
                                         })()}
                                     </td>
-                                    <td className="px-4 py-3 font-bold text-orange-600">
-                                        {latestTrackingStatus ? latestTrackingStatus : (needToPick ? 'Yes' : '')}
+                                    <td className="px-4 py-3">
+                                        {latestTrackingStatus ? (
+                                            <div className="flex flex-col gap-0.5">
+                                                {latestTrackingTime && (
+                                                    <span className="text-[11px] text-slate-500">{latestTrackingTime}</span>
+                                                )}
+                                                <span className="text-xs font-semibold text-orange-600">{latestTrackingStatus}</span>
+                                            </div>
+                                        ) : needToPick ? (
+                                            <span className="text-xs font-bold text-orange-600">Yes</span>
+                                        ) : ''}
                                     </td>
                                     <td className="px-4 py-3">
                                         {order.trackingId ? (

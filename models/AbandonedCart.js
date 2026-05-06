@@ -16,9 +16,14 @@ const AbandonedCartSchema = new mongoose.Schema({
   recoveryEmailSentAt: Date,
   recoveryProductId: String,
   source: { type: String, default: 'checkout' },
+  // Purchase tracking
+  purchased: { type: Boolean, default: false },
+  purchasedAt: Date,
+  purchasedOrderId: mongoose.Schema.Types.ObjectId,
 }, { timestamps: true });
 
 // Index for better query performance
 AbandonedCartSchema.index({ storeId: 1, lastSeenAt: -1 });
+AbandonedCartSchema.index({ storeId: 1, purchased: 1 });
 
 export default mongoose.models.AbandonedCart || mongoose.model("AbandonedCart", AbandonedCartSchema);

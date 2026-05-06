@@ -2,8 +2,7 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import crypto from 'crypto';
-import connectDB from '@/lib/mongodb';
-import Order from '@/models/Order';
+import AbandonedCart from '@/models/AbandonedCart';
 import Product from '@/models/Product';
 import User from '@/models/User';
 import Address from '@/models/Address';
@@ -943,6 +942,29 @@ export async function POST(request) {
                 throw createOrderError;
             }
             orderIds.push(order._id);
+
+            // Mark abandoned cart as purchased
+            try {
+                const matchQuery = {};
+                if (userId) matchQuery.userId = userId;
+                if (guestInfo?.email || order.guestEmail) matchQuery.email = guestInfo?.email || order.guestEmail;
+                
+                if (Object.keys(matchQuery).length > 0) {
+                    await AbandonedCart.updateMany(
+                        { storeId: order.storeId, purchased: false, ...matchQuery },
+                        {
+                            $set: {
+                                purchased: true,
+                                purchasedAt: new Date(),
+                                purchasedOrderId: order._id
+                            }
+                        }
+                    );
+                    console.log(`[ORDER] Marked abandoned carts as purchased for user: ${userId || guestInfo?.email}`);
+                }
+            } catch (cartErr) {
+                console.error('[ORDER] Failed to update abandoned cart:', cartErr?.message);
+            }
 
             // --- AUTOMATIC DELHIVERY SHIPMENT CREATION ---
             try {

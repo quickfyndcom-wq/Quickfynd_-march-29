@@ -1053,7 +1053,7 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
       </div>
 
       <div className="max-w-[1450px] mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-8">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 lg:gap-8 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 lg:gap-8 items-start relative">
           
           {/* LEFT: Image Gallery */}
           <div className="space-y-4 lg:sticky lg:top-20 lg:self-start">
@@ -1326,7 +1326,7 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
           </div>
 
           {/* RIGHT: Product Info */}
-          <div className="bg-white -mx-4 sm:mx-0 rounded-none sm:rounded-lg p-4 lg:p-6 space-y-5">
+          <div className="bg-white -mx-4 sm:mx-0 rounded-t-3xl sm:rounded-lg p-4 lg:p-6 space-y-5 -mt-8 lg:mt-0 relative z-10 shadow-[0_-4px_24px_rgba(0,0,0,0.08)]">
             {/* Special Offer - Countdown Timer */}
             {offerData?.countdownTimer && (
               <div className="mb-4">

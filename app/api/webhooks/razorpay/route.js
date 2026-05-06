@@ -142,6 +142,7 @@ async function handlePaymentFailed(payload) {
       console.log(`[Webhook] Payment failed for order ${order._id}: ${errorReason}`);
       
       order.isPaid = false;
+      order.status = 'PAYMENT_FAILED';
       order.paymentStatus = 'FAILED';
       order.notes = `Payment failed: ${errorReason}`;
       

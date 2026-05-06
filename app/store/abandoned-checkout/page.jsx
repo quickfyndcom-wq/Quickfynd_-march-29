@@ -123,7 +123,13 @@ export default function AbandonedCheckoutPage() {
     "checkout": "💳 At Checkout",
   };
 
-  const filteredCarts = filter === "all" ? carts : carts.filter(c => c.source === filter);
+  const filteredCarts = filter === "all" 
+    ? carts 
+    : filter === "purchased"
+    ? carts.filter(c => c.purchased)
+    : filter === "abandoned"
+    ? carts.filter(c => !c.purchased)
+    : carts.filter(c => c.source === filter);
 
   return (
     <div className="w-full">
@@ -152,24 +158,24 @@ export default function AbandonedCheckoutPage() {
           All ({carts.length})
         </button>
         <button
-          onClick={() => setFilter("cart")}
+          onClick={() => setFilter("purchased")}
           className={`px-4 py-2 rounded text-sm font-medium transition ${
-            filter === "cart"
-              ? "bg-blue-600 text-white"
+            filter === "purchased"
+              ? "bg-green-600 text-white"
               : "bg-slate-200 text-slate-700 hover:bg-slate-300"
           }`}
         >
-          🛒 Added to Cart ({carts.filter(c => c.source === "cart").length})
+          ✓ Purchased ({carts.filter(c => c.purchased).length})
         </button>
         <button
-          onClick={() => setFilter("guest-cart")}
+          onClick={() => setFilter("abandoned")}
           className={`px-4 py-2 rounded text-sm font-medium transition ${
-            filter === "guest-cart"
-              ? "bg-blue-600 text-white"
+            filter === "abandoned"
+              ? "bg-orange-600 text-white"
               : "bg-slate-200 text-slate-700 hover:bg-slate-300"
           }`}
         >
-          👤 Guest ({carts.filter(c => c.source === "guest-cart").length})
+          ⚠ Abandoned ({carts.filter(c => !c.purchased).length})
         </button>
         <button
           onClick={() => setFilter("checkout")}
@@ -179,7 +185,7 @@ export default function AbandonedCheckoutPage() {
               : "bg-slate-200 text-slate-700 hover:bg-slate-300"
           }`}
         >
-          💳 Checkout ({carts.filter(c => c.source === "checkout").length})
+          💳 At Checkout ({carts.filter(c => c.source === "checkout").length})
         </button>
       </div>
 

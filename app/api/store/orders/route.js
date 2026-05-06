@@ -7,6 +7,8 @@ import Product from '@/models/Product';
 import User from '@/models/User';
 import Address from '@/models/Address';
 import { fetchNormalizedDelhiveryTracking } from '@/lib/delhivery';
+import { fetchSeventeenTrackInfo } from '@/lib/seventeentrack';
+import Store from '@/models/Store';
 
 const ORDER_NUMBER_SEQUENCE_KEY = 'short_order_number';
 const ORDER_NUMBER_START = 52300;
@@ -276,6 +278,54 @@ export async function GET(request){
                 }
                 return order;
             }));
+        }
+
+        // Enrich India Post orders with live 17track data
+        try {
+            const ipOrders = enrichedOrders.filter(o =>
+                (o.courier || '').toLowerCase().includes('india post') &&
+                o.trackingId &&
+                !['CANCELLED', 'ORDER_PLACED'].includes(o.status)
+            );
+            if (ipOrders.length > 0) {
+                const storeDoc = await Store.findOne({ $or: [{ _id: storeId }, { userId }] })
+                    .select('+integrations.seventeentrack.apiKey +integrations.seventeentrack.publicKey +integrations.seventeentrack.secretKey +integrations.seventeentrack.baseUrl')
+                    .lean();
+                const cfg = storeDoc?.integrations?.seventeentrack || {};
+                const ipConfig = {
+                    baseUrl: String(cfg.baseUrl || '').trim(),
+                    apiKey: String(cfg.apiKey || '').trim() || process.env.SEVENTEENTRACK_API_KEY || '',
+                    publicKey: String(cfg.publicKey || '').trim(),
+                    secretKey: String(cfg.secretKey || '').trim(),
+                };
+                const hasKey = !!(ipConfig.apiKey || ipConfig.publicKey || ipConfig.secretKey);
+                if (hasKey) {
+                    // Unique AWBs only to avoid redundant calls
+                    const uniqueAwbs = [...new Set(ipOrders.map(o => o.trackingId.trim()))];
+                    const trackingMap = new Map();
+
+                    // Fetch in small batches to avoid rate-limit spikes while covering all orders.
+                    const BATCH_SIZE = 20;
+                    for (let i = 0; i < uniqueAwbs.length; i += BATCH_SIZE) {
+                        const batch = uniqueAwbs.slice(i, i + BATCH_SIZE);
+                        await Promise.all(batch.map(async (awb) => {
+                            try {
+                                const t = await fetchSeventeenTrackInfo(awb, ipConfig);
+                                if (t) trackingMap.set(awb, t);
+                            } catch {}
+                        }));
+                    }
+                    if (trackingMap.size > 0) {
+                        enrichedOrders = enrichedOrders.map(order => {
+                            if (!(order.courier || '').toLowerCase().includes('india post')) return order;
+                            const t = trackingMap.get((order.trackingId || '').trim());
+                            return t ? { ...order, indiaPost: t } : order;
+                        });
+                    }
+                }
+            }
+        } catch (ipErr) {
+            debugLog('India Post enrichment failed:', ipErr?.message);
         }
 
         return NextResponse.json({orders: enrichedOrders})
