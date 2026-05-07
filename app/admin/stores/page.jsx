@@ -53,6 +53,7 @@ export default function AdminStores() {
     const [stores, setStores] = useState([])
     const [loading, setLoading] = useState(true)
     const [deleteModal, setDeleteModal] = useState({ open: false, store: null })
+    const [settingPrimaryId, setSettingPrimaryId] = useState(null)
 
     const fetchStores = async () => {
         try {
@@ -104,6 +105,21 @@ export default function AdminStores() {
         }
     }
 
+    const handleSetPrimaryStore = async (storeId) => {
+        try {
+            setSettingPrimaryId(storeId)
+            const token = await getToken()
+            const { data } = await axios.patch('/api/admin/stores', { storeId }, { headers: { Authorization: `Bearer ${token}` } })
+            toast.success(data?.message || 'Primary store updated')
+            setStores((prev) => prev.map((s) => ({ ...s, isPrimary: String(s._id) === String(storeId) })))
+            await fetchStores()
+        } catch (error) {
+            toast.error(error?.response?.data?.error || error.message)
+        } finally {
+            setSettingPrimaryId(null)
+        }
+    }
+
     return (authLoading || loading) ? <Loading /> : (
         <div className="text-slate-500 mb-28">
             <h1 className="text-2xl">Live <span className="text-slate-800 font-medium">Stores</span></h1>
@@ -111,12 +127,31 @@ export default function AdminStores() {
             {stores.length ? (
                 <div className="flex flex-col gap-4 mt-4">
                     {stores.map((store) => (
-                        <div key={store._id} className="bg-white border border-slate-200 rounded-lg shadow-sm p-6 flex max-md:flex-col gap-4 md:items-end max-w-4xl" >
+                        (() => {
+                            const isStorePrimary = Boolean(store.isPrimary) || stores.length === 1
+                            return (
+                        <div key={store._id} className={`relative rounded-lg shadow-sm p-6 flex max-md:flex-col gap-4 md:items-end max-w-4xl transition-all ${isStorePrimary ? 'bg-green-50 border-2 border-green-500' : 'bg-white border border-slate-200'}`}>
+                            {/* Primary badge (top-right corner) */}
+                            {isStorePrimary && (
+                                <span className="absolute top-3 right-4 inline-flex items-center gap-1 bg-green-600 text-white text-xs font-semibold px-3 py-1 rounded-full shadow">
+                                    ⭐ Primary Store
+                                </span>
+                            )}
+
                             {/* Store Info */}
-                            <StoreInfo store={store} />
+                            <StoreInfo store={{ ...store, isPrimary: isStorePrimary }} />
 
                             {/* Actions */}
                             <div className="flex items-center gap-3 pt-2 flex-wrap">
+                                {!isStorePrimary && (
+                                    <button
+                                        className="px-4 py-2 rounded-lg font-semibold bg-indigo-600 text-white hover:bg-indigo-700 transition disabled:opacity-60"
+                                        onClick={() => handleSetPrimaryStore(store._id)}
+                                        disabled={settingPrimaryId === store._id}
+                                    >
+                                        {settingPrimaryId === store._id ? 'Setting...' : 'Set as Primary'}
+                                    </button>
+                                )}
                                 <p>Active</p>
                                 <label className="relative inline-flex items-center cursor-pointer text-gray-900">
                                     <input type="checkbox" className="sr-only peer" onChange={() => toast.promise(toggleIsActive(store._id), { loading: "Updating data..." })} checked={store.isActive} />
@@ -129,6 +164,8 @@ export default function AdminStores() {
                                 >Delete Store</button>
                             </div>
                         </div>
+                            )
+                        })()
                     ))}
 
                 </div>

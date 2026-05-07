@@ -1474,12 +1474,44 @@ export default function CheckoutPage() {
         modal: {
           ondismiss: function() {
             setPlacingOrder(false);
-            router.push(`/order-failed?reason=${encodeURIComponent('Payment cancelled by user')}`);
+            const reason = 'Payment cancelled by user';
+            // Save failed order record silently
+            fetch('/api/orders/failed', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                storeId: paymentPayload.storeId,
+                items: paymentPayload.items,
+                shippingFee: paymentPayload.shippingFee,
+                reason,
+                paymentPayload,
+              }),
+            }).catch(() => {});
+            router.push(`/order-failed?reason=${encodeURIComponent(reason)}`);
           }
         }
       };
 
       const rzp = new window.Razorpay(options);
+      rzp.on('payment.failed', function(response) {
+        setPlacingOrder(false);
+        const errorDesc = response?.error?.description || response?.error?.reason || 'Payment failed';
+        const errorCode = response?.error?.code || '';
+        const reason = errorCode ? `${errorDesc} (${errorCode})` : errorDesc;
+        // Save failed order record silently
+        fetch('/api/orders/failed', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            storeId: paymentPayload.storeId,
+            items: paymentPayload.items,
+            shippingFee: paymentPayload.shippingFee,
+            reason,
+            paymentPayload,
+          }),
+        }).catch(() => {});
+        router.push(`/order-failed?reason=${encodeURIComponent(reason)}`);
+      });
       rzp.open();
       return true;
     } catch (error) {
@@ -1584,6 +1616,8 @@ export default function CheckoutPage() {
           shippingFee: shipping,
           shippingMethod: shippingMethod,
           paymentStatus: 'pending',
+          storeId: storeId,
+          total: totalAfterWallet,
         };
         
         // Add coupon data if applied
@@ -2279,7 +2313,10 @@ export default function CheckoutPage() {
                 </div>
               )}
               
-              <h2 className="text-xl font-bold mb-1 mt-3 text-gray-900">Shipping details</h2>
+              <h2 className="text-lg font-bold mb-2 mt-4 text-gray-900 flex items-center gap-2">
+                <svg className="w-5 h-5 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                Shipping Details
+              </h2>
               {/* ...existing code for address/guest form... */}
               {/* Show address fetch error if present */}
               {addressFetchError && (
@@ -2424,207 +2461,270 @@ export default function CheckoutPage() {
                   <span className="text-xl">+</span> Add Delivery Address
                 </button>
               ) : (!user) ? (
-                <div className="flex flex-col gap-3">{/* Guest form starts here */}
-                  {/* ...existing code for guest/inline address form... */}
-                  {/* Name */}
-                  <input
-                    className="border border-gray-200 bg-white rounded px-4 py-2 focus:border-gray-400"
-                    type="text"
-                    name="name"
-                    placeholder="Name"
-                    value={form.name || ''}
-                    onChange={handleChange}
-                    required
-                  />
-                  {/* Phone input */}
-                  <div className="flex gap-2">
-                    <select
-                      className="border border-gray-200 bg-white rounded px-2 py-2 focus:border-gray-400"
-                      name="phoneCode"
-                      value={form.phoneCode}
-                      onChange={handleChange}
-                      style={{ maxWidth: '110px' }}
-                      required
-                    >
-                      {countryCodes.map((c) => (
-                        <option key={c.code} value={c.code}>{c.code}</option>
-                      ))}
-                    </select>
-                    <input
-                      className="border border-gray-200 bg-white rounded px-4 py-2 flex-1 focus:border-gray-400"
-                      type="tel"
-                      name="phone"
-                      placeholder="Phone number"
-                      value={form.phone || ''}
-                      onChange={(e) => {
-                        // Only allow digits
-                        const cleaned = e.target.value.replace(/\D/g, '');
-                        setForm(f => ({ ...f, phone: cleaned }));
-                      }}
-                      pattern="[0-9]{7,15}"
-                      title="Phone number must be 7-15 digits"
-                      maxLength="15"
-                      required
-                    />
-                  </div>
-                  {form.phone && !/^[0-9]{7,15}$/.test(form.phone) && (
-                    <div className="text-red-500 text-sm">Phone number must be 7-15 digits</div>
-                  )}
-                  {/* Alternate phone checkbox */}
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={showAlternatePhone}
-                      onChange={(e) => {
-                        setShowAlternatePhone(e.target.checked);
-                        if (!e.target.checked) {
-                          setForm(f => ({ ...f, alternatePhone: '', alternatePhoneCode: f.phoneCode }));
-                        }
-                      }}
-                      className="w-4 h-4 text-orange-500 border-gray-300 rounded focus:ring-orange-500"
-                    />
-                    <span className="text-sm text-gray-700">Add alternate phone number (optional)</span>
-                  </label>
-                  {/* Alternate phone input - only show when checkbox is ticked */}
-                  {showAlternatePhone && (
-                    <>
-                      <div className="flex gap-2">
-                        <select
-                          className="border border-gray-200 bg-white rounded px-2 py-2 focus:border-gray-400"
-                          name="alternatePhoneCode"
-                          value={form.alternatePhoneCode}
-                          onChange={handleChange}
-                          style={{ maxWidth: '110px' }}
-                        >
-                          {countryCodes.map((c) => (
-                            <option key={c.code} value={c.code}>{c.code}</option>
-                          ))}
-                        </select>
+                <div className="flex flex-col gap-4">
+
+                  {/* Contact Info Card */}
+                  <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                    <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
+                      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Contact Information</span>
+                    </div>
+                    <div className="p-4 flex flex-col gap-3">
+
+                      {/* Name */}
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Full Name <span className="text-red-500">*</span></label>
+                        <div className="relative">
+                          <span className="absolute inset-y-0 left-3 flex items-center text-gray-400">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                          </span>
+                          <input
+                            className="w-full border border-gray-200 bg-white rounded-lg pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition"
+                            type="text"
+                            name="name"
+                            placeholder="Enter your full name"
+                            value={form.name || ''}
+                            onChange={handleChange}
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      {/* Phone */}
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Phone Number <span className="text-red-500">*</span></label>
+                        <div className="flex gap-2">
+                          <select
+                            className="border border-gray-200 bg-white rounded-lg px-2 py-2.5 text-sm focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition"
+                            name="phoneCode"
+                            value={form.phoneCode}
+                            onChange={handleChange}
+                            style={{ minWidth: '80px', maxWidth: '100px' }}
+                            required
+                          >
+                            {countryCodes.map((c) => (
+                              <option key={c.code} value={c.code}>{c.code}</option>
+                            ))}
+                          </select>
+                          <div className="relative flex-1">
+                            <span className="absolute inset-y-0 left-3 flex items-center text-gray-400">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
+                            </span>
+                            <input
+                              className="w-full border border-gray-200 bg-white rounded-lg pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition"
+                              type="tel"
+                              name="phone"
+                              placeholder="Phone number"
+                              value={form.phone || ''}
+                              onChange={(e) => setForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '') }))}
+                              pattern="[0-9]{7,15}"
+                              maxLength="15"
+                              required
+                            />
+                          </div>
+                        </div>
+                        {form.phone && !/^[0-9]{7,15}$/.test(form.phone) && (
+                          <p className="text-red-500 text-xs mt-1">Phone number must be 7–15 digits</p>
+                        )}
+                      </div>
+
+                      {/* Alternate phone toggle */}
+                      <label className="flex items-center gap-2 cursor-pointer select-none">
                         <input
-                          className="border border-gray-200 bg-white rounded px-4 py-2 flex-1 focus:border-gray-400"
-                          type="tel"
-                          name="alternatePhone"
-                          placeholder="Alternate phone (optional)"
-                          value={form.alternatePhone || ''}
+                          type="checkbox"
+                          checked={showAlternatePhone}
                           onChange={(e) => {
-                            // Only allow digits
-                            const cleaned = e.target.value.replace(/\D/g, '');
-                            setForm(f => ({ ...f, alternatePhone: cleaned }));
+                            setShowAlternatePhone(e.target.checked);
+                            if (!e.target.checked) setForm(f => ({ ...f, alternatePhone: '', alternatePhoneCode: f.phoneCode }));
                           }}
-                          pattern="[0-9]{7,15}"
-                          title="Alternate number must be 7-15 digits"
-                          maxLength="15"
+                          className="w-4 h-4 accent-orange-500 rounded"
+                        />
+                        <span className="text-xs text-gray-600">Add alternate phone number <span className="text-gray-400">(optional)</span></span>
+                      </label>
+
+                      {showAlternatePhone && (
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">Alternate Phone</label>
+                          <div className="flex gap-2">
+                            <select
+                              className="border border-gray-200 bg-white rounded-lg px-2 py-2.5 text-sm focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition shrink-0"
+                              name="alternatePhoneCode"
+                              value={form.alternatePhoneCode}
+                              onChange={handleChange}
+                              style={{ width: '80px' }}
+                            >
+                              {countryCodes.map((c) => (
+                                <option key={c.code} value={c.code}>{c.code}</option>
+                              ))}
+                            </select>
+                            <input
+                              className="min-w-0 flex-1 border border-gray-200 bg-white rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition"
+                              type="tel"
+                              name="alternatePhone"
+                              placeholder="Alternate phone (optional)"
+                              value={form.alternatePhone || ''}
+                              onChange={(e) => setForm(f => ({ ...f, alternatePhone: e.target.value.replace(/\D/g, '') }))}
+                              pattern="[0-9]{7,15}"
+                              maxLength="15"
+                            />
+                          </div>
+                          {form.alternatePhone && !/^[0-9]{7,15}$/.test(form.alternatePhone) && (
+                            <p className="text-red-500 text-xs mt-1">Must be 7–15 digits</p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Email */}
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Email Address <span className="text-red-500">*</span> <span className="text-gray-400 font-normal">(used to track your order)</span></label>
+                        <div className="relative">
+                          <span className="absolute inset-y-0 left-3 flex items-center text-gray-400">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                          </span>
+                          <input
+                            className="w-full border border-gray-200 bg-white rounded-lg pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition"
+                            type="email"
+                            name="email"
+                            placeholder="your@email.com"
+                            value={form.email || ''}
+                            onChange={handleChange}
+                            required
+                          />
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">If you create an account later with this email, this order will appear in your history.</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Delivery Address Card */}
+                  <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                    <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
+                      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Delivery Address</span>
+                    </div>
+                    <div className="p-4 flex flex-col gap-3">
+
+                      {/* Pincode + Auto-fill */}
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Pincode <span className="text-red-500">*</span></label>
+                        <div className="flex gap-2">
+                          <div className="relative flex-1">
+                            <span className="absolute inset-y-0 left-3 flex items-center text-gray-400">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                            </span>
+                            <input
+                              className="w-full border border-gray-200 bg-white rounded-lg pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition"
+                              type="text"
+                              name="pincode"
+                              placeholder="6-digit pincode"
+                              value={form.pincode || ''}
+                              onChange={(e) => handleChange({ target: { name: 'pincode', value: e.target.value.replace(/\D/g, '').slice(0, 6) } })}
+                              maxLength={6}
+                              pattern="[0-9]{6}"
+                              required={form.country === 'India'}
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleAutoFillClick}
+                            className="px-4 py-2.5 bg-orange-500 text-white rounded-lg hover:bg-orange-600 text-sm font-semibold whitespace-nowrap transition"
+                          >
+                            Auto-fill
+                          </button>
+                        </div>
+                        {form.pincode && /^0+$/.test(String(form.pincode).trim()) ? (
+                          <p className="text-red-500 text-xs mt-1">All-zero pincodes are not valid</p>
+                        ) : form.pincode ? (
+                          <p className="text-green-600 text-xs mt-1 flex items-center gap-1">
+                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                            Address auto-filled from pincode
+                          </p>
+                        ) : null}
+                      </div>
+
+                      {/* City + District row */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">City <span className="text-red-500">*</span></label>
+                          <input
+                            className="w-full border border-gray-200 bg-white rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition"
+                            type="text"
+                            name="city"
+                            placeholder="City"
+                            value={form.city || ''}
+                            onChange={handleChange}
+                            required
+                          />
+                        </div>
+                        {form.country === 'India' && (
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">District {form.state && <span className="text-red-500">*</span>}</label>
+                            <select
+                              className="w-full border border-gray-200 bg-white rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition"
+                              name="district"
+                              value={form.district}
+                              onChange={handleChange}
+                              required={!!form.state}
+                              disabled={!form.state}
+                            >
+                              <option value="">Select District</option>
+                              {districts.map((d) => (
+                                <option key={d} value={d}>{d}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Street / Full address */}
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Full Address <span className="text-red-500">*</span></label>
+                        <input
+                          className="w-full border border-gray-200 bg-white rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition"
+                          type="text"
+                          name="street"
+                          placeholder="Street, Building, Apartment, Floor…"
+                          value={form.street || ''}
+                          onChange={handleChange}
+                          required
                         />
                       </div>
-                      {form.alternatePhone && !/^[0-9]{7,15}$/.test(form.alternatePhone) && (
-                        <div className="text-red-500 text-sm">Alternate number must be 7-15 digits</div>
-                      )}
-                    </>
-                  )}
-                  {/* Email (optional) */}
-                  <input
-                    className="border border-gray-200 bg-white rounded px-4 py-2 focus:border-gray-400"
-                    type="email"
-                    name="email"
-                    placeholder="Email address "
-                    value={form.email || ''}
-                    onChange={handleChange}
-                  />
-                  {/* Pincode with auto-fill option */}
-                  <div className="flex gap-2 items-center">
-                    <input
-                      className="border border-gray-200 bg-white rounded px-4 py-2 focus:border-gray-400 flex-1"
-                      type="text"
-                      name="pincode"
-                      placeholder="Pincode"
-                      value={form.pincode || ''}
-                      onChange={(e) => {
-                        const value = e.target.value.replace(/\D/g, '').slice(0, 6);
-                        handleChange({ target: { name: 'pincode', value } });
-                      }}
-                      maxLength={6}
-                      pattern="[0-9]{6}"
-                      required={form.country === 'India'}
-                    />
-                    <button
-                      type="button"
-                      onClick={handleAutoFillClick}
-                      className="px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600 whitespace-nowrap text-sm font-semibold"
-                    >
-                      Auto-fill
-                    </button>
+
+                      {/* State + Country row */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">State <span className="text-red-500">*</span></label>
+                          <select
+                            className="w-full border border-gray-200 bg-white rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition"
+                            name="state"
+                            value={form.state}
+                            onChange={handleChange}
+                            required
+                          >
+                            <option value="">Select State</option>
+                            {indiaStatesAndDistricts.map((s) => (
+                              <option key={s.state} value={s.state}>{s.state}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">Country <span className="text-red-500">*</span></label>
+                          <select
+                            className="w-full border border-gray-200 bg-white rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition"
+                            name="country"
+                            value={form.country}
+                            onChange={handleChange}
+                            required
+                          >
+                            <option value="India">India</option>
+                            {countryCodes.filter(c => c.label !== 'India').map((c) => (
+                              <option key={c.label} value={c.label.replace(/ \(.*\)/, '')}>{c.label.replace(/ \(.*\)/, '')}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                    </div>
                   </div>
-                  {form.pincode && /^0+$/.test(String(form.pincode).trim()) ? (
-                    <div className="text-xs text-red-500 -mt-2">
-                      Please enter a valid pincode. All-zero values are not allowed.
-                    </div>
-                  ) : form.pincode ? (
-                    <div className="text-xs text-gray-500 -mt-2">
-                      ✓ Address auto-filled from pincode
-                    </div>
-                  ) : null}
-                  {/* City - Auto-filled from pincode */}
-                  <input
-                    className="border border-gray-200 bg-white rounded px-4 py-2 focus:border-gray-400"
-                    type="text"
-                    name="city"
-                    placeholder="City (auto-filled from pincode)"
-                    value={form.city || ''}
-                    onChange={handleChange}
-                    required
-                  />
-                  {/* District dropdown (for India) */}
-                  {form.country === 'India' && (
-                    <select
-                      className="border border-gray-200 bg-white rounded px-4 py-2 focus:border-gray-400"
-                      name="district"
-                      value={form.district}
-                      onChange={handleChange}
-                      required={!!form.state}
-                      disabled={!form.state}
-                    >
-                      <option value="">Select District</option>
-                      {districts.map((d) => (
-                        <option key={d} value={d}>{d}</option>
-                      ))}
-                    </select>
-                  )}
-                  {/* Full Address Line (street) */}
-                  <input
-                    className="border border-gray-200 bg-white rounded px-4 py-2 focus:border-gray-400"
-                    type="text"
-                    name="street"
-                    placeholder="Full Address Line (Street, Building, Apartment)"
-                    value={form.street || ''}
-                    onChange={handleChange}
-                    required
-                  />
-                  {/* State dropdown (all states, default Kerala) */}
-                  <select
-                    className="border border-gray-200 bg-white rounded px-4 py-2 focus:border-gray-400"
-                    name="state"
-                    value={form.state}
-                    onChange={handleChange}
-                    required
-                  >
-                    <option value="">Select State</option>
-                    {indiaStatesAndDistricts.map((s) => (
-                      <option key={s.state} value={s.state}>{s.state}</option>
-                    ))}
-                  </select>
-                  {/* Country dropdown (default India) */}
-                  <select
-                    className="border border-gray-200 bg-white rounded px-4 py-2 focus:border-gray-400"
-                    name="country"
-                    value={form.country}
-                    onChange={handleChange}
-                    required
-                  >
-                    <option value="India">India</option>
-                    {countryCodes.filter(c => c.label !== 'India').map((c) => (
-                      <option key={c.label} value={c.label.replace(/ \(.*\)/, '')}>{c.label.replace(/ \(.*\)/, '')}</option>
-                    ))}
-                  </select>
+
                 </div>
               ) : null}
               <h2 className="text-xl font-bold mb-3 mt-4 text-gray-900">Payment methods</h2>
@@ -2998,7 +3098,7 @@ export default function CheckoutPage() {
       <div className="fixed bottom-0 left-0 right-0 md:hidden bg-white border-t border-gray-200 shadow-lg z-40 p-4">
         <div className="max-w-6xl mx-auto">
           {/* Address validation message */}
-          {!form.addressId && !(form.name && form.phone && form.pincode && form.city && form.state && form.street) && (
+          {!form.addressId && !(form.name && form.email && form.phone && form.pincode && form.city && form.state && form.street) && (
             <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm p-3 rounded mb-3">
               Please fill the address to continue
             </div>
@@ -3008,7 +3108,7 @@ export default function CheckoutPage() {
             type="submit"
             form="checkout-form"
             className={`relative w-full overflow-hidden rounded-xl py-4 text-base font-bold text-white transition-all duration-300 shadow-md hover:shadow-lg flex items-center justify-between px-6 ${
-              (!form.addressId && !(form.name && form.phone && form.pincode && form.city && form.state && form.street)) || isPlaceOrderDisabled 
+              (!form.addressId && !(form.name && form.email && form.phone && form.pincode && form.city && form.state && form.street)) || isPlaceOrderDisabled 
                 ? 'bg-gray-400 cursor-not-allowed opacity-75' 
                 : form.payment === 'cod' 
                   ? 'bg-gradient-to-r from-emerald-600 to-green-600' 
@@ -3018,10 +3118,10 @@ export default function CheckoutPage() {
                       ? 'bg-gradient-to-r from-emerald-600 to-green-600'
                     : 'bg-gradient-to-r from-red-600 via-rose-600 to-orange-500'
             } ${placingOrder ? 'scale-[0.99]' : ''}`}
-            disabled={(!form.addressId && !(form.name && form.phone && form.pincode && form.city && form.state && form.street)) || isPlaceOrderDisabled}
+            disabled={(!form.addressId && !(form.name && form.email && form.phone && form.pincode && form.city && form.state && form.street)) || isPlaceOrderDisabled}
             aria-busy={placingOrder}
           >
-            {(!((!form.addressId && !(form.name && form.phone && form.pincode && form.city && form.state && form.street)) || isPlaceOrderDisabled)) && (
+            {(!((!form.addressId && !(form.name && form.email && form.phone && form.pincode && form.city && form.state && form.street)) || isPlaceOrderDisabled)) && (
               <>
                 <span className={`pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_50%,rgba(255,255,255,0.16),transparent_24%),radial-gradient(circle_at_82%_50%,rgba(255,255,255,0.12),transparent_24%)] transition-opacity duration-300 ${placingOrder ? 'opacity-100' : 'opacity-70'}`} />
                 <span className={`pointer-events-none absolute inset-y-0 left-[-35%] w-1/2 -skew-x-12 bg-white/15 blur-xl transition-transform duration-1000 ${placingOrder ? 'translate-x-[260%]' : 'translate-x-0'}`} />

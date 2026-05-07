@@ -87,6 +87,11 @@ export async function POST(request) {
     const email = getField("email");
     const contact = getField("contact");
     const address = getField("address");
+    const returnAddress = getField("returnAddress");
+    const gst = getField("gst");
+    const customerId = getField("customerId");
+    const businessHours = getField("businessHours");
+    const website = getField("website");
     const image = formData.get("image");
 
     // Check for missing fields
@@ -135,6 +140,11 @@ export async function POST(request) {
       email,
       contact,
       address,
+      returnAddress,
+      gst,
+      customerId,
+      businessHours,
+      website,
       logo: optimizedImage,
       status: 'pending',
       isActive: false,

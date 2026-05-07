@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { useAuth } from "@/lib/useAuth";
 import Loading from "@/components/Loading";
-import { Activity, Clock3, MousePointerClick, ShoppingCart, Users, X } from "lucide-react";
+import { Activity, Clock3, MousePointerClick, ShoppingCart, Trash2, Users, X } from "lucide-react";
 
 function StatCard({ title, value, subtitle, icon: Icon, color }) {
   return (
@@ -113,6 +113,8 @@ export default function StoreCustomerTrackingPage() {
   const [selectedCustomerKey, setSelectedCustomerKey] = useState("");
   const [selectedCustomerData, setSelectedCustomerData] = useState(null);
   const [customerDetailsLoading, setCustomerDetailsLoading] = useState(false);
+  const [clearingAll, setClearingAll] = useState(false);
+  const [deletingCustomer, setDeletingCustomer] = useState(false);
 
   const fetchTracking = async () => {
     try {
@@ -166,6 +168,48 @@ export default function StoreCustomerTrackingPage() {
   const handleCloseCustomer = () => {
     setSelectedCustomerKey("");
     setSelectedCustomerData(null);
+  };
+
+  const handleClearAllTracking = async () => {
+    const confirmed = window.confirm(`Clear tracking events for the last ${days} day(s)? This cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+      setError("");
+      setClearingAll(true);
+      const token = await getToken();
+      await axios.delete(`/api/store/customer-tracking?days=${days}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      handleCloseCustomer();
+      await fetchTracking();
+    } catch (err) {
+      setError(err?.response?.data?.error || err.message || "Failed to clear tracking");
+    } finally {
+      setClearingAll(false);
+    }
+  };
+
+  const handleDeleteCustomerTracking = async () => {
+    if (!selectedCustomerKey) return;
+    const confirmed = window.confirm("Delete tracking timeline for this customer in the selected range? This cannot be undone.");
+    if (!confirmed) return;
+
+    try {
+      setError("");
+      setDeletingCustomer(true);
+      const token = await getToken();
+      await axios.delete(
+        `/api/store/customer-tracking?days=${days}&customerKey=${encodeURIComponent(selectedCustomerKey)}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      handleCloseCustomer();
+      await fetchTracking();
+    } catch (err) {
+      setError(err?.response?.data?.error || err.message || "Failed to delete customer tracking");
+    } finally {
+      setDeletingCustomer(false);
+    }
   };
 
   const overview = payload?.overview || {};
@@ -291,6 +335,15 @@ export default function StoreCustomerTrackingPage() {
           <p className="text-sm text-slate-600">See where customers came from and how they behaved on product pages.</p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleClearAllTracking}
+            disabled={clearingAll || loading}
+            className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Trash2 className="h-4 w-4" />
+            {clearingAll ? "Clearing..." : "Clear Tracking"}
+          </button>
           <label className="text-sm font-medium text-slate-700">Range</label>
           <select
             value={days}
@@ -436,13 +489,24 @@ export default function StoreCustomerTrackingPage() {
                 <h3 className="text-lg font-semibold text-slate-900">Customer Tracking Details</h3>
                 <p className="text-xs text-slate-500">{selectedCustomerKey}</p>
               </div>
-              <button
-                type="button"
-                onClick={handleCloseCustomer}
-                className="rounded-lg border border-slate-300 p-2 text-slate-600 hover:bg-slate-50"
-              >
-                <X className="h-4 w-4" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleDeleteCustomerTracking}
+                  disabled={deletingCustomer}
+                  className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  {deletingCustomer ? "Deleting..." : "Delete Customer Data"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCloseCustomer}
+                  className="rounded-lg border border-slate-300 p-2 text-slate-600 hover:bg-slate-50"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </div>
 
             <div className="max-h-[78vh] overflow-y-auto p-4">

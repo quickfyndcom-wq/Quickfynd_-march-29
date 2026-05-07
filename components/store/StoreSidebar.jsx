@@ -5,6 +5,8 @@ import Link from "next/link"
 
 const StoreSidebar = ({ storeInfo, isOpen = false, onClose }) => {
     const pathname = usePathname()
+    // Backward compatible: if isPrimary is not set on legacy stores, keep storefront access enabled.
+    const hasStorefrontAccess = storeInfo?.isPrimary !== false
 
     const sidebarLinks = [
         { name: 'Most Selling Products', href: '/store/most-selling-products', icon: BarChart3 },
@@ -220,6 +222,11 @@ const StoreSidebar = ({ storeInfo, isOpen = false, onClose }) => {
         }
     }
 
+    const visibleSections = sidebarSections.filter((section) => {
+        if (section.name === 'Storefront' && !hasStorefrontAccess) return false
+        return true
+    })
+
     return (
         <>
             <div
@@ -255,7 +262,7 @@ const StoreSidebar = ({ storeInfo, isOpen = false, onClose }) => {
                     style={{ WebkitOverflowScrolling: 'touch' }}
                 >
                     {/* Sectioned Navigation */}
-                    {sidebarSections.map((section) => {
+                    {visibleSections.map((section) => {
                         const SectionIcon = getSectionIcon(section.name)
                         const theme = getSectionTheme(section.name)
 

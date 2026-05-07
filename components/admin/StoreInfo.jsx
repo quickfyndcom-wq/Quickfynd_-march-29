@@ -21,12 +21,27 @@ const StoreInfo = ({store}) => {
                 >
                     {store.status}
                 </span>
+                {store.isPrimary && (
+                    <span className="text-xs font-semibold px-3 py-1 rounded-full bg-indigo-100 text-indigo-700">
+                        Primary Store
+                    </span>
+                )}
             </div>
 
             <p className="text-slate-600 my-5 max-w-2xl">{store.description}</p>
             <p className="flex items-center gap-2"> <MapPin size={16} /> {store.address}</p>
             <p className="flex items-center gap-2"><Phone size={16} /> {store.contact}</p>
             <p className="flex items-center gap-2"><Mail size={16} />  {store.email}</p>
+            {store.returnAddress && <p className="text-slate-600"><span className="font-medium">Return Address:</span> {store.returnAddress}</p>}
+            {store.gst && <p className="text-slate-600"><span className="font-medium">GST:</span> {store.gst}</p>}
+            {store.customerId && <p className="text-slate-600"><span className="font-medium">Customer/Contract ID:</span> {store.customerId}</p>}
+            {store.businessHours && <p className="text-slate-600"><span className="font-medium">Business Hours:</span> {store.businessHours}</p>}
+            {store.website && (
+                <p className="text-slate-600">
+                    <span className="font-medium">Website:</span>{' '}
+                    <a href={store.website} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{store.website}</a>
+                </p>
+            )}
             <p className="text-slate-700 mt-5">Applied  on <span className="text-xs">{new Date(store.createdAt).toLocaleDateString()}</span> by</p>
                         <div className="flex items-center gap-2 text-sm ">
                                 {store.user.image ? (

@@ -12,25 +12,69 @@ export default function AppInstallPrompt() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const dismissed = sessionStorage.getItem('appPromptDismissed');
-    if (dismissed) {
-      setIsLoading(false);
-      return;
-    }
+    let cancelled = false;
 
-    const isMobileUA = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-      navigator.userAgent
-    );
-    const isMobileViewport = window.innerWidth < 768;
-    const isMobile = isMobileUA || isMobileViewport;
+    const decideVisibility = async () => {
+      const dismissed = sessionStorage.getItem('appPromptDismissed');
+      if (dismissed) {
+        if (!cancelled) setIsLoading(false);
+        return;
+      }
 
-    if (!isMobile) {
-      setIsLoading(false);
-      return;
-    }
+      const ua = navigator.userAgent || navigator.vendor || '';
+      const isIOS = /iPad|iPhone|iPod/i.test(ua) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
-    setIsVisible(true);
-    setIsLoading(false);
+      // iOS app is not available yet, so hide the banner entirely.
+      if (isIOS) {
+        if (!cancelled) {
+          setIsVisible(false);
+          setIsLoading(false);
+        }
+        return;
+      }
+
+      const isAndroid = /Android/i.test(ua);
+      const isMobileUA = /Android|webOS|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+      const isMobileViewport = window.innerWidth < 768;
+      const isMobile = isMobileUA || isMobileViewport;
+
+      if (!isMobile || !isAndroid) {
+        if (!cancelled) {
+          setIsVisible(false);
+          setIsLoading(false);
+        }
+        return;
+      }
+
+      const isStandalone =
+        window.matchMedia?.('(display-mode: standalone)')?.matches ||
+        window.navigator.standalone === true;
+
+      let hasInstalledRelatedApp = false;
+      if (typeof navigator.getInstalledRelatedApps === 'function') {
+        try {
+          const relatedApps = await navigator.getInstalledRelatedApps();
+          hasInstalledRelatedApp = relatedApps.some((app) => {
+            const id = String(app?.id || '').toLowerCase();
+            return id.includes('com.quickfynd');
+          });
+        } catch {
+          hasInstalledRelatedApp = false;
+        }
+      }
+
+      if (!cancelled) {
+        setIsVisible(!(isStandalone || hasInstalledRelatedApp));
+        setIsLoading(false);
+      }
+    };
+
+    decideVisibility();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleDownload = () => {

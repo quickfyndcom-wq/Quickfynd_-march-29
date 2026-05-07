@@ -315,3 +315,41 @@ export async function GET(request) {
     );
   }
 }
+
+export async function DELETE(request) {
+  try {
+    const authResult = await getStoreIdFromRequest(request);
+    if (authResult.error) return authResult.error;
+
+    await dbConnect();
+
+    const { searchParams } = new URL(request.url);
+    const { from, safeDays } = getDateRange(searchParams);
+    const customerKey = String(searchParams.get("customerKey") || "").trim();
+    const { storeId } = authResult;
+
+    const baseFilter = {
+      storeId,
+      eventAt: { $gte: from },
+    };
+
+    const deleteFilter = customerKey
+      ? buildCustomerLookupFilter(baseFilter, customerKey)
+      : baseFilter;
+
+    const result = await CustomerBehaviorEvent.deleteMany(deleteFilter);
+
+    return NextResponse.json({
+      success: true,
+      periodDays: safeDays,
+      customerKey: customerKey || null,
+      deletedCount: Number(result?.deletedCount || 0),
+    });
+  } catch (error) {
+    console.error("[store-customer-tracking] DELETE error:", error);
+    return NextResponse.json(
+      { error: error.message || "Failed to delete tracking data" },
+      { status: 500 }
+    );
+  }
+}

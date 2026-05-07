@@ -3,7 +3,7 @@ import { useEffect, useState } from "react"
 import Loading from "../Loading"
 import Link from "next/link"
 import { ArrowRightIcon } from "lucide-react"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import SellerNavbar from "./StoreNavbar"
 import SellerSidebar from "./StoreSidebar"
 
@@ -15,6 +15,7 @@ const StoreLayout = ({ children }) => {
 
     const { user, loading, getToken } = useAuth();
     const pathname = usePathname();
+    const router = useRouter();
 
     const [isSeller, setIsSeller] = useState(false);
     const [sellerLoading, setSellerLoading] = useState(true);
@@ -73,6 +74,28 @@ const StoreLayout = ({ children }) => {
     useEffect(() => {
         setIsSidebarOpen(false);
     }, [pathname]);
+
+    useEffect(() => {
+        if (!isSeller || !storeInfo) return;
+
+        // Backward compatible: legacy stores without isPrimary field keep storefront access.
+        const hasStorefrontAccess = storeInfo?.isPrimary !== false;
+        if (hasStorefrontAccess) return;
+
+        const restrictedPrefixes = [
+            '/store/storefront',
+            '/store/home-preferences',
+            '/store/category-slider',
+            '/store/navbar-menu',
+            '/store/media',
+            '/store/mobile-features',
+        ];
+
+        const isRestrictedPath = restrictedPrefixes.some((prefix) => pathname?.startsWith(prefix));
+        if (isRestrictedPath) {
+            router.replace('/store');
+        }
+    }, [isSeller, pathname, router, storeInfo]);
 
     return (loading || sellerLoading) ? (
         <Loading />

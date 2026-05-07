@@ -34,6 +34,11 @@ function CreateStoreAuthed() {
         email: "",
         contact: "",
         address: "",
+        returnAddress: "",
+        gst: "",
+        customerId: "",
+        businessHours: "",
+        website: "",
         image: ""
     })
 
@@ -87,6 +92,11 @@ function CreateStoreAuthed() {
             formData.append("email", storeInfo.email);
             formData.append("contact", storeInfo.contact);
             formData.append("address", storeInfo.address);
+            formData.append("returnAddress", storeInfo.returnAddress);
+            formData.append("gst", storeInfo.gst);
+            formData.append("customerId", storeInfo.customerId);
+            formData.append("businessHours", storeInfo.businessHours);
+            formData.append("website", storeInfo.website);
             formData.append("image", storeInfo.image);
 
             const { data } = await axios.post('/api/store/create', formData, { headers: { Authorization: `Bearer ${token}` } });
@@ -119,7 +129,7 @@ function CreateStoreAuthed() {
                         {/* Title */}
                         <div>
                             <h1 className="text-3xl ">Add Your <span className="text-slate-800 font-medium">Store</span></h1>
-                            <p className="max-w-lg">To become a seller on Qui, submit your store details for review. Your store will be activated after admin verification.</p>
+                            <p className="max-w-lg">To become a seller on Nilaas, submit your store details for review. Your store will be activated after admin verification.</p>
                         </div>
 
                         <label className="mt-10 cursor-pointer">
@@ -162,6 +172,21 @@ function CreateStoreAuthed() {
 
                                                 <p>Address</p>
                                                 <textarea name="address" onChange={onChangeHandler} value={storeInfo.address} rows={5} placeholder="Enter your store address" className="border border-slate-300 outline-slate-400 w-full max-w-lg p-2 rounded resize-none" />
+
+                                                <p>Return/Warehouse Address</p>
+                                                <textarea name="returnAddress" onChange={onChangeHandler} value={storeInfo.returnAddress} rows={3} placeholder="Enter return or warehouse address" className="border border-slate-300 outline-slate-400 w-full max-w-lg p-2 rounded resize-none" />
+
+                                                <p>GST Number</p>
+                                                <input name="gst" onChange={onChangeHandler} value={storeInfo.gst} type="text" placeholder="Enter GST number" className="border border-slate-300 outline-slate-400 w-full max-w-lg p-2 rounded" />
+
+                                                <p>Customer/Contract ID</p>
+                                                <input name="customerId" onChange={onChangeHandler} value={storeInfo.customerId} type="text" placeholder="Enter seller customer or contract ID" className="border border-slate-300 outline-slate-400 w-full max-w-lg p-2 rounded" />
+
+                                                <p>Business Hours</p>
+                                                <input name="businessHours" onChange={onChangeHandler} value={storeInfo.businessHours} type="text" placeholder="e.g. Mon-Sat 9AM - 7PM" className="border border-slate-300 outline-slate-400 w-full max-w-lg p-2 rounded" />
+
+                                                <p>Website</p>
+                                                <input name="website" onChange={onChangeHandler} value={storeInfo.website} type="url" placeholder="https://yourstore.com" className="border border-slate-300 outline-slate-400 w-full max-w-lg p-2 rounded" />
 
                         <button className="bg-slate-800 text-white px-12 py-2 rounded mt-10 mb-40 active:scale-95 hover:bg-slate-900 transition ">Submit</button>
                     </form>

@@ -726,6 +726,7 @@ export default function StoreOrders() {
             DELIVERED: orders.filter(o => isRegularStatusOrder(o) && o.status === 'DELIVERED').length,
             CANCELLED: orders.filter(o => isRegularStatusOrder(o) && o.status === 'CANCELLED').length,
             PAYMENT_FAILED: orders.filter(o => isRegularStatusOrder(o) && o.status === 'PAYMENT_FAILED').length,
+            FAILED_ORDER: orders.filter(o => isRegularStatusOrder(o) && (o.status === 'PAYMENT_FAILED' || o.paymentStatus === 'FAILED')).length,
             RTO: orders.filter(o => isRegularStatusOrder(o) && o.status === 'RTO').length,
             RETURNED: orders.filter(o => hasLifecycleStatus(o, 'RETURNED')).length,
             RETURN_REQUESTED: orders.filter(o => hasLifecycleStatus(o, 'RETURN_REQUESTED')).length,
@@ -768,7 +769,7 @@ export default function StoreOrders() {
     const getFilteredOrders = () => {
         const dateFiltered = orders.filter(isOrderInRange);
         let statusFiltered;
-        if (filterStatus === 'ALL') statusFiltered = dateFiltered;
+        if (filterStatus === 'ALL') statusFiltered = dateFiltered.filter(o => o.status !== 'PAYMENT_FAILED' && o.paymentStatus !== 'FAILED');
         else if (filterStatus === 'PENDING_PAYMENT') {
             const hasReturn = (o) => hasReturnWithStatus(o, 'REQUESTED');
             statusFiltered = dateFiltered.filter(o => !getLifecycleBucket(o) && !isOrderPaid(o) && !hasReturn(o) && o.status !== 'CANCELLED' && o.status !== 'RETURNED' && o.status !== 'RTO' && o.status !== 'PAYMENT_FAILED');
@@ -784,6 +785,7 @@ export default function StoreOrders() {
         else if (filterStatus === 'REPLACED') statusFiltered = dateFiltered.filter(o => hasLifecycleStatus(o, 'REPLACED'));
         else if (filterStatus === 'RETURNED_REFUNDED') statusFiltered = dateFiltered.filter(o => hasLifecycleStatus(o, 'RETURNED_REFUNDED'));
         else if (filterStatus === 'DAMAGED_REVIEW') statusFiltered = dateFiltered.filter(o => ['MINOR_DAMAGE', 'DAMAGED'].includes(o?.deliveryReview?.packageCondition));
+        else if (filterStatus === 'FAILED_ORDER') statusFiltered = dateFiltered.filter(o => !getLifecycleBucket(o) && (o.status === 'PAYMENT_FAILED' || o.paymentStatus === 'FAILED'));
         else statusFiltered = dateFiltered.filter(o => !getLifecycleBucket(o) && o.status === filterStatus);
 
         if (filterDelivery === 'ALL') {
@@ -1752,11 +1754,18 @@ export default function StoreOrders() {
                     <p className="text-xs opacity-75">Damaged Review</p>
                     <p className="text-2xl font-bold">{stats.DAMAGED_REVIEW}</p>
                 </div>
+                <div 
+                    onClick={() => setFilterStatus('FAILED_ORDER')}
+                    className={`p-4 rounded-lg cursor-pointer transition-all ${filterStatus === 'FAILED_ORDER' ? 'bg-rose-700 text-white shadow-lg' : 'bg-white border border-rose-200 text-rose-700'}`}
+                >
+                    <p className="text-xs opacity-75">Failed Orders</p>
+                    <p className="text-2xl font-bold">{stats.FAILED_ORDER}</p>
+                </div>
             </div>
 
             {/* Status Filter Tabs */}
             <div className="mb-3 flex flex-wrap gap-2">
-                {['ALL', 'PROCESSING', 'MANIFESTED', 'PICKUP_SCHEDULED', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'PAYMENT_FAILED', 'RTO', 'RETURNED', 'RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED', 'REPLACEMENT_REQUESTED', 'REPLACEMENT_APPROVED', 'REPLACED', 'RETURNED_REFUNDED', 'DAMAGED_REVIEW', 'AWB_GENERATED', 'AWB_REFERENCE_MISSING'].map(status => (
+                {['ALL', 'PROCESSING', 'MANIFESTED', 'PICKUP_SCHEDULED', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'PAYMENT_FAILED', 'FAILED_ORDER', 'RTO', 'RETURNED', 'RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED', 'REPLACEMENT_REQUESTED', 'REPLACEMENT_APPROVED', 'REPLACED', 'RETURNED_REFUNDED', 'DAMAGED_REVIEW', 'AWB_GENERATED', 'AWB_REFERENCE_MISSING'].map(status => (
                     <button
                         key={status}
                         onClick={() => setFilterStatus(status)}
@@ -1766,12 +1775,12 @@ export default function StoreOrders() {
                                 : 'bg-gray-100 text-slate-700 hover:bg-gray-200'
                         }`}
                     >
-                        <span>{status === 'ALL' ? 'All Orders' : status === 'PAYMENT_FAILED' ? 'Payment Failed' : status === 'RETURN_REQUESTED' ? 'Return Requested' : status === 'RETURN_APPROVED' ? 'Return Approved' : status === 'RETURN_REJECTED' ? 'Return Rejected' : status === 'REPLACEMENT_REQUESTED' ? 'Replacement Requested' : status === 'REPLACEMENT_APPROVED' ? 'Replacement Approved' : status === 'REPLACED' ? 'Replaced' : status === 'RETURNED_REFUNDED' ? 'Returned & Refunded' : status === 'DAMAGED_REVIEW' ? 'Damaged Review' : status === 'AWB_GENERATED' ? 'AWB Generated' : status === 'AWB_REFERENCE_MISSING' ? 'AWB Ref Missing' : status.replace(/_/g, ' ')}</span>
-                        {(['RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED', 'REPLACEMENT_REQUESTED', 'REPLACEMENT_APPROVED', 'REPLACED', 'RETURNED_REFUNDED', 'DAMAGED_REVIEW', 'AWB_GENERATED', 'AWB_REFERENCE_MISSING'].includes(status)) && (status === 'RETURN_REQUESTED' ? stats.RETURN_REQUESTED : status === 'RETURN_APPROVED' ? stats.RETURN_APPROVED : status === 'RETURN_REJECTED' ? stats.RETURN_REJECTED : status === 'REPLACEMENT_REQUESTED' ? stats.REPLACEMENT_REQUESTED : status === 'REPLACEMENT_APPROVED' ? stats.REPLACEMENT_APPROVED : status === 'REPLACED' ? stats.REPLACED : status === 'RETURNED_REFUNDED' ? stats.RETURNED_REFUNDED : status === 'DAMAGED_REVIEW' ? stats.DAMAGED_REVIEW : status === 'AWB_GENERATED' ? stats.AWB_GENERATED : stats.AWB_REFERENCE_MISSING) > 0 && (
+                        <span>{status === 'ALL' ? 'All Orders' : status === 'PAYMENT_FAILED' ? 'Payment Failed' : status === 'FAILED_ORDER' ? 'Failed Orders' : status === 'RETURN_REQUESTED' ? 'Return Requested' : status === 'RETURN_APPROVED' ? 'Return Approved' : status === 'RETURN_REJECTED' ? 'Return Rejected' : status === 'REPLACEMENT_REQUESTED' ? 'Replacement Requested' : status === 'REPLACEMENT_APPROVED' ? 'Replacement Approved' : status === 'REPLACED' ? 'Replaced' : status === 'RETURNED_REFUNDED' ? 'Returned & Refunded' : status === 'DAMAGED_REVIEW' ? 'Damaged Review' : status === 'AWB_GENERATED' ? 'AWB Generated' : status === 'AWB_REFERENCE_MISSING' ? 'AWB Ref Missing' : status.replace(/_/g, ' ')}</span>
+                        {(['FAILED_ORDER', 'RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED', 'REPLACEMENT_REQUESTED', 'REPLACEMENT_APPROVED', 'REPLACED', 'RETURNED_REFUNDED', 'DAMAGED_REVIEW', 'AWB_GENERATED', 'AWB_REFERENCE_MISSING'].includes(status)) && (status === 'FAILED_ORDER' ? stats.FAILED_ORDER : status === 'RETURN_REQUESTED' ? stats.RETURN_REQUESTED : status === 'RETURN_APPROVED' ? stats.RETURN_APPROVED : status === 'RETURN_REJECTED' ? stats.RETURN_REJECTED : status === 'REPLACEMENT_REQUESTED' ? stats.REPLACEMENT_REQUESTED : status === 'REPLACEMENT_APPROVED' ? stats.REPLACEMENT_APPROVED : status === 'REPLACED' ? stats.REPLACED : status === 'RETURNED_REFUNDED' ? stats.RETURNED_REFUNDED : status === 'DAMAGED_REVIEW' ? stats.DAMAGED_REVIEW : status === 'AWB_GENERATED' ? stats.AWB_GENERATED : stats.AWB_REFERENCE_MISSING) > 0 && (
                             <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
                                 filterStatus === status ? 'bg-blue-800' : status === 'AWB_GENERATED' ? 'bg-emerald-500 text-white' : status === 'AWB_REFERENCE_MISSING' ? 'bg-amber-500 text-white' : status === 'RETURN_APPROVED' ? 'bg-green-500 text-white' : status === 'REPLACEMENT_APPROVED' ? 'bg-violet-600 text-white' : status === 'REPLACED' ? 'bg-green-500 text-white' : status === 'RETURNED_REFUNDED' ? 'bg-cyan-500 text-white' : status === 'RETURN_REJECTED' ? 'bg-rose-500 text-white' : status === 'REPLACEMENT_REQUESTED' ? 'bg-violet-500 text-white' : 'bg-red-500 text-white'
                             }`}>
-                                {status === 'RETURN_REQUESTED' ? stats.RETURN_REQUESTED : status === 'RETURN_APPROVED' ? stats.RETURN_APPROVED : status === 'RETURN_REJECTED' ? stats.RETURN_REJECTED : status === 'REPLACEMENT_REQUESTED' ? stats.REPLACEMENT_REQUESTED : status === 'REPLACEMENT_APPROVED' ? stats.REPLACEMENT_APPROVED : status === 'REPLACED' ? stats.REPLACED : status === 'RETURNED_REFUNDED' ? stats.RETURNED_REFUNDED : status === 'DAMAGED_REVIEW' ? stats.DAMAGED_REVIEW : status === 'AWB_GENERATED' ? stats.AWB_GENERATED : stats.AWB_REFERENCE_MISSING}
+                                {status === 'FAILED_ORDER' ? stats.FAILED_ORDER : status === 'FAILED_ORDER' ? stats.FAILED_ORDER : status === 'RETURN_REQUESTED' ? stats.RETURN_REQUESTED : status === 'RETURN_APPROVED' ? stats.RETURN_APPROVED : status === 'RETURN_REJECTED' ? stats.RETURN_REJECTED : status === 'REPLACEMENT_REQUESTED' ? stats.REPLACEMENT_REQUESTED : status === 'REPLACEMENT_APPROVED' ? stats.REPLACEMENT_APPROVED : status === 'REPLACED' ? stats.REPLACED : status === 'RETURNED_REFUNDED' ? stats.RETURNED_REFUNDED : status === 'DAMAGED_REVIEW' ? stats.DAMAGED_REVIEW : status === 'AWB_GENERATED' ? stats.AWB_GENERATED : stats.AWB_REFERENCE_MISSING}
                             </span>
                         )}
                     </button>
@@ -2200,6 +2209,11 @@ export default function StoreOrders() {
                                                 <div>
                                                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(mappedStatus)}`}>{mappedStatusLabel}</span>
                                                     {cancelBadge}
+                                                    {(mappedStatus === 'PAYMENT_FAILED' || order.paymentStatus === 'FAILED') && order.notes && (
+                                                        <span className="mt-1 block text-[10px] px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 font-medium leading-snug">
+                                                            ⚠ {order.notes.replace(/^Payment failed:\s*/i, '')}
+                                                        </span>
+                                                    )}
                                                 </div>
                                             );
                                         })()}

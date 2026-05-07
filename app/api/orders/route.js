@@ -952,17 +952,10 @@ export async function POST(request) {
                 if (guestInfo?.email || order.guestEmail) matchQuery.email = guestInfo?.email || order.guestEmail;
                 
                 if (Object.keys(matchQuery).length > 0) {
-                    await AbandonedCart.updateMany(
-                        { storeId: order.storeId, purchased: false, ...matchQuery },
-                        {
-                            $set: {
-                                purchased: true,
-                                purchasedAt: new Date(),
-                                purchasedOrderId: order._id
-                            }
-                        }
+                    await AbandonedCart.deleteMany(
+                        { storeId: order.storeId, ...matchQuery }
                     );
-                    console.log(`[ORDER] Marked abandoned carts as purchased for user: ${userId || guestInfo?.email}`);
+                    console.log(`[ORDER] Deleted abandoned carts on confirmed order for user: ${userId || guestInfo?.email}`);
                 }
             } catch (cartErr) {
                 console.error('[ORDER] Failed to update abandoned cart:', cartErr?.message);
