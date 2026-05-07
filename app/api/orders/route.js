@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import crypto from 'crypto';
+import connectDB from '@/lib/mongodb';
 import AbandonedCart from '@/models/AbandonedCart';
 import Product from '@/models/Product';
 import User from '@/models/User';
@@ -12,6 +13,7 @@ import GuestUser from '@/models/GuestUser';
 import Wallet from '@/models/Wallet';
 import PersonalizedOffer from '@/models/PersonalizedOffer';
 import OrderCounter from '@/models/OrderCounter';
+import Order from '@/models/Order';
 import { sendOrderConfirmationEmail, sendGuestAccountCreationEmail } from '@/lib/email';
 import { fetchNormalizedDelhiveryTracking } from '@/lib/delhivery';
 import { fetchSeventeenTrackInfo } from '@/lib/seventeentrack';
