@@ -8,7 +8,7 @@ import { FiTrash2, FiPlus, FiEdit2, FiX, FiSearch, FiCheckCircle } from 'react-i
 import { MdEdit, MdCategory, MdOutlineCheckCircleOutline } from 'react-icons/md';
 import Loading from '@/components/Loading';
 
-const MAX_CATEGORIES = 30;
+const MAX_CATEGORIES = 500;
 
 export default function StoreCategoryMenu() {
   const { user, getToken } = useAuth();
