@@ -3,6 +3,11 @@ import { NextResponse } from "next/server";
 import connectDB from '@/lib/mongodb';
 import Order from '@/models/Order';
 import User from '@/models/User';
+import {
+    sendOrderShipped,
+    sendOrderDelivered,
+    sendPaymentNotification
+} from '@/lib/whatsapp-webhook';
 
 // Update order status and tracking details
 export async function PUT(request, { params }) {
@@ -173,6 +178,8 @@ export async function PUT(request, { params }) {
                         console.error('SMS notification failed:', smsError);
                     });
                 }
+
+                // Send WhatsApp notification if status changed\n                if (statusForEmail) {\n                    const phoneNumber = existingOrder.guestPhone || \n                        existingOrder.alternatePhone || \n                        existingOrder.shippingAddress?.phone || \n                        existingOrder.shippingAddress?.phoneNumber;\n                    \n                    console.log('[Order API] WhatsApp check - Status:', updatedOrder.status, 'Phone:', phoneNumber);\n                    \n                    if (phoneNumber) {\n                        try {\n                            const orderForWhatsApp = {\n                                _id: updatedOrder._id,\n                                orderNumber: updatedOrder.orderNumber || updatedOrder._id.toString().slice(-6),\n                                total: updatedOrder.total,\n                                status: updatedOrder.status,\n                                trackingId: updatedOrder.trackingId,\n                                courier: updatedOrder.courier,\n                                phoneNumber: phoneNumber,\n                                customerName: existingOrder.userId.name || existingOrder.guestName || 'Customer'\n                            };\n\n                            console.log('[Order API] WhatsApp action - Status:', updatedOrder.status);\n                            if (updatedOrder.status === 'SHIPPED') {\n                                const result = await sendOrderShipped(orderForWhatsApp);\n                                console.log('[Order API] WhatsApp SHIPPED result:', result);\n                            } else if (updatedOrder.status === 'DELIVERED') {\n                                const result = await sendOrderDelivered(orderForWhatsApp);\n                                console.log('[Order API] WhatsApp DELIVERED result:', result);\n                            } else if (updatedOrder.paymentStatus === 'PAID' && !existingOrder.paymentStatus?.includes('PAID')) {\n                                const result = await sendPaymentNotification(orderForWhatsApp);\n                                console.log('[Order API] WhatsApp PAYMENT result:', result);\n                            }\n                        } catch (whatsappError) {\n                            console.error('[WhatsApp] Notification send failed:', whatsappError.message, whatsappError.stack);\n                            // Don't fail the order update if WhatsApp notification fails\n                        }\n                    } else {\n                        console.warn('[WhatsApp] No phone number found for order:', updatedOrder._id);\n                    }\n                }"
             } catch (emailError) {
                 console.error('Email notification failed:', emailError);
                 // Continue even if email fails
