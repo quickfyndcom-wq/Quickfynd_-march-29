@@ -51,6 +51,7 @@ export default function CheckoutPage() {
     country: 'India',
     state: 'Kerala',
     district: '',
+    houseNumber: '',
     street: '',
     city: '',
     pincode: '',
@@ -113,14 +114,78 @@ export default function CheckoutPage() {
     return '';
   };
 
+  const composeStreetAddress = (currentForm) => {
+    const houseNumber = String(currentForm?.houseNumber || "").trim();
+    const street = String(currentForm?.street || "").trim();
+    return [houseNumber, street].filter(Boolean).join(', ');
+  };
+
+  const getAddressStrength = (currentForm) => {
+    const houseNumber = String(currentForm?.houseNumber || '').trim();
+    const street = String(currentForm?.street || '').trim();
+    const combined = `${houseNumber} ${street}`.trim();
+
+    if (!combined) {
+      return null;
+    }
+
+    const tokens = combined.split(/\s+/).filter(Boolean);
+    const looksLikeOneWord = tokens.length <= 1;
+
+    let score = 0;
+    if (houseNumber.length >= 2) score += 1;
+    if (/\d/.test(houseNumber)) score += 1;
+    if (street.length >= 8) score += 1;
+    if (tokens.length >= 3) score += 1;
+    if (/(near|opp|behind|road|rd|street|st|lane|ln|nagar|colony|apartment|apt|floor|fl|building|bldg|house)/i.test(combined)) {
+      score += 1;
+    }
+
+    if (looksLikeOneWord || combined.length < 8 || score <= 1) {
+      return {
+        level: 'very_weak',
+        label: 'Very weak address',
+        className: 'text-red-600',
+        helper: 'Address is too short. Add house/building number, street, area or landmark for safe delivery.'
+      };
+    }
+
+    if (score === 2) {
+      return {
+        level: 'weak',
+        label: 'Weak address',
+        className: 'text-amber-600',
+        helper: 'Add more details like area, landmark, apartment or floor to avoid delivery issues.'
+      };
+    }
+
+    if (score === 3) {
+      return {
+        level: 'ok',
+        label: 'Good address',
+        className: 'text-green-600',
+        helper: 'Looks good. You can still add a nearby landmark for easier delivery.'
+      };
+    }
+
+    return {
+      level: 'strong',
+      label: 'Strong address',
+      className: 'text-green-700',
+      helper: 'Address is detailed enough for delivery.'
+    };
+  };
+
   const buildCheckoutAddress = (currentForm) => {
+    const houseNumber = String(currentForm?.houseNumber || "").trim();
     const street = String(currentForm?.street || "").trim();
     const city = String(currentForm?.city || "").trim();
     const pincode = String(currentForm?.pincode || "").trim();
-    const hasMeaningfulAddress = Boolean(street || city || pincode);
+    const hasMeaningfulAddress = Boolean(houseNumber || street || city || pincode);
     if (!hasMeaningfulAddress) return "";
 
     const parts = [
+      houseNumber,
       street,
       city,
       currentForm?.district,
@@ -136,13 +201,15 @@ export default function CheckoutPage() {
 
   const buildAddressFromAddressObject = (addressObj) => {
     if (!addressObj) return "";
+    const houseNumber = String(addressObj?.houseNumber || "").trim();
     const street = String(addressObj?.street || "").trim();
     const city = String(addressObj?.city || "").trim();
     const pincode = String(addressObj?.pincode || addressObj?.zip || "").trim();
-    const hasMeaningfulAddress = Boolean(street || city || pincode);
+    const hasMeaningfulAddress = Boolean(houseNumber || street || city || pincode);
     if (!hasMeaningfulAddress) return "";
 
     const parts = [
+      houseNumber,
       street,
       city,
       addressObj?.district,
@@ -200,6 +267,8 @@ export default function CheckoutPage() {
     return numericPrice * numericQty;
   };
 
+  const addressStrength = getAddressStrength(form);
+
   const buildAbandonedCheckoutPayload = () => {
     const cartEntries = Object.entries(cartItems || {});
     if (cartEntries.length === 0) return null;
@@ -240,6 +309,7 @@ export default function CheckoutPage() {
           state: form.state,
           district: form.district,
           city: form.city,
+          houseNumber: form.houseNumber,
           street: form.street,
           pincode: form.pincode,
         },
@@ -646,6 +716,7 @@ export default function CheckoutPage() {
           phoneCode: firstAddr.phoneCode || '+91',
           alternatePhone: cleanDigits(firstAddr.alternatePhone),
           alternatePhoneCode: firstAddr.alternatePhoneCode || '+91',
+          houseNumber: firstAddr.houseNumber || f.houseNumber,
           street: firstAddr.street || f.street,
           city: firstAddr.city || f.city,
           state: firstAddr.state || f.state,
@@ -733,6 +804,7 @@ export default function CheckoutPage() {
     form.name,
     form.email,
     form.phone,
+    form.houseNumber,
     form.street,
     form.city,
     form.district,
@@ -1636,7 +1708,7 @@ export default function CheckoutPage() {
             payload.addressId = addressId;
           } else {
             // Fallback for logged-in users without a saved address.
-            if (!form.street || !form.city || !form.state || !form.country || !resolvedPincode) {
+            if (!form.houseNumber || !form.street || !form.city || !form.state || !form.country || !resolvedPincode) {
               setFormError('Please add a delivery address before paying online.');
               setPlacingOrder(false);
               return;
@@ -1648,7 +1720,8 @@ export default function CheckoutPage() {
               phoneCode: form.phoneCode,
               alternatePhone: cleanedAlternatePhone || '',
               alternatePhoneCode: form.alternatePhone ? form.alternatePhoneCode || form.phoneCode : '',
-              street: form.street,
+              houseNumber: form.houseNumber,
+              street: composeStreetAddress(form),
               city: form.city,
               state: form.state,
               country: form.country || 'India',
@@ -1660,7 +1733,7 @@ export default function CheckoutPage() {
             payload.coinsToRedeem = safeRedeemCoins;
           }
         } else {
-          if (!form.name || !form.email || !form.phone || !form.street || !form.city || !form.state || !form.country || !resolvedPincode) {
+          if (!form.name || !form.email || !form.phone || !form.houseNumber || !form.street || !form.city || !form.state || !form.country || !resolvedPincode) {
             setFormError("Please fill all required shipping details.");
             setPlacingOrder(false);
             return;
@@ -1673,7 +1746,8 @@ export default function CheckoutPage() {
             phoneCode: form.phoneCode,
             alternatePhone: cleanedAlternatePhone || '',
             alternatePhoneCode: form.alternatePhone ? form.alternatePhoneCode || form.phoneCode : '',
-            street: form.street,
+            houseNumber: form.houseNumber,
+            street: composeStreetAddress(form),
             city: form.city,
             state: form.state,
             country: form.country,
@@ -1798,7 +1872,7 @@ export default function CheckoutPage() {
         // Only add addressId if it exists
         if (addressId || (addressList[0] && addressList[0]._id)) {
           payload.addressId = addressId || addressList[0]._id;
-        } else if (form.street && form.city && form.state && form.country && resolvedPincode) {
+        } else if (form.houseNumber && form.street && form.city && form.state && form.country && resolvedPincode) {
           // User is logged in but has no saved address - include address in payload
           payload.addressData = {
             name: form.name || user.displayName || '',
@@ -1807,7 +1881,8 @@ export default function CheckoutPage() {
             phoneCode: form.phoneCode,
             alternatePhone: cleanedAlternatePhone || '',
             alternatePhoneCode: form.alternatePhone ? form.alternatePhoneCode || form.phoneCode : '',
-            street: form.street,
+            houseNumber: form.houseNumber,
+            street: composeStreetAddress(form),
             city: form.city,
             state: form.state,
             country: form.country || 'India',
@@ -1830,7 +1905,8 @@ export default function CheckoutPage() {
             phoneCode: form.phoneCode,
             alternatePhone: cleanedAlternatePhone || '',
             alternatePhoneCode: form.alternatePhone ? form.alternatePhoneCode || form.phoneCode : '',
-            street: form.street,
+            houseNumber: form.houseNumber,
+            street: composeStreetAddress(form),
             city: form.city,
             state: form.state,
             country: form.country,
@@ -2674,19 +2750,43 @@ export default function CheckoutPage() {
                         )}
                       </div>
 
-                      {/* Street / Full address */}
-                      <div>
-                        <label className="block text-xs font-medium text-gray-600 mb-1">Full Address <span className="text-red-500">*</span></label>
-                        <input
-                          className="w-full border border-gray-200 bg-white rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition"
-                          type="text"
-                          name="street"
-                          placeholder="Street, Building, Apartment, Floor…"
-                          value={form.street || ''}
-                          onChange={handleChange}
-                          required
-                        />
+                      {/* House/Building + Address details */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">House / Building No <span className="text-red-500">*</span></label>
+                          <input
+                            className="w-full border border-gray-200 bg-white rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition"
+                            type="text"
+                            name="houseNumber"
+                            placeholder="House No, Flat No, Building"
+                            value={form.houseNumber || ''}
+                            onChange={handleChange}
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">Address Details <span className="text-red-500">*</span></label>
+                          <input
+                            className="w-full border border-gray-200 bg-white rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition"
+                            type="text"
+                            name="street"
+                            placeholder="Street, Area, Landmark, Apartment, Floor"
+                            value={form.street || ''}
+                            onChange={handleChange}
+                            required
+                          />
+                        </div>
                       </div>
+                      {addressStrength && (
+                        <div className="-mt-1">
+                          <p className={`text-xs font-medium ${addressStrength.className}`}>
+                            {addressStrength.label}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            {addressStrength.helper}
+                          </p>
+                        </div>
+                      )}
 
                       {/* State + Country row */}
                       <div className="grid grid-cols-2 gap-3">
@@ -3098,7 +3198,7 @@ export default function CheckoutPage() {
       <div className="fixed bottom-0 left-0 right-0 md:hidden bg-white border-t border-gray-200 shadow-lg z-40 p-4">
         <div className="max-w-6xl mx-auto">
           {/* Address validation message */}
-          {!form.addressId && !(form.name && form.email && form.phone && form.pincode && form.city && form.state && form.street) && (
+          {!form.addressId && !(form.name && form.email && form.phone && form.pincode && form.city && form.state && form.houseNumber && form.street) && (
             <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm p-3 rounded mb-3">
               Please fill the address to continue
             </div>
@@ -3108,7 +3208,7 @@ export default function CheckoutPage() {
             type="submit"
             form="checkout-form"
             className={`relative w-full overflow-hidden rounded-xl py-4 text-base font-bold text-white transition-all duration-300 shadow-md hover:shadow-lg flex items-center justify-between px-6 ${
-              (!form.addressId && !(form.name && form.email && form.phone && form.pincode && form.city && form.state && form.street)) || isPlaceOrderDisabled 
+              (!form.addressId && !(form.name && form.email && form.phone && form.pincode && form.city && form.state && form.houseNumber && form.street)) || isPlaceOrderDisabled 
                 ? 'bg-gray-400 cursor-not-allowed opacity-75' 
                 : form.payment === 'cod' 
                   ? 'bg-gradient-to-r from-emerald-600 to-green-600' 
@@ -3118,10 +3218,10 @@ export default function CheckoutPage() {
                       ? 'bg-gradient-to-r from-emerald-600 to-green-600'
                     : 'bg-gradient-to-r from-red-600 via-rose-600 to-orange-500'
             } ${placingOrder ? 'scale-[0.99]' : ''}`}
-            disabled={(!form.addressId && !(form.name && form.email && form.phone && form.pincode && form.city && form.state && form.street)) || isPlaceOrderDisabled}
+            disabled={(!form.addressId && !(form.name && form.email && form.phone && form.pincode && form.city && form.state && form.houseNumber && form.street)) || isPlaceOrderDisabled}
             aria-busy={placingOrder}
           >
-            {(!((!form.addressId && !(form.name && form.email && form.phone && form.pincode && form.city && form.state && form.street)) || isPlaceOrderDisabled)) && (
+            {(!((!form.addressId && !(form.name && form.email && form.phone && form.pincode && form.city && form.state && form.houseNumber && form.street)) || isPlaceOrderDisabled)) && (
               <>
                 <span className={`pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_50%,rgba(255,255,255,0.16),transparent_24%),radial-gradient(circle_at_82%_50%,rgba(255,255,255,0.12),transparent_24%)] transition-opacity duration-300 ${placingOrder ? 'opacity-100' : 'opacity-70'}`} />
                 <span className={`pointer-events-none absolute inset-y-0 left-[-35%] w-1/2 -skew-x-12 bg-white/15 blur-xl transition-transform duration-1000 ${placingOrder ? 'translate-x-[260%]' : 'translate-x-0'}`} />
@@ -3162,6 +3262,7 @@ export default function CheckoutPage() {
             phoneCode: addr.phoneCode || '+91',
             alternatePhone: cleanDigits(addr.alternatePhone),
             alternatePhoneCode: addr.alternatePhoneCode || '+91',
+            houseNumber: addr.houseNumber || f.houseNumber,
             street: addr.street || f.street,
             city: addr.city || f.city,
             state: addr.state || f.state,
@@ -3208,6 +3309,7 @@ export default function CheckoutPage() {
                 phoneCode: selectedAddr.phoneCode || '+91',
                 alternatePhone: cleanDigits(selectedAddr.alternatePhone),
                 alternatePhoneCode: selectedAddr.alternatePhoneCode || '+91',
+                houseNumber: selectedAddr.houseNumber || f.houseNumber,
                 street: selectedAddr.street || f.street,
                 city: selectedAddr.city || f.city,
                 state: selectedAddr.state || f.state,

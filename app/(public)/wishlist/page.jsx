@@ -236,11 +236,12 @@ function WishlistAuthed() {
     <>
       <PageTitle title="My Wishlist" />
 
-      <div className="max-w-[1250px] mx-auto px-4 sm:px-6 py-8 grid grid-cols-1 lg:grid-cols-[4fr_1fr] gap-6">
-        {isSignedIn && <DashboardSidebar />}
+      <div className="max-w-[1250px] mx-auto px-4 sm:px-6 py-8">
+        <div className={`${isSignedIn ? 'grid grid-cols-1 md:grid-cols-[260px_minmax(0,1fr)] gap-6' : ''} min-w-0`}>
+          {isSignedIn && <DashboardSidebar />}
 
-        {/* ------------------ LEFT (80%) ------------------ */}
-        <main>
+          {/* ------------------ LEFT CONTENT ------------------ */}
+          <main className="min-w-0">
           {wishlist.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 px-4">
               <div className="bg-gradient-to-br from-pink-100 to-red-100 rounded-full p-8 mb-6">
@@ -275,7 +276,7 @@ function WishlistAuthed() {
                 </button>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {wishlist.map((item) => {
                   const product = getProduct(item);
                   if (!product) return null;
@@ -383,64 +384,9 @@ function WishlistAuthed() {
               </div>
             </>
           )}
-        </main>
+          </main>
+        </div>
 
-        {/* ------------------ RIGHT (20%) ------------------ */}
-        <aside className="hidden lg:block">
-          <div className="sticky top-24 bg-gradient-to-br from-orange-50 to-red-50 border-2 border-orange-200 rounded-2xl p-6 shadow-lg">
-            <div className="flex items-center gap-2 mb-5">
-              <div className="bg-orange-500 rounded-full p-2">
-                <ShoppingCartIcon size={20} className="text-white" />
-              </div>
-              <h3 className="text-xl font-bold text-gray-900">
-                Price Summary
-              </h3>
-            </div>
-
-            <div className="space-y-4 text-sm bg-white rounded-xl p-4 mb-5">
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Selected Items</span>
-                <span className="font-semibold text-gray-900 text-lg">{selected.length}</span>
-              </div>
-              <div className="border-t pt-4 flex justify-between items-center">
-                <span className="text-gray-900 font-semibold">Total Amount</span>
-                <span className="font-bold text-2xl text-orange-600">₹{total.toLocaleString()}</span>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <button
-                disabled={selected.length === 0}
-                onClick={goToCartWithSelected}
-                className={`w-full py-3 rounded-xl font-bold text-base transition-all ${
-                  selected.length === 0
-                    ? "bg-gray-200 text-gray-400 cursor-not-allowed"
-                    : "bg-white border-2 border-orange-400 text-orange-600 hover:bg-orange-50"
-                }`}
-              >
-                {selected.length === 0 ? 'Select Items' : 'Go to Cart'}
-              </button>
-
-              <button
-                disabled={selected.length === 0}
-                onClick={goToCheckoutWithSelected}
-                className={`w-full py-4 rounded-xl font-bold text-lg transition-all ${
-                  selected.length === 0
-                    ? "bg-gray-200 text-gray-400 cursor-not-allowed"
-                    : "bg-gradient-to-r from-orange-500 to-red-500 text-white hover:from-orange-600 hover:to-red-600 shadow-lg hover:shadow-xl transform hover:scale-105"
-                }`}
-              >
-                {selected.length === 0 ? 'Select Items' : 'Go to Checkout'}
-              </button>
-            </div>
-            
-            {selected.length > 0 && (
-              <p className="text-xs text-gray-500 text-center mt-3">
-                🎉 {selected.length} {selected.length === 1 ? 'item' : 'items'} ready to checkout
-              </p>
-            )}
-          </div>
-        </aside>
       </div>
 
       {/* ------------------ MOBILE CHECKOUT BAR ------------------ */}

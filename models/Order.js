@@ -66,6 +66,10 @@ const OrderSchema = new mongoose.Schema({
   razorpayOrderId: String,                                  // Razorpay order ID
   razorpaySignature: String,                                // Webhook signature for verification
   razorpaySettlement: RazorpaySettlementSchema,            // Settlement details
+  paymentLinkId: { type: String, index: true },
+  paymentLinkUrl: String,
+  paymentLinkAmount: Number,
+  paymentLinkCreatedAt: Date,
   
   // Return & Replacement
   returns: [{

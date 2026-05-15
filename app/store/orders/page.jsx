@@ -175,6 +175,11 @@ export default function StoreOrders() {
     const [currentPage, setCurrentPage] = useState(1);
     const [pageSize, setPageSize] = useState(20);
     const [showCancelModal, setShowCancelModal] = useState(false);
+    const [isEditingOrderDetails, setIsEditingOrderDetails] = useState(false);
+    const [savingOrderDetails, setSavingOrderDetails] = useState(false);
+    const [paymentLinkAmount, setPaymentLinkAmount] = useState('');
+    const [generatedPaymentLink, setGeneratedPaymentLink] = useState('');
+    const [creatingPaymentLink, setCreatingPaymentLink] = useState(false);
     const [pendingCancelStatus, setPendingCancelStatus] = useState(null);
     const [cancelModalReason, setCancelModalReason] = useState('');
     const [cancelModalBy, setCancelModalBy] = useState('SELLER');
@@ -268,10 +273,21 @@ export default function StoreOrders() {
     };
 
     const hasGeneratedAwb = (order) => {
+        const hasLocalAwbDetails = Boolean(
+            awbDetailsByOrder?.[order?._id] && Object.keys(awbDetailsByOrder[order._id] || {}).length > 0
+        );
         const localGenerated = Boolean(awbStatus?.[order?._id]?.generated);
-        const orderStatus = String(order?.orderStatus || '').toUpperCase();
-        const courierQueued = Boolean(order?.sentToDelhivery || orderStatus === 'PENDING_ASSIGNMENT');
-        return Boolean(localGenerated || courierQueued);
+        const orderStatus = String(order?.orderStatus || order?.status || '').toUpperCase();
+        const awbWorkflowStatuses = new Set([
+            'PENDING_ASSIGNMENT',
+            'MANIFESTED',
+            'PICKUP_SCHEDULED',
+            'PICKUP_REQUESTED',
+            'WAITING_FOR_PICKUP',
+        ]);
+        const courierQueued = Boolean(order?.sentToDelhivery || awbWorkflowStatuses.has(orderStatus));
+        const hasServerAwbReference = Boolean(getOrderAwbNumber(order));
+        return Boolean(localGenerated || hasLocalAwbDetails || courierQueued || hasServerAwbReference);
     };
 
     const hasGeneratedAwbMissingReference = (order) => {
@@ -279,9 +295,19 @@ export default function StoreOrders() {
     };
 
     const hasAwbQueuedWithoutReference = (order) => {
-        const orderStatus = String(order?.orderStatus || '').toUpperCase();
-        const courierQueued = Boolean(order?.sentToDelhivery || orderStatus === 'PENDING_ASSIGNMENT');
-        return Boolean(courierQueued && !getOrderAwbNumber(order));
+        const orderStatus = String(order?.orderStatus || order?.status || '').toUpperCase();
+        const awbWorkflowStatuses = new Set([
+            'PENDING_ASSIGNMENT',
+            'MANIFESTED',
+            'PICKUP_SCHEDULED',
+            'PICKUP_REQUESTED',
+            'WAITING_FOR_PICKUP',
+        ]);
+        const courierQueued = Boolean(order?.sentToDelhivery || awbWorkflowStatuses.has(orderStatus));
+        const hasLocalAwbDetails = Boolean(
+            awbDetailsByOrder?.[order?._id] && Object.keys(awbDetailsByOrder[order._id] || {}).length > 0
+        );
+        return Boolean((courierQueued || hasLocalAwbDetails) && !getOrderAwbNumber(order));
     };
 
     const hasReturnWithStatus = (order, status) => {
@@ -371,8 +397,17 @@ export default function StoreOrders() {
     };
 
     const hasAwbPendingDownload = (order) => {
+        // Once an AWB/tracking reference exists on the order, remove it from
+        // AWB Generated pending list.
+        if (getOrderAwbNumber(order)) {
+            return false;
+        }
+
         const status = awbStatus?.[order?._id];
-        return Boolean(status?.generated && !status?.downloaded);
+        if (status?.generated) {
+            return Boolean(!status?.downloaded);
+        }
+        return false;
     };
 
     const openAwbEditor = async (order) => {
@@ -614,6 +649,14 @@ export default function StoreOrders() {
         { value: 'REPLACEMENT_OUT_FOR_DELIVERY', label: 'Replacement Out For Delivery', color: 'bg-teal-100 text-teal-700' },
         { value: 'REPLACEMENT_DELIVERED', label: 'Replacement Delivered', color: 'bg-green-100 text-green-700' },
         { value: 'REPLACED', label: 'Replaced', color: 'bg-emerald-100 text-emerald-700' },
+    ];
+
+    const PAYMENT_METHOD_OPTIONS = [
+        { value: 'COD', label: 'COD' },
+        { value: 'CARD', label: 'CARD' },
+        { value: 'RAZORPAY', label: 'RAZORPAY' },
+        { value: 'WALLET', label: 'WALLET' },
+        { value: 'STRIPE', label: 'STRIPE' },
     ];
 
     // Map Delhivery live status (current_status + latest event) to internal order status
@@ -1243,6 +1286,9 @@ export default function StoreOrders() {
         console.log('[MODAL DEBUG] Order addressId:', order.addressId);
         console.log('[MODAL DEBUG] Order isGuest:', order.isGuest);
         setSelectedOrder(order);
+        setIsEditingOrderDetails(false);
+        setPaymentLinkAmount(String(order?.paymentLinkAmount || order?.total || ''));
+        setGeneratedPaymentLink(order?.paymentLinkUrl || '');
         // Pre-fill tracking data if it exists
         // Auto-fix old India Post URLs (indiapost.gov.in) to 17track
         const isIndiaPost = (order.courier || '').toLowerCase().includes('india post');
@@ -1355,6 +1401,9 @@ export default function StoreOrders() {
     const closeModal = () => {
         setIsModalOpen(false);
         setSelectedOrder(null);
+        setIsEditingOrderDetails(false);
+        setPaymentLinkAmount('');
+        setGeneratedPaymentLink('');
         // Reset tracking data
         setTrackingData({
             trackingId: '',
@@ -1493,6 +1542,146 @@ export default function StoreOrders() {
             toast.error(err?.response?.data?.error || err?.response?.data?.message || 'Failed to save cancellation details');
         } finally {
             setSavingCancellationDetails(false);
+        }
+    };
+
+    const saveEditedOrderDetails = async () => {
+        if (!selectedOrder?._id) return;
+
+        const normalizedPaymentMethod = String(selectedOrder.paymentMethod || '').toUpperCase().trim();
+        const shippingAddress = {
+            ...(selectedOrder.shippingAddress || {}),
+            zip: String(selectedOrder.shippingAddress?.zip || selectedOrder.shippingAddress?.pincode || '').trim(),
+            pincode: String(selectedOrder.shippingAddress?.zip || selectedOrder.shippingAddress?.pincode || '').trim(),
+        };
+
+        const resolvedName = selectedOrder.isGuest
+            ? String(selectedOrder.guestName || shippingAddress.name || '').trim()
+            : String(shippingAddress.name || selectedOrder.userId?.name || '').trim();
+        const resolvedEmail = selectedOrder.isGuest
+            ? String(selectedOrder.guestEmail || shippingAddress.email || '').trim()
+            : String(shippingAddress.email || selectedOrder.userId?.email || '').trim();
+        const resolvedPhone = selectedOrder.isGuest
+            ? String(selectedOrder.guestPhone || shippingAddress.phone || '').trim()
+            : String(shippingAddress.phone || '').trim();
+
+        if (!resolvedName || !resolvedPhone || !shippingAddress.street || !shippingAddress.city || !shippingAddress.state || !shippingAddress.country || !shippingAddress.zip) {
+            toast.error('Please fill name, phone and complete address before saving.');
+            return;
+        }
+
+        const payload = {
+            paymentMethod: normalizedPaymentMethod,
+            shippingAddress: {
+                ...shippingAddress,
+                name: resolvedName,
+                email: resolvedEmail,
+                phone: resolvedPhone,
+            },
+            alternatePhone: selectedOrder.alternatePhone || shippingAddress.alternatePhone || '',
+            alternatePhoneCode:
+                selectedOrder.alternatePhoneCode ||
+                shippingAddress.alternatePhoneCode ||
+                shippingAddress.phoneCode ||
+                '+91',
+        };
+
+        if (selectedOrder.isGuest) {
+            payload.guestName = resolvedName;
+            payload.guestEmail = resolvedEmail;
+            payload.guestPhone = resolvedPhone;
+        }
+
+        try {
+            setSavingOrderDetails(true);
+            const token = await getToken(true);
+            if (!token) {
+                toast.error('Authentication failed. Please sign in again.');
+                return;
+            }
+
+            const { data } = await axios.put(`/api/store/orders/${selectedOrder._id}`, payload, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+
+            const updated = data?.order;
+            if (!updated) {
+                toast.error('No updated order returned from server.');
+                return;
+            }
+
+            setSelectedOrder((prev) => {
+                if (!prev) return prev;
+                const updatedOrderItems = Array.isArray(updated?.orderItems) ? updated.orderItems : [];
+                const hasUsableProductData = updatedOrderItems.some((item) => item?.productId && typeof item.productId === 'object');
+                return {
+                    ...prev,
+                    ...updated,
+                    orderItems: hasUsableProductData ? updatedOrderItems : prev.orderItems,
+                };
+            });
+            setOrders((prev) => prev.map((o) => (o._id === selectedOrder._id ? { ...o, ...updated } : o)));
+            setIsEditingOrderDetails(false);
+            toast.success('Order details updated successfully');
+        } catch (error) {
+            console.error('Failed to update order details:', error);
+            toast.error(error?.response?.data?.error || 'Failed to update order details');
+        } finally {
+            setSavingOrderDetails(false);
+        }
+    };
+
+    const createCustomerPaymentLink = async () => {
+        if (!selectedOrder?._id) return;
+
+        const amount = Number(paymentLinkAmount || 0);
+        if (!Number.isFinite(amount) || amount <= 0) {
+            toast.error('Please enter a valid payment amount.');
+            return;
+        }
+
+        try {
+            setCreatingPaymentLink(true);
+            const token = await getToken(true);
+            if (!token) {
+                toast.error('Authentication failed. Please sign in again.');
+                return;
+            }
+
+            const { data } = await axios.post(`/api/store/orders/${selectedOrder._id}/payment-link`, {
+                amount,
+            }, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+
+            const url = data?.paymentLink?.url || '';
+            if (!url) {
+                toast.error('Payment link was not returned by server.');
+                return;
+            }
+
+            setGeneratedPaymentLink(url);
+            if (data?.order) {
+                setSelectedOrder((prev) => prev ? { ...prev, ...data.order } : prev);
+                setOrders((prev) => prev.map((o) => o._id === selectedOrder._id ? { ...o, ...data.order } : o));
+            } else {
+                setSelectedOrder((prev) => prev ? {
+                    ...prev,
+                    paymentMethod: 'CARD',
+                    paymentStatus: 'PENDING',
+                    isPaid: false,
+                    total: amount,
+                    paymentLinkUrl: url,
+                    paymentLinkAmount: amount,
+                } : prev);
+            }
+
+            toast.success('Payment link created. Share it with customer.');
+        } catch (error) {
+            console.error('Payment link creation failed:', error);
+            toast.error(error?.response?.data?.error || 'Failed to create payment link');
+        } finally {
+            setCreatingPaymentLink(false);
         }
     };
 
@@ -2825,15 +3014,25 @@ export default function StoreOrders() {
 
                             {/* Customer Details */}
                             <div className="bg-slate-50 rounded-xl p-5">
-                                <h3 className="font-semibold text-slate-900 mb-3 flex items-center gap-2">
-                                    <div className="w-1 h-5 bg-blue-600 rounded-full"></div>
-                                    Customer Details
-                                    {selectedOrder.isGuest && (
-                                        <span className="ml-2 px-2 py-1 bg-orange-100 text-orange-700 text-xs font-semibold rounded-full">
-                                            GUEST ORDER
-                                        </span>
-                                    )}
-                                </h3>
+                                <div className="flex items-center justify-between mb-3 gap-3">
+                                    <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+                                        <div className="w-1 h-5 bg-blue-600 rounded-full"></div>
+                                        Customer Details
+                                        {selectedOrder.isGuest && (
+                                            <span className="ml-2 px-2 py-1 bg-orange-100 text-orange-700 text-xs font-semibold rounded-full">
+                                                GUEST ORDER
+                                            </span>
+                                        )}
+                                    </h3>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsEditingOrderDetails((prev) => !prev)}
+                                        className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 transition"
+                                    >
+                                        {isEditingOrderDetails ? 'Cancel Edit' : 'Edit Details'}
+                                    </button>
+                                </div>
                                 
                                 {!selectedOrder.shippingAddress && !selectedOrder.isGuest && (
                                     <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
@@ -2851,65 +3050,227 @@ export default function StoreOrders() {
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
                                     <div>
                                         <p className="text-slate-500">Name</p>
-                                        <p className="font-medium text-slate-900">
-                                            {selectedOrder.isGuest 
-                                                ? (selectedOrder.guestName || '—') 
-                                                : (selectedOrder.shippingAddress?.name || selectedOrder.userId?.name || '—')}
-                                        </p>
+                                        {isEditingOrderDetails ? (
+                                            <input
+                                                type="text"
+                                                value={selectedOrder.isGuest ? (selectedOrder.guestName || '') : (selectedOrder.shippingAddress?.name || '')}
+                                                onChange={(e) => {
+                                                    const value = e.target.value;
+                                                    setSelectedOrder({
+                                                        ...selectedOrder,
+                                                        ...(selectedOrder.isGuest ? { guestName: value } : {}),
+                                                        shippingAddress: { ...(selectedOrder.shippingAddress || {}), name: value }
+                                                    });
+                                                }}
+                                                className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        ) : (
+                                            <p className="font-medium text-slate-900">
+                                                {selectedOrder.isGuest
+                                                    ? (selectedOrder.guestName || '—')
+                                                    : (selectedOrder.shippingAddress?.name || selectedOrder.userId?.name || '—')}
+                                            </p>
+                                        )}
                                     </div>
                                     <div>
                                         <p className="text-slate-500">Email</p>
-                                        <p className="font-medium text-slate-900">
-                                            {selectedOrder.isGuest 
-                                                ? (selectedOrder.guestEmail || '—') 
-                                                : (selectedOrder.shippingAddress?.email || selectedOrder.userId?.email || '—')}
-                                        </p>
+                                        {isEditingOrderDetails ? (
+                                            <input
+                                                type="email"
+                                                value={selectedOrder.isGuest ? (selectedOrder.guestEmail || '') : (selectedOrder.shippingAddress?.email || '')}
+                                                onChange={(e) => {
+                                                    const value = e.target.value;
+                                                    setSelectedOrder({
+                                                        ...selectedOrder,
+                                                        ...(selectedOrder.isGuest ? { guestEmail: value } : {}),
+                                                        shippingAddress: { ...(selectedOrder.shippingAddress || {}), email: value }
+                                                    });
+                                                }}
+                                                className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        ) : (
+                                            <p className="font-medium text-slate-900">
+                                                {selectedOrder.isGuest
+                                                    ? (selectedOrder.guestEmail || '—')
+                                                    : (selectedOrder.shippingAddress?.email || selectedOrder.userId?.email || '—')}
+                                            </p>
+                                        )}
                                     </div>
                                     <div>
                                         <p className="text-slate-500">Phone</p>
-                                        <p className="font-medium text-slate-900">
-                                            {selectedOrder.isGuest 
-                                                ? ([selectedOrder.shippingAddress?.phoneCode, selectedOrder.guestPhone].filter(Boolean).join(' ') || '—')
-                                                : ([selectedOrder.shippingAddress?.phoneCode, selectedOrder.shippingAddress?.phone].filter(Boolean).join(' ') || '—')}
-                                        </p>
-                                    </div>
-                                    {(selectedOrder.shippingAddress?.alternatePhone || selectedOrder.alternatePhone) && (
-                                        <div>
-                                            <p className="text-slate-500">Alternate Phone</p>
+                                        {isEditingOrderDetails ? (
+                                            <input
+                                                type="text"
+                                                inputMode="numeric"
+                                                value={selectedOrder.isGuest ? (selectedOrder.guestPhone || '') : (selectedOrder.shippingAddress?.phone || '')}
+                                                onChange={(e) => {
+                                                    const value = String(e.target.value || '').replace(/[^0-9]/g, '').slice(0, 15);
+                                                    setSelectedOrder({
+                                                        ...selectedOrder,
+                                                        ...(selectedOrder.isGuest ? { guestPhone: value } : {}),
+                                                        shippingAddress: { ...(selectedOrder.shippingAddress || {}), phone: value }
+                                                    });
+                                                }}
+                                                className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        ) : (
                                             <p className="font-medium text-slate-900">
                                                 {selectedOrder.isGuest
-                                                    ? [selectedOrder.alternatePhoneCode || selectedOrder.shippingAddress?.phoneCode || '+91', selectedOrder.alternatePhone || selectedOrder.shippingAddress?.alternatePhone].filter(Boolean).join(' ')
-                                                    : [selectedOrder.shippingAddress?.alternatePhoneCode || selectedOrder.shippingAddress?.phoneCode || '+91', selectedOrder.shippingAddress?.alternatePhone || selectedOrder.alternatePhone].filter(Boolean).join(' ')}
+                                                    ? ([selectedOrder.shippingAddress?.phoneCode, selectedOrder.guestPhone].filter(Boolean).join(' ') || '—')
+                                                    : ([selectedOrder.shippingAddress?.phoneCode, selectedOrder.shippingAddress?.phone].filter(Boolean).join(' ') || '—')}
                                             </p>
+                                        )}
+                                    </div>
+                                    {(selectedOrder.shippingAddress?.alternatePhone || selectedOrder.alternatePhone || isEditingOrderDetails) && (
+                                        <div>
+                                            <p className="text-slate-500">Alternate Phone</p>
+                                            {isEditingOrderDetails ? (
+                                                <input
+                                                    type="text"
+                                                    inputMode="numeric"
+                                                    value={selectedOrder.alternatePhone || selectedOrder.shippingAddress?.alternatePhone || ''}
+                                                    onChange={(e) => {
+                                                        const value = String(e.target.value || '').replace(/[^0-9]/g, '').slice(0, 15);
+                                                        setSelectedOrder({
+                                                            ...selectedOrder,
+                                                            alternatePhone: value,
+                                                            shippingAddress: { ...(selectedOrder.shippingAddress || {}), alternatePhone: value }
+                                                        });
+                                                    }}
+                                                    className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                />
+                                            ) : (
+                                                <p className="font-medium text-slate-900">
+                                                    {selectedOrder.isGuest
+                                                        ? [selectedOrder.alternatePhoneCode || selectedOrder.shippingAddress?.phoneCode || '+91', selectedOrder.alternatePhone || selectedOrder.shippingAddress?.alternatePhone].filter(Boolean).join(' ')
+                                                        : [selectedOrder.shippingAddress?.alternatePhoneCode || selectedOrder.shippingAddress?.phoneCode || '+91', selectedOrder.shippingAddress?.alternatePhone || selectedOrder.alternatePhone].filter(Boolean).join(' ')}
+                                                </p>
+                                            )}
                                         </div>
                                     )}
                                     <div>
                                         <p className="text-slate-500">Street</p>
-                                        <p className="font-medium text-slate-900">{selectedOrder.shippingAddress?.street || '—'}</p>
+                                        {isEditingOrderDetails ? (
+                                            <input
+                                                type="text"
+                                                value={selectedOrder.shippingAddress?.street || ''}
+                                                onChange={(e) => setSelectedOrder({
+                                                    ...selectedOrder,
+                                                    shippingAddress: { ...(selectedOrder.shippingAddress || {}), street: e.target.value }
+                                                })}
+                                                className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        ) : (
+                                            <p className="font-medium text-slate-900">{selectedOrder.shippingAddress?.street || '—'}</p>
+                                        )}
                                     </div>
                                     <div>
                                         <p className="text-slate-500">City</p>
-                                        <p className="font-medium text-slate-900">{selectedOrder.shippingAddress?.city || '—'}</p>
+                                        {isEditingOrderDetails ? (
+                                            <input
+                                                type="text"
+                                                value={selectedOrder.shippingAddress?.city || ''}
+                                                onChange={(e) => setSelectedOrder({
+                                                    ...selectedOrder,
+                                                    shippingAddress: { ...(selectedOrder.shippingAddress || {}), city: e.target.value }
+                                                })}
+                                                className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        ) : (
+                                            <p className="font-medium text-slate-900">{selectedOrder.shippingAddress?.city || '—'}</p>
+                                        )}
                                     </div>
-                                    {selectedOrder.shippingAddress?.district && selectedOrder.shippingAddress.district.trim() !== '' && (
+                                    {(selectedOrder.shippingAddress?.district || isEditingOrderDetails) && (
                                         <div>
                                             <p className="text-slate-500">District</p>
-                                            <p className="font-medium text-slate-900">{selectedOrder.shippingAddress.district}</p>
+                                            {isEditingOrderDetails ? (
+                                                <input
+                                                    type="text"
+                                                    value={selectedOrder.shippingAddress?.district || ''}
+                                                    onChange={(e) => setSelectedOrder({
+                                                        ...selectedOrder,
+                                                        shippingAddress: { ...(selectedOrder.shippingAddress || {}), district: e.target.value }
+                                                    })}
+                                                    className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                />
+                                            ) : (
+                                                <p className="font-medium text-slate-900">{selectedOrder.shippingAddress.district}</p>
+                                            )}
                                         </div>
                                     )}
                                     <div>
                                         <p className="text-slate-500">State</p>
-                                        <p className="font-medium text-slate-900">{selectedOrder.shippingAddress?.state || '—'}</p>
+                                        {isEditingOrderDetails ? (
+                                            <input
+                                                type="text"
+                                                value={selectedOrder.shippingAddress?.state || ''}
+                                                onChange={(e) => setSelectedOrder({
+                                                    ...selectedOrder,
+                                                    shippingAddress: { ...(selectedOrder.shippingAddress || {}), state: e.target.value }
+                                                })}
+                                                className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        ) : (
+                                            <p className="font-medium text-slate-900">{selectedOrder.shippingAddress?.state || '—'}</p>
+                                        )}
                                     </div>
                                     <div>
                                         <p className="text-slate-500">Pincode</p>
-                                        <p className="font-medium text-slate-900">{selectedOrder.shippingAddress?.zip || selectedOrder.shippingAddress?.pincode || '—'}</p>
+                                        {isEditingOrderDetails ? (
+                                            <input
+                                                type="text"
+                                                inputMode="numeric"
+                                                value={selectedOrder.shippingAddress?.zip || selectedOrder.shippingAddress?.pincode || ''}
+                                                onChange={(e) => {
+                                                    const value = String(e.target.value || '').replace(/[^0-9]/g, '').slice(0, 10);
+                                                    setSelectedOrder({
+                                                        ...selectedOrder,
+                                                        shippingAddress: { ...(selectedOrder.shippingAddress || {}), zip: value, pincode: value }
+                                                    });
+                                                }}
+                                                className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        ) : (
+                                            <p className="font-medium text-slate-900">{selectedOrder.shippingAddress?.zip || selectedOrder.shippingAddress?.pincode || '—'}</p>
+                                        )}
                                     </div>
                                     <div>
                                         <p className="text-slate-500">Country</p>
-                                        <p className="font-medium text-slate-900">{selectedOrder.shippingAddress?.country || '—'}</p>
+                                        {isEditingOrderDetails ? (
+                                            <input
+                                                type="text"
+                                                value={selectedOrder.shippingAddress?.country || ''}
+                                                onChange={(e) => setSelectedOrder({
+                                                    ...selectedOrder,
+                                                    shippingAddress: { ...(selectedOrder.shippingAddress || {}), country: e.target.value }
+                                                })}
+                                                className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        ) : (
+                                            <p className="font-medium text-slate-900">{selectedOrder.shippingAddress?.country || '—'}</p>
+                                        )}
                                     </div>
                                 </div>
+
+                                {isEditingOrderDetails && (
+                                    <div className="mt-4 pt-4 border-t border-slate-200 flex flex-wrap items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={saveEditedOrderDetails}
+                                            disabled={savingOrderDetails}
+                                            className={`px-4 py-2 rounded-lg text-sm font-semibold text-white transition ${savingOrderDetails ? 'bg-blue-300 cursor-wait' : 'bg-blue-600 hover:bg-blue-700'}`}
+                                        >
+                                            {savingOrderDetails ? 'Saving...' : 'Save Details'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsEditingOrderDetails(false)}
+                                            className="px-4 py-2 rounded-lg text-sm font-semibold text-slate-700 bg-slate-200 hover:bg-slate-300 transition"
+                                        >
+                                            Cancel
+                                        </button>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Products */}
@@ -2922,8 +3283,8 @@ export default function StoreOrders() {
                                     {selectedOrder.orderItems.map((item, i) => (
                                         <div key={i} className="flex items-center gap-4 border border-slate-200 rounded-xl p-3 bg-white hover:shadow-md transition-shadow">
                                             <img
-                                                src={getImageSrc(item.productId?.images?.[0] || item.product?.images?.[0] || item.productId?.image || item.product?.image)}
-                                                alt={item.productId?.name || item.product?.name || 'Product'}
+                                                src={getImageSrc(item.productId?.images?.[0] || item.product?.images?.[0] || item.productId?.image || item.product?.image || item.image)}
+                                                alt={item.productId?.name || item.product?.name || item.name || 'Product'}
                                                 className="w-20 h-20 object-cover rounded-lg border border-slate-100"
                                                 onError={(e) => {
                                                     if (e.currentTarget.src !== '/placeholder.png') {
@@ -2932,7 +3293,7 @@ export default function StoreOrders() {
                                                 }}
                                             />
                                             <div className="flex-1">
-                                                <p className="font-medium text-slate-900">{item.productId?.name || item.product?.name || 'Unknown Product'}</p>
+                                                <p className="font-medium text-slate-900">{item.productId?.name || item.product?.name || item.name || item.productName || 'Unknown Product'}</p>
                                                 <p className="text-sm text-slate-600">Quantity: {item.quantity}</p>
                                                 <p className="text-sm font-semibold text-slate-900">{currency}{item.price} each</p>
                                             </div>
@@ -2969,7 +3330,19 @@ export default function StoreOrders() {
                                     </div>
                                     <div>
                                         <p className="text-slate-500">Payment Method</p>
-                                        <p className="font-medium text-slate-900">{selectedOrder.paymentMethod}</p>
+                                        {isEditingOrderDetails ? (
+                                            <select
+                                                value={String(selectedOrder.paymentMethod || '').toUpperCase()}
+                                                onChange={(e) => setSelectedOrder({ ...selectedOrder, paymentMethod: e.target.value })}
+                                                className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                            >
+                                                {PAYMENT_METHOD_OPTIONS.map((method) => (
+                                                    <option key={method.value} value={method.value}>{method.label}</option>
+                                                ))}
+                                            </select>
+                                        ) : (
+                                            <p className="font-medium text-slate-900">{selectedOrder.paymentMethod}</p>
+                                        )}
                                     </div>
                                     <div>
                                         <p className="text-slate-500">Payment Status</p>
@@ -3026,6 +3399,57 @@ export default function StoreOrders() {
                                     <div>
                                         <p className="text-slate-500">Order Date</p>
                                         <p className="font-medium text-slate-900">{new Date(selectedOrder.createdAt).toLocaleDateString()}</p>
+                                    </div>
+                                    <div className="md:col-span-3">
+                                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                                            <p className="text-sm font-semibold text-blue-900">Generate Customer Payment Link</p>
+                                            <p className="text-xs text-blue-700 mt-0.5">Use this when you want customer to pay updated amount online (card/UPI/netbanking).</p>
+
+                                            <div className="mt-3 flex flex-col md:flex-row gap-2">
+                                                <input
+                                                    type="number"
+                                                    min="1"
+                                                    step="0.01"
+                                                    value={paymentLinkAmount}
+                                                    onChange={(e) => setPaymentLinkAmount(e.target.value)}
+                                                    className="w-full md:w-56 px-3 py-2 rounded-lg border border-blue-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                    placeholder="Amount"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={createCustomerPaymentLink}
+                                                    disabled={creatingPaymentLink}
+                                                    className={`px-4 py-2 rounded-lg text-sm font-semibold text-white transition ${creatingPaymentLink ? 'bg-blue-300 cursor-wait' : 'bg-blue-600 hover:bg-blue-700'}`}
+                                                >
+                                                    {creatingPaymentLink ? 'Generating...' : 'Generate Link'}
+                                                </button>
+                                            </div>
+
+                                            {generatedPaymentLink && (
+                                                <div className="mt-3 flex flex-col md:flex-row gap-2">
+                                                    <input
+                                                        type="text"
+                                                        readOnly
+                                                        value={generatedPaymentLink}
+                                                        className="flex-1 px-3 py-2 rounded-lg border border-slate-300 text-xs md:text-sm text-slate-700 bg-white"
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={async () => {
+                                                            try {
+                                                                await navigator.clipboard.writeText(generatedPaymentLink);
+                                                                toast.success('Payment link copied');
+                                                            } catch {
+                                                                toast.error('Could not copy payment link');
+                                                            }
+                                                        }}
+                                                        className="px-4 py-2 rounded-lg text-sm font-semibold bg-slate-800 text-white hover:bg-slate-900 transition"
+                                                    >
+                                                        Copy Link
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                     <div className="md:col-span-3">
                                         <p className="text-slate-500 mb-1">Delivery Review</p>

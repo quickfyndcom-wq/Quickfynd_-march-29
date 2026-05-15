@@ -1326,7 +1326,7 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
           </div>
 
           {/* RIGHT: Product Info */}
-          <div className="bg-white -mx-4 sm:mx-0 rounded-t-3xl sm:rounded-lg p-4 lg:p-6 space-y-5 -mt-8 lg:mt-0 relative z-10 shadow-[0_-4px_24px_rgba(0,0,0,0.08)]">
+          <div className="bg-white -mx-4 sm:mx-0 rounded-t-3xl sm:rounded-lg p-4 lg:p-6 space-y-5 mt-2 lg:mt-0 relative z-10 shadow-[0_-4px_24px_rgba(0,0,0,0.08)]">
             {/* Special Offer - Countdown Timer */}
             {offerData?.countdownTimer && (
               <div className="mb-4">

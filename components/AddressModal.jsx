@@ -31,6 +31,7 @@ const AddressModal = ({ open, setShowAddressModal, onAddressAdded, initialAddres
     const [address, setAddress] = useState({
         name: '',
         email: '',
+        houseNumber: '',
         street: '',
         city: '',
         state: '',
@@ -68,12 +69,20 @@ const AddressModal = ({ open, setShowAddressModal, onAddressAdded, initialAddres
                 // Remove country code (everything before the actual number)
                 phoneNumber = phoneNumber.replace(/^\+\d+/, '').trim();
             }
+
+            const existingHouse = String(addressToEdit.houseNumber || '').trim();
+            const existingStreet = String(addressToEdit.street || '').trim();
+            let streetWithoutHouse = existingStreet;
+            if (existingHouse && existingStreet.toLowerCase().startsWith(`${existingHouse.toLowerCase()},`)) {
+                streetWithoutHouse = existingStreet.slice(existingHouse.length + 1).trim();
+            }
             
             setAddress({
                 id: addressToEdit.id || addressToEdit._id || null,
                 name: addressToEdit.name || '',
                 email: addressToEdit.email || '',
-                street: addressToEdit.street || '',
+                houseNumber: existingHouse,
+                street: streetWithoutHouse,
                 city: addressToEdit.city || '',
                 state: addressToEdit.state || '',
                 district: addressToEdit.district || '',
@@ -89,6 +98,7 @@ const AddressModal = ({ open, setShowAddressModal, onAddressAdded, initialAddres
             setAddress({
                 name: '',
                 email: '',
+                houseNumber: '',
                 street: '',
                 city: '',
                 state: '',
@@ -132,6 +142,62 @@ const AddressModal = ({ open, setShowAddressModal, onAddressAdded, initialAddres
             })
         }
     }
+
+    const composeStreetAddress = (currentAddress) => {
+        const houseNumber = String(currentAddress?.houseNumber || '').trim();
+        const street = String(currentAddress?.street || '').trim();
+        return [houseNumber, street].filter(Boolean).join(', ');
+    };
+
+    const getAddressStrength = (currentAddress) => {
+        const houseNumber = String(currentAddress?.houseNumber || '').trim();
+        const street = String(currentAddress?.street || '').trim();
+        const combined = `${houseNumber} ${street}`.trim();
+
+        if (!combined) return null;
+
+        const tokens = combined.split(/\s+/).filter(Boolean);
+        const looksLikeOneWord = tokens.length <= 1;
+
+        let score = 0;
+        if (houseNumber.length >= 2) score += 1;
+        if (/\d/.test(houseNumber)) score += 1;
+        if (street.length >= 8) score += 1;
+        if (tokens.length >= 3) score += 1;
+        if (/(near|opp|behind|road|rd|street|st|lane|ln|nagar|colony|apartment|apt|floor|fl|building|bldg|house)/i.test(combined)) {
+            score += 1;
+        }
+
+        if (looksLikeOneWord || combined.length < 8 || score <= 1) {
+            return {
+                label: 'Very weak address',
+                className: 'text-red-600',
+                helper: 'Address is too short. Add house/building number, street, area or landmark for safe delivery.'
+            };
+        }
+
+        if (score === 2) {
+            return {
+                label: 'Weak address',
+                className: 'text-amber-600',
+                helper: 'Add more details like area, landmark, apartment or floor to avoid delivery issues.'
+            };
+        }
+
+        if (score === 3) {
+            return {
+                label: 'Good address',
+                className: 'text-green-600',
+                helper: 'Looks good. You can still add a nearby landmark for easier delivery.'
+            };
+        }
+
+        return {
+            label: 'Strong address',
+            className: 'text-green-700',
+            helper: 'Address is detailed enough for delivery.'
+        };
+    };
 
     // Fetch pincode details from API
     const handlePincodeSearch = async (e) => {
@@ -220,11 +286,20 @@ const AddressModal = ({ open, setShowAddressModal, onAddressAdded, initialAddres
                     return;
                 }
             }
+
+            const houseNumber = String(address.houseNumber || '').trim();
+            const streetDetails = String(address.street || '').trim();
+            if (!houseNumber || !streetDetails) {
+                toast.error('Please enter house/building number and address details.');
+                return;
+            }
             
             const token = await getToken()
             
             // Prepare address data with userId from authenticated user
             const addressData = { ...address, userId: user.uid, phone: cleanedPhone };
+            addressData.houseNumber = houseNumber;
+            addressData.street = composeStreetAddress(address);
             addressData.zip = normalizedZip;
             addressData.alternatePhone = cleanedAlternate || '';
             addressData.alternatePhoneCode = cleanedAlternate ? address.alternatePhoneCode || address.phoneCode : '';
@@ -264,6 +339,7 @@ const AddressModal = ({ open, setShowAddressModal, onAddressAdded, initialAddres
             setAddress({
                 name: '',
                 email: '',
+                houseNumber: '',
                 street: '',
                 city: '',
                 state: '',
@@ -283,6 +359,7 @@ const AddressModal = ({ open, setShowAddressModal, onAddressAdded, initialAddres
     }
 
     if (!open) return null;
+    const addressStrength = getAddressStrength(address);
     return (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col my-8">
@@ -453,18 +530,38 @@ const AddressModal = ({ open, setShowAddressModal, onAddressAdded, initialAddres
                         />
                     </div>
 
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1.5">Street Address</label>
-                        <input 
-                            name="street" 
-                            onChange={handleAddressChange} 
-                            value={address.street} 
-                            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition" 
-                            type="text" 
-                            placeholder="Street" 
-                            required 
-                        />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1.5">House / Building No</label>
+                            <input 
+                                name="houseNumber" 
+                                onChange={handleAddressChange} 
+                                value={address.houseNumber} 
+                                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition" 
+                                type="text" 
+                                placeholder="House No, Flat No, Building" 
+                                required 
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Address Details</label>
+                            <input 
+                                name="street" 
+                                onChange={handleAddressChange} 
+                                value={address.street} 
+                                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition" 
+                                type="text" 
+                                placeholder="Street, Area, Landmark, Apartment, Floor" 
+                                required 
+                            />
+                        </div>
                     </div>
+                    {addressStrength && (
+                        <div className="-mt-2">
+                            <p className={`text-xs font-medium ${addressStrength.className}`}>{addressStrength.label}</p>
+                            <p className="text-xs text-gray-500 mt-0.5">{addressStrength.helper}</p>
+                        </div>
+                    )}
 
                     <div className="grid grid-cols-2 gap-4">
                         <div>

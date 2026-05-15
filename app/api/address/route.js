@@ -48,6 +48,7 @@ export async function POST(req) {
       userId,
       name: addr.name,
       email: addr.email,
+      houseNumber: addr.houseNumber || '',
       street: addr.street,
       city: addr.city,
       state: addr.state,
@@ -100,6 +101,7 @@ export async function PUT(req) {
     const data = {
       name: addr.name ?? existing.name,
       email: addr.email ?? existing.email,
+      houseNumber: addr.houseNumber ?? existing.houseNumber,
       street: addr.street ?? existing.street,
       city: addr.city ?? existing.city,
       state: addr.state ?? existing.state,

@@ -39,6 +39,10 @@ export async function POST(request) {
         await handlePaymentCaptured(event.payload.payment.entity);
         break;
 
+      case "payment_link.paid":
+        await handlePaymentLinkPaid(event.payload);
+        break;
+
       case "payment.failed":
         await handlePaymentFailed(event.payload.payment.entity);
         break;
@@ -70,15 +74,24 @@ async function handlePaymentCaptured(payment) {
   
   try {
     // Find order by razorpay payment ID
-    const order = await Order.findOne({ 
-      razorpayPaymentId: payment.id 
-    });
+    let order = await Order.findOne({ razorpayPaymentId: payment.id });
+
+    if (!order && payment?.notes?.orderId) {
+      order = await Order.findById(payment.notes.orderId);
+    }
+
+    if (!order && payment?.order_id) {
+      order = await Order.findOne({ razorpayOrderId: payment.order_id });
+    }
 
     if (order) {
       // Update order status if not already updated
       if (order.paymentStatus !== 'paid') {
+        order.paymentMethod = order.paymentMethod || 'CARD';
         order.paymentStatus = 'paid';
         order.isPaid = true;
+        order.razorpayPaymentId = payment.id;
+        if (payment?.order_id) order.razorpayOrderId = payment.order_id;
         order.paidAt = new Date();
         await order.save();
         console.log("[Webhook] Order updated:", order._id);
@@ -90,6 +103,42 @@ async function handlePaymentCaptured(payment) {
     }
   } catch (error) {
     console.error("[Webhook] Error handling payment.captured:", error);
+    throw error;
+  }
+}
+
+async function handlePaymentLinkPaid(payload) {
+  try {
+    const linkEntity = payload?.payment_link?.entity || payload?.payment_link || null;
+    const paymentEntity = payload?.payment?.entity || payload?.payment || null;
+
+    const paymentLinkId = linkEntity?.id || paymentEntity?.payment_link_id || null;
+    const orderIdFromNotes = paymentEntity?.notes?.orderId || linkEntity?.notes?.orderId || null;
+
+    let order = null;
+    if (orderIdFromNotes) {
+      order = await Order.findById(orderIdFromNotes);
+    }
+    if (!order && paymentLinkId) {
+      order = await Order.findOne({ paymentLinkId });
+    }
+
+    if (!order) {
+      console.warn('[Webhook] payment_link.paid received but order not found');
+      return;
+    }
+
+    order.paymentMethod = 'CARD';
+    order.paymentStatus = 'paid';
+    order.isPaid = true;
+    order.paidAt = new Date();
+    if (paymentEntity?.id) order.razorpayPaymentId = paymentEntity.id;
+    if (paymentEntity?.order_id) order.razorpayOrderId = paymentEntity.order_id;
+    await order.save();
+
+    console.log('[Webhook] payment_link.paid order updated:', order._id);
+  } catch (error) {
+    console.error('[Webhook] Error handling payment_link.paid:', error);
     throw error;
   }
 }

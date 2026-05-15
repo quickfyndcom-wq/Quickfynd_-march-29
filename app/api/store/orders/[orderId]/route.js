@@ -31,7 +31,19 @@ export async function PUT(request, { params }) {
         const { orderId } = await params;
 
         // Read update payload
-        const { status, trackingId, trackingUrl, courier } = await request.json();
+        const {
+            status,
+            trackingId,
+            trackingUrl,
+            courier,
+            paymentMethod,
+            shippingAddress,
+            guestName,
+            guestEmail,
+            guestPhone,
+            alternatePhone,
+            alternatePhoneCode
+        } = await request.json();
 
         // Verify the order belongs to this store
         const existingOrder = await Order.findOne({
@@ -59,12 +71,58 @@ export async function PUT(request, { params }) {
         if (trackingUrl !== undefined) updateData.trackingUrl = trackingUrl;
         if (courier !== undefined) updateData.courier = courier;
 
-        // Update the order
+        if (paymentMethod !== undefined) {
+            const normalizedPaymentMethod = String(paymentMethod || '').toUpperCase().trim();
+            const allowedPaymentMethods = new Set(['COD', 'CARD', 'RAZORPAY', 'WALLET', 'STRIPE']);
+            if (!allowedPaymentMethods.has(normalizedPaymentMethod)) {
+                return NextResponse.json({ error: 'Invalid payment method' }, { status: 400 });
+            }
+            updateData.paymentMethod = normalizedPaymentMethod;
+            if (normalizedPaymentMethod === 'COD') {
+                updateData.paymentStatus = 'PENDING';
+                updateData.isPaid = false;
+            } else if (!existingOrder.isPaid) {
+                updateData.paymentStatus = 'PENDING';
+            }
+        }
+
+        if (shippingAddress !== undefined) {
+            const incomingAddress = shippingAddress && typeof shippingAddress === 'object' ? shippingAddress : {};
+            const mergedAddress = {
+                ...(existingOrder.shippingAddress || {}),
+                ...incomingAddress,
+            };
+
+            const normalizedZip = String(mergedAddress.zip || mergedAddress.pincode || '').trim();
+            if (normalizedZip) {
+                mergedAddress.zip = normalizedZip;
+                mergedAddress.pincode = normalizedZip;
+            }
+
+            updateData.shippingAddress = mergedAddress;
+        }
+
+        if (guestName !== undefined) updateData.guestName = guestName;
+        if (guestEmail !== undefined) updateData.guestEmail = guestEmail;
+        if (guestPhone !== undefined) updateData.guestPhone = guestPhone;
+        if (alternatePhone !== undefined) updateData.alternatePhone = alternatePhone;
+        if (alternatePhoneCode !== undefined) updateData.alternatePhoneCode = alternatePhoneCode;
+
+        // Update the order and return populated document so UI keeps product/user details.
         const updatedOrder = await Order.findByIdAndUpdate(
             orderId,
             updateData,
             { new: true }
-        ).lean();
+        )
+        .populate({
+            path: 'userId',
+            select: 'email name'
+        })
+        .populate({
+            path: 'orderItems.productId',
+            model: 'Product'
+        })
+        .lean();
 
         // Decide what status value to send to the email service:
         // - If the request explicitly changed status, use the updated status.
