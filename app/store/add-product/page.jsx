@@ -496,6 +496,16 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
         setProductInfo(prev => ({ ...prev, reviews: prev.reviews.filter((_, i) => i !== index) }))
     }
 
+    const availableVariantImages = Object.entries(images)
+        .map(([key, media]) => {
+            const imageSrc = media?.preview || resolveImageUrl(media)
+            if (!imageSrc) return null
+            const isVideo = Boolean(media?.file?.type?.startsWith('video/')) || isVideoUrl(imageSrc)
+            if (isVideo) return null
+            return { key, imageSrc }
+        })
+        .filter(Boolean)
+
     const onSubmitHandler = async (e) => {
         e.preventDefault()
         try {
@@ -581,10 +591,7 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                     formData.set('mrp', String(variantsToSend[0].mrp))
                 }
             }
-            formData.append('hasVariants', String(hasVariantsFlag))
-            if (hasVariantsFlag) {
-                formData.append('variants', JSON.stringify(variantsToSend))
-            }
+            const uploadedImageBySlot = {}
 
             for (const key of Object.keys(images)) {
                 const img = images[key]
@@ -592,13 +599,36 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                     if (img.file) {
                         const uploadedUrl = await uploadMediaAndGetUrl(img.file, token)
                         formData.append('images', uploadedUrl)
+                        uploadedImageBySlot[String(key)] = uploadedUrl
                     } else {
                         const imageUrl = resolveImageUrl(img)
                         if (imageUrl) {
                             formData.append('images', imageUrl)
+                            uploadedImageBySlot[String(key)] = imageUrl
                         }
                     }
                 }
+            }
+
+            if (hasVariantsFlag && !bulkEnabled) {
+                variantsToSend = variantsToSend.map((variant) => {
+                    const slotKey = String(variant?.options?.imageSlot || '')
+                    const slotUrl = slotKey ? uploadedImageBySlot[slotKey] : null
+                    if (!slotUrl) return variant
+
+                    return {
+                        ...variant,
+                        options: {
+                            ...(variant.options || {}),
+                            image: slotUrl,
+                        },
+                    }
+                })
+            }
+
+            formData.append('hasVariants', String(hasVariantsFlag))
+            if (hasVariantsFlag) {
+                formData.append('variants', JSON.stringify(variantsToSend))
             }
 
             productInfo.reviews.forEach((rev, index) => {
@@ -1364,14 +1394,65 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                                             </div>
                                         </div>
 
-                                        {/* Image URL */}
+                                        {/* Variant Image Selection from uploaded product media */}
                                         <div>
-                                            <label className="block text-xs font-medium text-gray-600 mb-1">Image URL (Optional)</label>
-                                            <input className="w-full border rounded px-3 py-2" placeholder="https://example.com/image.jpg"
-                                                value={v.options?.image || ''}
-                                                onChange={(e)=>{
-                                                    const nv=[...variants]; nv[idx]={...v, options:{...(v.options||{}), image:e.target.value}}; setVariants(nv);
-                                                }} />
+                                            <label className="block text-xs font-medium text-gray-600 mb-1">Variant Image (Choose from uploaded product images)</label>
+                                            {availableVariantImages.length === 0 ? (
+                                                <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                                                    Upload product images above first, then select one for this variant.
+                                                </div>
+                                            ) : (
+                                                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                                                    {availableVariantImages.map((imgOption) => {
+                                                        const isSelected = String(v.options?.imageSlot || '') === imgOption.key || v.options?.image === imgOption.imageSrc
+                                                        return (
+                                                            <button
+                                                                key={imgOption.key}
+                                                                type="button"
+                                                                className={`relative border rounded overflow-hidden ${isSelected ? 'ring-2 ring-blue-500 border-blue-500' : 'border-gray-300 hover:border-gray-400'}`}
+                                                                onClick={() => {
+                                                                    const nv = [...variants]
+                                                                    nv[idx] = {
+                                                                        ...v,
+                                                                        options: {
+                                                                            ...(v.options || {}),
+                                                                            imageSlot: imgOption.key,
+                                                                            image: imgOption.imageSrc,
+                                                                        },
+                                                                    }
+                                                                    setVariants(nv)
+                                                                }}
+                                                            >
+                                                                <img src={imgOption.imageSrc} alt={`Variant option ${imgOption.key}`} className="w-full h-16 object-cover" />
+                                                                <span className="absolute bottom-0 left-0 right-0 text-[10px] bg-black/60 text-white px-1 py-0.5">Media {imgOption.key}</span>
+                                                            </button>
+                                                        )
+                                                    })}
+                                                </div>
+                                            )}
+                                            {!!v.options?.image && (
+                                                <div className="mt-2 flex items-center gap-2">
+                                                    <span className="text-xs text-green-700">Selected image set for this variant</span>
+                                                    <button
+                                                        type="button"
+                                                        className="text-xs text-red-600 hover:text-red-700"
+                                                        onClick={() => {
+                                                            const nv = [...variants]
+                                                            nv[idx] = {
+                                                                ...v,
+                                                                options: {
+                                                                    ...(v.options || {}),
+                                                                    image: '',
+                                                                    imageSlot: '',
+                                                                },
+                                                            }
+                                                            setVariants(nv)
+                                                        }}
+                                                    >
+                                                        Clear
+                                                    </button>
+                                                </div>
+                                            )}
                                         </div>
 
                                         {/* Pricing */}

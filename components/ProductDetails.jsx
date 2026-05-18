@@ -593,6 +593,24 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
     return variantColors.some(color => isVariantInStock(color, size));
   };
 
+  const getColorVariantImage = (color) => {
+    if (!color) return '';
+
+    const exactMatch = variants.find((variant) => {
+      const cOk = variant?.options?.color === color;
+      const sOk = selectedSize ? variant?.options?.size === selectedSize : true;
+      return cOk && sOk && variant?.options?.image;
+    });
+    if (exactMatch?.options?.image) return String(exactMatch.options.image);
+
+    const colorOnlyMatch = variants.find(
+      (variant) => variant?.options?.color === color && variant?.options?.image,
+    );
+    if (colorOnlyMatch?.options?.image) return String(colorOnlyMatch.options.image);
+
+    return '';
+  };
+
   useEffect(() => {
     const availableVariants = variants.filter(v => (v?.stock ?? 0) > 0);
     if (availableVariants.length === 1) {
@@ -1730,25 +1748,50 @@ const ProductDetails = ({ product, reviews = [], hideTitle = false, offerData = 
             {/* Color Options */}
             {variantColors.length > 0 && (
               <div className="space-y-2 pt-2">
-                <label className="text-sm font-semibold text-gray-900">Color</label>
-                <div className="flex flex-wrap gap-2">
+                <label className="text-sm font-semibold tracking-wide text-gray-700 uppercase">Colour Name</label>
+                <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
                   {variantColors.map((color) => {
                     const inStock = isColorAvailable(color);
+                    const colorImage = getColorVariantImage(color);
+                    const isSelected = selectedColor === color;
                     return (
                       <button
                         key={color}
-                        onClick={() => setSelectedColor(color)}
-                        className={`px-4 py-2 rounded-lg border-2 transition-all text-sm font-medium relative ${
-                          selectedColor === color
-                            ? 'border-orange-500 bg-orange-50 text-orange-700'
+                        onClick={() => {
+                          setSelectedColor(color);
+                          if (colorImage) {
+                            setMainImage(colorImage);
+                          }
+                        }}
+                        className={`w-[102px] min-w-[102px] h-[146px] rounded-xl border transition-all relative px-2 py-2.5 flex flex-col items-center justify-between ${
+                          isSelected
+                            ? 'border-gray-300 bg-gray-100 text-gray-900'
                             : inStock
-                            ? 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
-                            : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400 opacity-40'
+                            ? 'border-gray-200 bg-white text-gray-800 hover:border-gray-300'
+                            : 'border-gray-200 bg-white text-gray-500 opacity-60'
                         }`}
+                        title={color}
+                        aria-label={`Color ${color}`}
                       >
-                        {color}
+                        <div className="w-full h-[98px] rounded-lg bg-gray-50 overflow-hidden flex items-center justify-center">
+                          {colorImage ? (
+                            <img
+                              src={colorImage}
+                              alt={color}
+                              className="w-[72px] h-[72px] object-contain"
+                              onError={(e) => {
+                                e.currentTarget.src = PLACEHOLDER_IMAGE;
+                              }}
+                            />
+                          ) : (
+                            <div className="w-[72px] h-[72px] rounded-lg bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center text-sm text-gray-500 font-semibold">
+                              {color.slice(0, 1).toUpperCase()}
+                            </div>
+                          )}
+                        </div>
+                        <span className="text-[26px] sm:text-base font-medium leading-tight text-center break-words w-full">{color}</span>
                         {!inStock && (
-                          <span className="absolute -top-1 -right-1 text-[8px] bg-red-500 text-white px-1 py-0.5 rounded opacity-100">
+                          <span className="absolute top-1.5 right-1.5 text-[9px] bg-red-400 text-white px-1.5 py-0.5 rounded-full">
                             OUT
                           </span>
                         )}

@@ -24,6 +24,19 @@ import { getAuth } from '@/lib/firebase-admin';
 const ORDER_NUMBER_SEQUENCE_KEY = 'short_order_number';
 const ORDER_NUMBER_START = 52300;
 
+function getAdminNotificationEmails() {
+    const raw = String(process.env.ADMIN_EMAIL || process.env.NEXT_PUBLIC_ADMIN_EMAIL || '').trim();
+    if (!raw) return [];
+
+    return [...new Set(
+        raw
+            .replace(/["']/g, '')
+            .split(',')
+            .map((email) => email.trim())
+            .filter(Boolean)
+    )];
+}
+
 function hasValidShortOrderNumber(value) {
     if (value === null || value === undefined) return false;
     const normalized = String(value).trim();
@@ -1070,6 +1083,7 @@ export async function POST(request) {
         // Send order confirmation emails for successfully created orders (non-blocking)
         try {
             if (orderIds.length > 0) {
+                const adminNotificationEmails = getAdminNotificationEmails();
                 const createdOrders = await Order.find({ _id: { $in: orderIds } })
                     .populate('orderItems.productId')
                     .populate('userId')
@@ -1106,6 +1120,28 @@ export async function POST(request) {
                     });
 
                     console.log('[orders/create] Confirmation email sent for order', created?._id?.toString?.());
+
+                    if (adminNotificationEmails.length > 0) {
+                        for (const adminEmail of adminNotificationEmails) {
+                            try {
+                                await sendOrderConfirmationEmail({
+                                    email: adminEmail,
+                                    name: 'Admin',
+                                    orderId: created._id,
+                                    shortOrderNumber: created.shortOrderNumber,
+                                    total: created.total,
+                                    orderItems: created.orderItems || [],
+                                    shippingAddress: created.shippingAddress,
+                                    createdAt: created.createdAt,
+                                    paymentMethod: created.paymentMethod,
+                                });
+
+                                console.log('[orders/create] Admin confirmation copy sent for order', created?._id?.toString?.(), 'to', adminEmail);
+                            } catch (adminEmailError) {
+                                console.error('[orders/create] Admin confirmation copy failed for order', created?._id?.toString?.(), adminEmailError);
+                            }
+                        }
+                    }
                 }
             }
         } catch (emailError) {
