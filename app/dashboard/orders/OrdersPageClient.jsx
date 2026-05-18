@@ -861,11 +861,11 @@ export default function DashboardOrdersPage() {
           ) : (
             <div className="max-h-none md:max-h-[70vh] overflow-visible md:overflow-y-auto pr-0 md:pr-1 space-y-3 md:space-y-4">
               {filteredOrders.map((order) => {
-                const orderId = order._id || order.id
-                const isExpanded = expandedOrder === orderId
-                const orderItems = order.orderItems || []
-                const totalItems = orderItems.reduce((sum, item) => sum + (item.quantity || 0), 0)
-                const orderDate = new Date(order.createdAt).toLocaleDateString()
+                const orderId = order._id || order.id;
+                const isExpanded = expandedOrder === orderId;
+                const orderItems = order.orderItems || [];
+                const totalItems = orderItems.reduce((sum, item) => sum + (item.quantity || 0), 0);
+                const orderDate = new Date(order.createdAt).toLocaleDateString();
                 const statusTone =
                   order.status === 'DELIVERED' ? 'bg-green-100 text-green-700' :
                   order.status === 'OUT_FOR_DELIVERY' ? 'bg-teal-100 text-teal-700' :
@@ -879,8 +879,20 @@ export default function DashboardOrdersPage() {
                   order.status === 'RETURN_REQUESTED' ? 'bg-pink-100 text-pink-700' :
                   order.status === 'RETURNED' ? 'bg-pink-200 text-pink-800' :
                   order.status === 'CANCELLED' ? 'bg-red-100 text-red-700' :
-                  'bg-slate-100 text-slate-700'
-                
+                  'bg-slate-100 text-slate-700';
+
+                // Determine display name: guest shipping name or user name
+                let displayName = '';
+                if (order.isGuest && order.shippingAddress?.name) {
+                  displayName = order.shippingAddress.name;
+                } else if (order.userName) {
+                  displayName = order.userName;
+                } else if (user && user.displayName) {
+                  displayName = user.displayName;
+                } else {
+                  displayName = order.guestName || 'User';
+                }
+
                 return (
                   <div 
                     key={orderId} 
@@ -977,9 +989,9 @@ export default function DashboardOrdersPage() {
                               <p className="font-semibold text-slate-800">{getDisplayOrderNumber(order)}</p>
                               <button
                                 onClick={(e) => {
-                                  e.stopPropagation()
-                                  navigator.clipboard.writeText(orderId)
-                                  toast.success('Order ID copied!')
+                                  e.stopPropagation();
+                                  navigator.clipboard.writeText(orderId);
+                                  toast.success('Order ID copied!');
                                 }}
                                 className="p-1 hover:bg-slate-100 rounded transition"
                                 title="Copy full order ID"
@@ -990,6 +1002,10 @@ export default function DashboardOrdersPage() {
                                 </svg>
                               </button>
                             </div>
+                          </div>
+                          <div>
+                            <p className="text-xs text-slate-500">Customer</p>
+                            <p className="text-sm font-semibold text-slate-800">{displayName}</p>
                           </div>
                           <div>
                             <p className="text-xs text-slate-500">Date</p>
