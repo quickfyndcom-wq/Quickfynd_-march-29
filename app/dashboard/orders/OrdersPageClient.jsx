@@ -13,6 +13,53 @@ import ReviewForm from '@/components/ReviewForm'
 import { useSearchParams } from 'next/navigation'
 import { getDisplayOrderNumber } from '@/lib/orderNumber'
 
+const orderStatuses = [
+  { value: 'ALL', label: 'All Orders' },
+  { value: 'ORDER_PLACED', label: 'Order Placed' },
+  { value: 'CONFIRMED', label: 'Confirmed' },
+  { value: 'PROCESSING', label: 'Processing' },
+  { value: 'PICKUP_REQUESTED', label: 'Pickup Requested' },
+  { value: 'SHIPPED', label: 'Shipped' },
+  { value: 'IN_TRANSIT', label: 'In Transit' },
+  { value: 'OUT_FOR_DELIVERY', label: 'Out for Delivery' },
+  { value: 'DELIVERED', label: 'Delivered' },
+  { value: 'RETURNED', label: 'Returned' },
+  { value: 'CANCELLED', label: 'Cancelled' },
+  { value: 'RTO', label: 'RTO (Return to Origin)' }
+]
+
+const getPaymentStatus = (order) => {
+  const paymentMethod = String(order?.paymentMethod || '').toLowerCase()
+  const status = String(order?.status || '').toUpperCase()
+  const paymentStatus = String(order?.paymentStatus || '').toLowerCase()
+
+  if (status.toLowerCase() === 'returned') {
+    return false
+  }
+
+  if (['cancelled', 'rto'].includes(status.toLowerCase())) {
+    return null
+  }
+
+  if (paymentMethod === 'cod') {
+    return Boolean(order?.isPaid || order?.delhivery?.payment?.is_cod_recovered || status === 'DELIVERED')
+  }
+
+  if (!paymentStatus) {
+    return Boolean(order?.isPaid)
+  }
+
+  if (['paid', 'success', 'captured', 'completed'].includes(paymentStatus)) {
+    return true
+  }
+
+  if (['failed', 'payment_failed', 'refunded', 'unpaid', 'pending'].includes(paymentStatus)) {
+    return false
+  }
+
+  return Boolean(order?.isPaid)
+}
+
 export default function DashboardOrdersPage() {
   const searchParams = useSearchParams()
   const [user, setUser] = useState(undefined)
@@ -63,42 +110,6 @@ export default function DashboardOrdersPage() {
     setDeliveryPackageCondition('')
     setDeliveryDamagePhotoUrl('')
   }
-
-  const orderStatuses = [
-    { value: 'ALL', label: 'All Orders', icon: '📦' },
-    { value: 'CONFIRMED', label: 'Processing', icon: '⏳' },
-    { value: 'SHIPPED', label: 'Shipped', icon: '🚚' },
-    { value: 'OUT_FOR_DELIVERY', label: 'Out for Delivery', icon: '📍' },
-    { value: 'DELIVERED', label: 'Delivered', icon: '✅' },
-    { value: 'RETURN_REQUESTED', label: 'Return Requested', icon: '↩️' },
-    { value: 'RETURNED', label: 'Returned', icon: '↩️✓' },
-    { value: 'CANCELLED', label: 'Cancelled', icon: '❌' }
-  ]
-
-  // Helper function to compute correct payment status
-  const getPaymentStatus = (order) => {
-    const paymentMethod = String(order?.paymentMethod || '').toLowerCase();
-    const status = String(order?.status || '').toUpperCase();
-    const paymentStatus = String(order?.paymentStatus || '').toLowerCase();
-
-    // Cancelled / returned orders — no money changes hands, return null (not pending, not paid)
-    if (['CANCELLED', 'RETURNED', 'RTO', 'PAYMENT_FAILED'].includes(status)) return null;
-
-    if (paymentMethod === 'cod') {
-      if (status === 'DELIVERED') return true;
-      if (order?.delhivery?.payment?.is_cod_recovered) return true;
-      return !!order?.isPaid;
-    }
-
-    if (status === 'PAYMENT_FAILED') return false;
-    if (['failed', 'payment_failed', 'refunded', 'unpaid'].includes(paymentStatus)) return false;
-
-    // Razorpay/card/online orders should be considered paid unless explicitly failed
-    if (paymentMethod) return true;
-
-    return !!order?.isPaid;
-  }
-
 
   const canCancelOrder = (order) => {
     const status = String(order?.status || '').toUpperCase()
@@ -893,6 +904,18 @@ export default function DashboardOrdersPage() {
                   displayName = order.guestName || 'User';
                 }
 
+                const latestApprovedReturnRequest = Array.isArray(order.returns)
+                  ? [...order.returns].reverse().find(
+                      (req) => String(req?.type || '').toUpperCase() === 'RETURN' && String(req?.status || '').toUpperCase() === 'APPROVED'
+                    )
+                  : null
+
+                const latestApprovedReplacementRequest = Array.isArray(order.returns)
+                  ? [...order.returns].reverse().find(
+                      (req) => String(req?.type || '').toUpperCase() === 'REPLACEMENT' && String(req?.status || '').toUpperCase() === 'APPROVED'
+                    )
+                  : null
+
                 return (
                   <div 
                     key={orderId} 
@@ -945,7 +968,7 @@ export default function DashboardOrdersPage() {
                             <span className="inline-block px-2 py-0.5 text-[11px] font-medium rounded bg-gray-100 text-gray-500">N/A</span>
                           ) : (
                             <span className={`inline-block px-2 py-0.5 text-[11px] font-medium rounded ${getPaymentStatus(order) ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-                              {getPaymentStatus(order) ? 'Paid' : 'Pending'}
+                              {getPaymentStatus(order) ? '✓ Paid' : 'Pending'}
                             </span>
                           )}
                         </div>
@@ -1193,6 +1216,54 @@ export default function DashboardOrdersPage() {
                                   {returnReq.status === 'REQUESTED' && (
                                     <div className="mt-2 bg-yellow-100 border border-yellow-300 rounded-lg p-3">
                                       <p className="text-yellow-800 font-medium text-sm">⏳ Your request is under review. We'll update you soon.</p>
+                                    </div>
+                                  )}
+
+                                  {returnReq.status === 'APPROVED' && returnReq.type === 'RETURN' && (
+                                    <div className="mt-3 space-y-3">
+                                      {(returnReq.returnTrackingId || latestApprovedReturnRequest?.returnTrackingId || order.returnTrackingId) && (
+                                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                                          <p className="text-xs font-semibold text-blue-700 mb-2">Return Shipment Tracking (Customer to Seller)</p>
+                                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                                            <p className="text-slate-700"><span className="font-medium">Tracking ID:</span> {returnReq.returnTrackingId || latestApprovedReturnRequest?.returnTrackingId || order.returnTrackingId}</p>
+                                            <p className="text-slate-700"><span className="font-medium">Courier:</span> {returnReq.returnCourier || latestApprovedReturnRequest?.returnCourier || order.returnCourier || '-'}</p>
+                                          </div>
+                                          {(returnReq.returnTrackingUrl || latestApprovedReturnRequest?.returnTrackingUrl || order.returnTrackingUrl) && (
+                                            <a
+                                              href={returnReq.returnTrackingUrl || latestApprovedReturnRequest?.returnTrackingUrl || order.returnTrackingUrl}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="inline-block mt-2 text-sm text-blue-700 font-semibold hover:underline"
+                                            >
+                                              Track Return Shipment
+                                            </a>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {returnReq.status === 'APPROVED' && returnReq.type === 'REPLACEMENT' && (
+                                    <div className="mt-3 space-y-3">
+                                      {(returnReq.replacementTrackingId || latestApprovedReplacementRequest?.replacementTrackingId || order.replacementTrackingId) && (
+                                        <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+                                          <p className="text-xs font-semibold text-purple-700 mb-2">Replacement Shipment Tracking (Seller to Customer)</p>
+                                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                                            <p className="text-slate-700"><span className="font-medium">Tracking ID:</span> {returnReq.replacementTrackingId || latestApprovedReplacementRequest?.replacementTrackingId || order.replacementTrackingId}</p>
+                                            <p className="text-slate-700"><span className="font-medium">Courier:</span> {returnReq.replacementCourier || latestApprovedReplacementRequest?.replacementCourier || order.replacementCourier || '-'}</p>
+                                          </div>
+                                          {(returnReq.replacementTrackingUrl || latestApprovedReplacementRequest?.replacementTrackingUrl || order.replacementTrackingUrl) && (
+                                            <a
+                                              href={returnReq.replacementTrackingUrl || latestApprovedReplacementRequest?.replacementTrackingUrl || order.replacementTrackingUrl}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="inline-block mt-2 text-sm text-purple-700 font-semibold hover:underline"
+                                            >
+                                              Track Replacement Shipment
+                                            </a>
+                                          )}
+                                        </div>
+                                      )}
                                     </div>
                                   )}
                                 </div>
@@ -1577,7 +1648,7 @@ export default function DashboardOrdersPage() {
                         {(order.trackingId || order.trackingUrl || order.courier || order.delhivery) && (
                           <div className="bg-gradient-to-br from-slate-50 to-blue-50 border border-blue-200 md:border-2 rounded-xl p-3 md:p-6 space-y-3 md:space-y-5">
                             {/* Header */}
-<div className="flex items-center gap-2 md:gap-3 pb-2.5 md:pb-4 border-b border-blue-200 md:border-b-2">
+                            <div className="flex items-center gap-2 md:gap-3 pb-2.5 md:pb-4 border-b border-blue-200 md:border-b-2">
                                 <div className="w-9 h-9 md:w-10 md:h-10 bg-blue-600 rounded-full flex items-center justify-center">
                                   <svg className="w-5 h-5 md:w-6 md:h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
@@ -1592,7 +1663,7 @@ export default function DashboardOrdersPage() {
                               <div className="bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-xl p-3.5 md:p-5 shadow-lg">
                                 <div className="flex items-start gap-2.5 md:gap-3">
                                   <svg className="w-5 h-5 md:w-6 md:h-6 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 24 24">
-                                    <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+                                    <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
                                   </svg>
                                   <div className="flex-1">
                                     <p className="text-xs md:text-sm font-semibold opacity-90 mb-1">📍 Current Location</p>
@@ -1665,7 +1736,7 @@ export default function DashboardOrdersPage() {
                               <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-3.5 md:p-5">
                                 <div className="flex items-center gap-2 mb-3 md:mb-4">
                                   <svg className="w-5 h-5 text-orange-600" fill="currentColor" viewBox="0 0 24 24">
-                                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/>
+                                    <path d="M12 2C6.48 2 2 5.13 2 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
                                   </svg>
                                   <p className="text-sm font-bold text-slate-800">Tracking History</p>
                                 </div>

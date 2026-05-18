@@ -744,6 +744,8 @@ export default function StoreOrders() {
         const orderStatus = String(order?.status || '').trim().toUpperCase();
         const paymentStatus = String(order?.paymentStatus || '').trim().toLowerCase();
 
+        if (orderStatus === 'RETURNED' || orderStatus === 'RETURNED_REFUNDED') return false;
+
         // COD is paid only when delivered/collected
         if (paymentMethod === 'cod') {
             if (orderStatus === 'DELIVERED') return true;
@@ -1069,6 +1071,20 @@ export default function StoreOrders() {
         const replacementCourier = (trackingData.replacementCourier || '').trim();
         const replacementTrackingUrl = (trackingData.replacementTrackingUrl || '').trim();
 
+        const approvedReturnIndex = Array.isArray(selectedOrder?.returns)
+            ? [...selectedOrder.returns]
+                .map((ret, idx) => ({ ret, idx }))
+                .reverse()
+                .find(({ ret }) => String(ret?.type || '').toUpperCase() === 'RETURN' && String(ret?.status || '').toUpperCase().includes('APPROVED'))?.idx
+            : undefined;
+
+        const approvedReplacementIndex = Array.isArray(selectedOrder?.returns)
+            ? [...selectedOrder.returns]
+                .map((ret, idx) => ({ ret, idx }))
+                .reverse()
+                .find(({ ret }) => String(ret?.type || '').toUpperCase() === 'REPLACEMENT' && String(ret?.status || '').toUpperCase().includes('APPROVED'))?.idx
+            : undefined;
+
         if (!awb && !returnAwb && !replacementAwb) {
             toast.error('At least one tracking ID (order, return, or replacement) is required');
             return;
@@ -1084,11 +1100,14 @@ export default function StoreOrders() {
             trackingUrl = `https://www.delhivery.com/track-v2/package/${encodeURIComponent(awb)}`;
         }
 
-        // Auto-generate return tracking URL if not provided
-        if (!returnTrackingUrl && returnAwb && returnCourier.toLowerCase() === 'delhivery') {
-            const generatedReturnUrl = `https://www.delhivery.com/track-v2/package/${encodeURIComponent(returnAwb)}`;
-            trackingData.returnTrackingUrl = generatedReturnUrl;
-        }
+        // Auto-generate return/replacement tracking URLs if not provided
+        const computedReturnTrackingUrl = (!returnTrackingUrl && returnAwb && returnCourier.toLowerCase() === 'delhivery')
+            ? `https://www.delhivery.com/track-v2/package/${encodeURIComponent(returnAwb)}`
+            : returnTrackingUrl;
+
+        const computedReplacementTrackingUrl = (!replacementTrackingUrl && replacementAwb && replacementCourier.toLowerCase() === 'delhivery')
+            ? `https://www.delhivery.com/track-v2/package/${encodeURIComponent(replacementAwb)}`
+            : replacementTrackingUrl;
 
         // Auto-move status forward when tracking is added
         // If the order is still ORDER_PLACED or PROCESSING, treat it as SHIPPED
@@ -1104,16 +1123,65 @@ export default function StoreOrders() {
                 ...(awb && { trackingId: awb, courier: courierName }),
                 ...(trackingUrl && { trackingUrl }),
                 ...(returnAwb && { returnTrackingId: returnAwb, returnCourier }),
-                ...(returnTrackingUrl && { returnTrackingUrl }),
+                ...(computedReturnTrackingUrl && { returnTrackingUrl: computedReturnTrackingUrl }),
                 ...(replacementAwb && { replacementTrackingId: replacementAwb, replacementCourier }),
-                ...(replacementTrackingUrl && { replacementTrackingUrl })
+                ...(computedReplacementTrackingUrl && { replacementTrackingUrl: computedReplacementTrackingUrl }),
+                ...(typeof approvedReturnIndex === 'number' && { returnRequestIndex: approvedReturnIndex }),
+                ...(typeof approvedReplacementIndex === 'number' && { replacementRequestIndex: approvedReplacementIndex })
             };
 
-            await axios.put(`/api/store/orders/${selectedOrder._id}`, updatePayload, {
+            let { data } = await axios.put(`/api/store/orders/${selectedOrder._id}`, updatePayload, {
                 headers: { Authorization: `Bearer ${token}` }
             });
+
+            const hasValueInReturns = (orderObj, field, value) => Array.isArray(orderObj?.returns)
+                ? orderObj.returns.some(r => String(r?.[field] || '') === String(value || ''))
+                : false;
+
+            const returnSaved = !returnAwb || String(data?.order?.returnTrackingId || '') === String(returnAwb) || hasValueInReturns(data?.order, 'returnTrackingId', returnAwb);
+            const replacementSaved = !replacementAwb || String(data?.order?.replacementTrackingId || '') === String(replacementAwb) || hasValueInReturns(data?.order, 'replacementTrackingId', replacementAwb);
+
+            // Rare fallback: if first response still misses entered values, retry once with explicit payload.
+            if (!returnSaved || !replacementSaved) {
+                const retryPayload = {
+                    ...(returnAwb && { returnTrackingId: returnAwb, returnCourier }),
+                    ...(computedReturnTrackingUrl && { returnTrackingUrl: computedReturnTrackingUrl }),
+                    ...(replacementAwb && { replacementTrackingId: replacementAwb, replacementCourier }),
+                    ...(computedReplacementTrackingUrl && { replacementTrackingUrl: computedReplacementTrackingUrl }),
+                    ...(typeof approvedReturnIndex === 'number' && { returnRequestIndex: approvedReturnIndex }),
+                    ...(typeof approvedReplacementIndex === 'number' && { replacementRequestIndex: approvedReplacementIndex })
+                };
+                const retry = await axios.put(`/api/store/orders/${selectedOrder._id}`, retryPayload, {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+                if (retry?.data) data = retry.data;
+            }
             
             toast.success('Tracking details updated and customer notified!');
+
+            if (data?.order) {
+                const savedOrder = data.order;
+                const latestReturnRequest = Array.isArray(savedOrder.returns)
+                    ? [...savedOrder.returns].reverse().find(r => String(r?.type || '').toUpperCase() === 'RETURN' && String(r?.status || '').toUpperCase().includes('APPROVED'))
+                    : null;
+                const latestReplacementRequest = Array.isArray(savedOrder.returns)
+                    ? [...savedOrder.returns].reverse().find(r => String(r?.type || '').toUpperCase() === 'REPLACEMENT' && String(r?.status || '').toUpperCase().includes('APPROVED'))
+                    : null;
+
+                setSelectedOrder(savedOrder);
+                setOrders(prev => prev.map(o => o._id === savedOrder._id ? { ...o, ...savedOrder } : o));
+                setTrackingData({
+                    trackingId: savedOrder.trackingId || awb || '',
+                    trackingUrl: savedOrder.trackingUrl || trackingUrl || '',
+                    courier: savedOrder.courier || courierName || '',
+                    returnTrackingId: latestReturnRequest?.returnTrackingId || savedOrder.returnTrackingId || returnAwb || '',
+                    returnTrackingUrl: latestReturnRequest?.returnTrackingUrl || savedOrder.returnTrackingUrl || computedReturnTrackingUrl || '',
+                    returnCourier: latestReturnRequest?.returnCourier || savedOrder.returnCourier || returnCourier || '',
+                    replacementTrackingId: latestReplacementRequest?.replacementTrackingId || savedOrder.replacementTrackingId || replacementAwb || '',
+                    replacementTrackingUrl: latestReplacementRequest?.replacementTrackingUrl || savedOrder.replacementTrackingUrl || computedReplacementTrackingUrl || '',
+                    replacementCourier: latestReplacementRequest?.replacementCourier || savedOrder.replacementCourier || replacementCourier || ''
+                });
+            }
 
             // Refresh orders list
             await fetchOrders();
@@ -1127,11 +1195,24 @@ export default function StoreOrders() {
                 trackingUrl: trackingUrl || prev.trackingUrl,
                 returnTrackingId: returnAwb || prev.returnTrackingId,
                 returnCourier: returnCourier || prev.returnCourier,
-                returnTrackingUrl: returnTrackingUrl || prev.returnTrackingUrl,
+                returnTrackingUrl: computedReturnTrackingUrl || prev.returnTrackingUrl,
                 replacementTrackingId: replacementAwb || prev.replacementTrackingId,
                 replacementCourier: replacementCourier || prev.replacementCourier,
-                replacementTrackingUrl: replacementTrackingUrl || prev.replacementTrackingUrl
+                replacementTrackingUrl: computedReplacementTrackingUrl || prev.replacementTrackingUrl
             } : prev);
+
+            setTrackingData(prev => ({
+                ...prev,
+                trackingId: awb || prev.trackingId,
+                courier: courierName || prev.courier,
+                trackingUrl: trackingUrl || prev.trackingUrl,
+                returnTrackingId: returnAwb || prev.returnTrackingId,
+                returnCourier: returnCourier || prev.returnCourier,
+                returnTrackingUrl: computedReturnTrackingUrl || prev.returnTrackingUrl,
+                replacementTrackingId: replacementAwb || prev.replacementTrackingId,
+                replacementCourier: replacementCourier || prev.replacementCourier,
+                replacementTrackingUrl: computedReplacementTrackingUrl || prev.replacementTrackingUrl
+            }));
 
             // Trigger an immediate Delhivery refresh (if Delhivery courier)
             if (courierName.toLowerCase() === 'delhivery') {
@@ -1340,10 +1421,23 @@ export default function StoreOrders() {
                 }
             });
         }
+        const latestReturnRequest = Array.isArray(order.returns)
+            ? [...order.returns].reverse().find(r => String(r?.type || '').toUpperCase() === 'RETURN' && String(r?.status || '').toUpperCase().includes('APPROVED'))
+            : null;
+        const latestReplacementRequest = Array.isArray(order.returns)
+            ? [...order.returns].reverse().find(r => String(r?.type || '').toUpperCase() === 'REPLACEMENT' && String(r?.status || '').toUpperCase().includes('APPROVED'))
+            : null;
+
         setTrackingData({
             trackingId: order.trackingId || '',
             trackingUrl: isIndiaPost ? correctedTrackingUrl : (order.trackingUrl || ''),
-            courier: order.courier || ''
+            courier: order.courier || '',
+            returnTrackingId: latestReturnRequest?.returnTrackingId || order.returnTrackingId || '',
+            returnTrackingUrl: latestReturnRequest?.returnTrackingUrl || order.returnTrackingUrl || '',
+            returnCourier: latestReturnRequest?.returnCourier || order.returnCourier || '',
+            replacementTrackingId: latestReplacementRequest?.replacementTrackingId || order.replacementTrackingId || '',
+            replacementTrackingUrl: latestReplacementRequest?.replacementTrackingUrl || order.replacementTrackingUrl || '',
+            replacementCourier: latestReplacementRequest?.replacementCourier || order.replacementCourier || ''
         });
         // Reset India Post state for new order
         setIndiaPostAwb(order.courier?.toLowerCase().includes('india post') ? (order.trackingId || '') : '');
@@ -1442,7 +1536,13 @@ export default function StoreOrders() {
         setTrackingData({
             trackingId: '',
             trackingUrl: '',
-            courier: ''
+            courier: '',
+            returnTrackingId: '',
+            returnTrackingUrl: '',
+            returnCourier: '',
+            replacementTrackingId: '',
+            replacementTrackingUrl: '',
+            replacementCourier: ''
         });
     };
 
@@ -1467,7 +1567,7 @@ export default function StoreOrders() {
             return resolvedPaid ? 'RTO (Paid)' : 'RTO (Unpaid)';
         }
         if (status === 'RETURNED') {
-            return resolvedPaid ? 'Returned (Paid)' : 'Returned (Unpaid)';
+            return 'Returned (Unpaid)';
         }
         if (status === 'PAYMENT_FAILED') {
             return 'Payment Failed';
@@ -2760,7 +2860,7 @@ export default function StoreOrders() {
                                         </div>
 
                                         {/* Return Tracking Section */}
-                                        {selectedOrder?.returns && selectedOrder.returns.length > 0 && (
+                                        {selectedOrder?.returns && selectedOrder.returns.some(r => String(r?.type || '').toUpperCase() === 'RETURN' && String(r?.status || '').toUpperCase().includes('APPROVED')) && (
                                             <div className="border-t pt-4">
                                                 <h5 className="text-sm font-bold text-pink-700 mb-3 flex items-center gap-2">
                                                     <span>↩️</span> Return Tracking (Customer to Seller)
@@ -2801,7 +2901,7 @@ export default function StoreOrders() {
                                         )}
 
                                         {/* Replacement Tracking Section (only for REPLACEMENT type) */}
-                                        {selectedOrder?.returns && selectedOrder.returns.some(r => r.type === 'REPLACEMENT' && r.status === 'APPROVED') && (
+                                        {selectedOrder?.returns && selectedOrder.returns.some(r => String(r?.type || '').toUpperCase() === 'REPLACEMENT' && String(r?.status || '').toUpperCase().includes('APPROVED')) && (
                                             <div className="border-t pt-4">
                                                 <h5 className="text-sm font-bold text-violet-700 mb-3 flex items-center gap-2">
                                                     <span>📦</span> Replacement Tracking (Seller to Customer)

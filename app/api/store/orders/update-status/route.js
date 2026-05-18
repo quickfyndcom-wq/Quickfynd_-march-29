@@ -103,6 +103,9 @@ export async function POST(request) {
         order.status = status;
         const normalizedStatus = String(status || '').toUpperCase();
         const paymentMethod = (order.paymentMethod || '').toLowerCase();
+        const hasReturnRequest = Array.isArray(order.returns) && order.returns.some((request) => String(request?.type || '').toUpperCase() === 'RETURN');
+        const hasReplacementRequest = Array.isArray(order.returns) && order.returns.some((request) => String(request?.type || '').toUpperCase() === 'REPLACEMENT');
+        const isReplacementOnlyFlow = hasReplacementRequest && !hasReturnRequest;
         if (!order.inventoryRestock) {
             order.inventoryRestock = { cancelled: false, returned: false };
         }
@@ -124,6 +127,11 @@ export async function POST(request) {
         if (normalizedStatus === 'RETURNED' && previousStatus !== 'RETURNED' && !order.inventoryRestock.returned) {
             await restockOrderItems(order.orderItems || []);
             order.inventoryRestock.returned = true;
+        }
+
+        if ((normalizedStatus === 'RETURNED' || normalizedStatus === 'RETURNED_REFUNDED') && !isReplacementOnlyFlow) {
+            order.isPaid = false;
+            order.paymentStatus = 'UNPAID';
         }
 
         // Auto-mark COD orders as PAID when delivered

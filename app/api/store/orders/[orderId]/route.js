@@ -44,9 +44,11 @@ export async function PUT(request, { params }) {
             returnTrackingId,
             returnTrackingUrl,
             returnCourier,
+            returnRequestIndex,
             replacementTrackingId,
             replacementTrackingUrl,
             replacementCourier,
+            replacementRequestIndex,
             paymentMethod,
             shippingAddress,
             guestName,
@@ -75,9 +77,20 @@ export async function PUT(request, { params }) {
             return NextResponse.json({ error: 'Order not found or unauthorized' }, { status: 404 });
         }
 
+        const hasReturnRequest = Array.isArray(existingOrder.returns) && existingOrder.returns.some((request) => String(request?.type || '').toUpperCase() === 'RETURN');
+        const hasReplacementRequest = Array.isArray(existingOrder.returns) && existingOrder.returns.some((request) => String(request?.type || '').toUpperCase() === 'REPLACEMENT');
+        const isReplacementOnlyFlow = hasReplacementRequest && !hasReturnRequest;
+
         // Prepare update data
         const updateData = {};
         if (status !== undefined) updateData.status = status;
+        if (status !== undefined) {
+            const normalizedStatus = String(status || '').toUpperCase();
+            if ((normalizedStatus === 'RETURNED' || normalizedStatus === 'RETURNED_REFUNDED') && !isReplacementOnlyFlow) {
+                updateData.isPaid = false;
+                updateData.paymentStatus = 'UNPAID';
+            }
+        }
         if (trackingId !== undefined) updateData.trackingId = trackingId;
         if (trackingUrl !== undefined) updateData.trackingUrl = trackingUrl;
         if (courier !== undefined) updateData.courier = courier;
@@ -87,6 +100,59 @@ export async function PUT(request, { params }) {
         if (replacementTrackingId !== undefined) updateData.replacementTrackingId = replacementTrackingId;
         if (replacementTrackingUrl !== undefined) updateData.replacementTrackingUrl = replacementTrackingUrl;
         if (replacementCourier !== undefined) updateData.replacementCourier = replacementCourier;
+
+        // Keep nested returns[] tracking fields in sync with top-level tracking fields.
+        // Persist return/replacement tracking to their own request rows so saves never overwrite the wrong entry.
+        const hasReturnPatch = [returnTrackingId, returnTrackingUrl, returnCourier].some((v) => typeof v !== 'undefined');
+        const hasReplacementPatch = [replacementTrackingId, replacementTrackingUrl, replacementCourier].some((v) => typeof v !== 'undefined');
+
+        if ((hasReturnPatch || hasReplacementPatch) && Array.isArray(existingOrder.returns) && existingOrder.returns.length > 0) {
+            const pickIndexByType = (type) => {
+                const normalizedType = String(type || '').toUpperCase();
+                const byApproved = [...existingOrder.returns]
+                    .map((ret, idx) => ({ ret, idx }))
+                    .reverse()
+                    .find(({ ret }) => {
+                        const retType = String(ret?.type || '').toUpperCase();
+                        const retStatus = String(ret?.status || '').toUpperCase();
+                        return retType === normalizedType && retStatus.includes('APPROVED');
+                    })?.idx;
+
+                if (typeof byApproved === 'number') return byApproved;
+
+                const byType = [...existingOrder.returns]
+                    .map((ret, idx) => ({ ret, idx }))
+                    .reverse()
+                    .find(({ ret }) => String(ret?.type || '').toUpperCase() === normalizedType)?.idx;
+
+                if (typeof byType === 'number') return byType;
+
+                return existingOrder.returns.length - 1;
+            };
+
+            const requestedReturnIdx = Number.isInteger(returnRequestIndex) ? returnRequestIndex : Number(returnRequestIndex);
+            const requestedReplacementIdx = Number.isInteger(replacementRequestIndex) ? replacementRequestIndex : Number(replacementRequestIndex);
+
+            const returnIdx = (Number.isInteger(requestedReturnIdx) && requestedReturnIdx >= 0 && requestedReturnIdx < existingOrder.returns.length)
+                ? requestedReturnIdx
+                : pickIndexByType('RETURN');
+
+            const replacementIdx = (Number.isInteger(requestedReplacementIdx) && requestedReplacementIdx >= 0 && requestedReplacementIdx < existingOrder.returns.length)
+                ? requestedReplacementIdx
+                : pickIndexByType('REPLACEMENT');
+
+            if (hasReturnPatch && typeof returnIdx === 'number') {
+                if (returnTrackingId !== undefined) updateData[`returns.${returnIdx}.returnTrackingId`] = returnTrackingId;
+                if (returnTrackingUrl !== undefined) updateData[`returns.${returnIdx}.returnTrackingUrl`] = returnTrackingUrl;
+                if (returnCourier !== undefined) updateData[`returns.${returnIdx}.returnCourier`] = returnCourier;
+            }
+
+            if (hasReplacementPatch && typeof replacementIdx === 'number') {
+                if (replacementTrackingId !== undefined) updateData[`returns.${replacementIdx}.replacementTrackingId`] = replacementTrackingId;
+                if (replacementTrackingUrl !== undefined) updateData[`returns.${replacementIdx}.replacementTrackingUrl`] = replacementTrackingUrl;
+                if (replacementCourier !== undefined) updateData[`returns.${replacementIdx}.replacementCourier`] = replacementCourier;
+            }
+        }
 
         if (paymentMethod !== undefined) {
             const normalizedPaymentMethod = String(paymentMethod || '').toUpperCase().trim();
