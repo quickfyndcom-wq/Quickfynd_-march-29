@@ -1,0 +1,708 @@
+# Quickfynd LLM Context File (llms.txt)
+
+Version: 2 (expanded)
+Purpose: Deep orientation file for AI/code agents working in this repository.
+
+This repository is a production e-commerce platform built on Next.js app-router APIs,
+MongoDB (Mongoose), and selected PostgreSQL/Prisma integrations.
+
+Goals of this file:
+- Provide a reliable source of truth for architecture and task routing.
+- Minimize hallucinations by pointing to real docs, folders, and endpoint families.
+- Speed up debugging by defining where to look first for each issue class.
+- Define safe handling rules for secrets, credentials, and production operations.
+
+-----------------------------------------------------------------------
+1) Executive Snapshot
+-----------------------------------------------------------------------
+
+Name: Quickfynd
+Type: Full-stack e-commerce (web storefront + seller/admin + mobile support)
+Framework: Next.js (app router)
+Runtime: Node.js
+Package manager: npm
+Deployment style: Next.js build and standalone start supported
+
+Primary business flows:
+- Catalog browsing, product detail, featured/deals sections, category sliders.
+- Cart/checkout with coupon, wallet, COD/prepaid logic.
+- Order placement, order history, cancellation, delivery review, returns.
+- Courier integrations (Delhivery + India Post + 17track event path).
+- Mobile-app oriented APIs and account-linking from guest to authenticated users.
+- Seller/store operations: products, orders, customers, marketing, settings.
+- Messaging stack: transactional email, promotional email, WhatsApp webhook.
+
+-----------------------------------------------------------------------
+2) Runtime and Dependencies
+-----------------------------------------------------------------------
+
+Core framework/runtime:
+- next, react, react-dom
+
+Data layer:
+- mongoose (MongoDB)
+- prisma, @prisma/client
+- @prisma/adapter-neon, @neondatabase/serverless
+
+Payments:
+- razorpay
+- stripe
+
+Auth and identity:
+- firebase, firebase-admin
+
+Media and assets:
+- imagekit, imagekitio-next
+
+Automation and async workflows:
+- inngest
+
+Email/communication:
+- nodemailer
+- node-mailjet
+- resend
+- @emailjs/nodejs
+
+AI/search:
+- @google/generative-ai
+- openai
+
+Frontend state and UI:
+- @reduxjs/toolkit, react-redux
+- tailwindcss, postcss
+
+Important architectural note:
+- This repo includes both MongoDB-first application data and Prisma/Postgres setup.
+- Many operational and domain docs are maintained as top-level markdown guides.
+
+-----------------------------------------------------------------------
+3) Commands and Operational Entry Points
+-----------------------------------------------------------------------
+
+Install:
+- npm install
+
+Development:
+- npm run dev
+- npm run dev:turbo
+
+Build and serve:
+- npm run build
+- npm run start
+- npm run start:standalone
+- npm run start:legacy
+
+Quality check:
+- npm run lint
+
+Identity migration:
+- npm run migrate:user-identity-indexes
+- npm run migrate:user-identity-indexes:apply
+
+Useful scripts folder commands (run via node):
+- scripts/migrateUserIdentityIndexes.js
+- scripts/migrateOrderAddresses.js
+- scripts/verify-security.js
+- scripts/fixProductSlugs.js
+- scripts/fixProductImages.js
+- scripts/fixStoreAndProducts.js
+- scripts/removeBrokenProductImages.js
+- scripts/updateImageKitUrls.js
+- scripts/checkRecentOrders.js
+- scripts/checkOrder.js
+- scripts/checkAddresses.js
+- scripts/createTestOrders.js
+
+-----------------------------------------------------------------------
+4) High-Priority Docs to Read First
+-----------------------------------------------------------------------
+
+General onboarding path:
+1. README.md
+2. IMPLEMENTATION_COMPLETE_INDEX.md
+3. BACKEND_DOCUMENTATION_INDEX.md
+4. API_QUICK_REFERENCE.md
+5. DEPLOYMENT_CHECKLIST.md
+
+Mobile app integration path:
+1. MOBILE_APP_DEVELOPER_QUICKSTART.md
+2. MOBILE_API_HANDOFF.md
+3. MOBILE_AUTH_PROFILE_ORDER_TRACKING_IMPLEMENTATION_GUIDE.md
+4. CHECKOUT_WALLET_COUPON_OFFERS_COMPLETE_GUIDE.md
+
+Production deployment path:
+1. DEPLOYMENT_CHECKLIST.md
+2. BACKEND_DEPLOYMENT_CHECKLIST.md
+3. BACKEND_ACCOUNT_LINKING_DEPLOYMENT.md
+4. SECURITY_CHECKLIST.md
+
+-----------------------------------------------------------------------
+5) Repository Layout and Responsibilities
+-----------------------------------------------------------------------
+
+- app/
+	Next.js routes/pages and API route handlers.
+- app/api/
+	Main backend API surface (app-router handlers).
+- components/
+	Reusable UI components for storefront/admin screens.
+- lib/
+	Shared service wrappers (shipping, payment, email, auth, db helpers).
+- models/
+	Mongoose schemas and domain entities.
+- prisma/
+	Prisma schema and postgres-related data assets.
+- scripts/
+	One-off and repeatable maintenance/migration scripts.
+- middlewares/ and middleware.ts
+	Request pipeline/auth/security handling.
+- configs/
+	Config modules and feature config data.
+- inngest/
+	Event/workflow orchestration code.
+- public/
+	Publicly served assets and static files (including public/llms.txt).
+
+-----------------------------------------------------------------------
+6) API Surface Map (Grouped)
+-----------------------------------------------------------------------
+
+The repository contains a large API surface under app/api (200+ route handlers).
+Below is a grouped map of the main domains and representative routes.
+
+A) Auth, profile, identity, guest linking
+- app/api/profile/route.js
+- app/api/user/profile/route.js
+- app/api/user/link-identities/route.js
+- app/api/user/link-guest-orders/route.js
+- app/api/guest/convert-account/route.js
+- app/api/auth/otp/send/route.js
+- app/api/auth/otp/verify/route.js
+- app/api/account/delete/route.js
+
+B) Catalog, products, search, browse
+- app/api/products/route.js
+- app/api/products/by-slug/route.js
+- app/api/products/batch/route.js
+- app/api/products/top-rated/route.js
+- app/api/products/deals/route.js
+- app/api/products/[id]/fbt/route.js
+- app/api/categories/route.js
+- app/api/search-products/route.js
+- app/api/search-by-image/route.js
+- app/api/browse-history/route.js
+- app/api/customer/recent-searches/route.js
+
+C) Cart, checkout, pricing, coupon, wallet
+- app/api/cart/route.js
+- app/api/cart/validate/route.js
+- app/api/coupon/route.js
+- app/api/coupons/route.js
+- app/api/wallet/route.js
+- app/api/wallet/bonus/route.js
+- app/api/shipping/route.js
+- app/api/store/checkout/route.js
+
+D) Orders and post-order flows
+- app/api/orders/route.js
+- app/api/orders/cancel/route.js
+- app/api/orders/failed/route.js
+- app/api/orders/delivery-review/route.js
+- app/api/orders/return-request/route.js
+- app/api/orders/check-razorpay-settlement/route.js
+- app/api/return-request/route.js
+- app/api/track-order/route.js
+
+E) Payments and webhooks
+- app/api/razorpay/order/route.js
+- app/api/razorpay/verify/route.js
+- app/api/razorpay/webhook/route.js
+- app/api/webhooks/razorpay/route.js
+- app/api/stripe/route.js
+
+F) Courier and logistics
+- app/api/delhivery/waybill/route.js
+- app/api/delhivery/create-shipment/route.js
+- app/api/delhivery/track/route.js
+- app/api/delhivery/shipping-cost/route.js
+- app/api/delhivery/pincode-serviceability/route.js
+- app/api/delhivery/pickup-request/route.js
+- app/api/delhivery/label/route.js
+- app/api/indiapost/pincode/route.js
+- app/api/indiapost/booking/route.js
+- app/api/indiapost/tracking/bulk/route.js
+- app/api/indiapost/events/route.js
+- app/api/india-post-tracking/route.js
+- app/api/17track/webhook/route.js
+
+G) Store/seller/admin domain (selected)
+- app/api/store/profile/update/route.js
+- app/api/store/settings/route.js
+- app/api/store/products/pricing/route.js
+- app/api/store/orders/route.js
+- app/api/store/orders/[orderId]/route.js
+- app/api/store/orders/update-status/route.js
+- app/api/store/return-requests/route.js
+- app/api/store/customers/route.js
+- app/api/store/customers/wallet/route.js
+- app/api/store/sales-report/route.js
+- app/api/store/sales-report/export/route.js
+- app/api/store/coupons/route.js
+- app/api/store/coupon/[code]/route.js
+- app/api/store/deals/route.js
+- app/api/store/meta-integration/route.js
+- app/api/store/marketing-expenses/route.js
+- app/api/store/spin-campaign/route.js
+- app/api/store/referral-program/route.js
+- app/api/admin/dashboard/route.js
+- app/api/admin/categories/route.js
+- app/api/admin/stores/route.js
+
+H) Content/home/experience configuration
+- app/api/home/sections/route.js
+- app/api/home-selection/route.js
+- app/api/public/featured-sections/route.js
+- app/api/public/category-sliders/route.js
+- app/api/public/most-selling-products/route.js
+- app/api/store/hero-slider/route.js
+- app/api/store/home-categories/route.js
+- app/api/store/category-slider/route.js
+- app/api/store/category-menu/route.js
+
+I) Notifications, engagement, and support
+- app/api/notifications/order-status/route.js
+- app/api/notifications/guest-order/route.js
+- app/api/send-welcome-email/route.js
+- app/api/send-login-email/route.js
+- app/api/send-signout-email/route.js
+- app/api/send-shipping-email/route.js
+- app/api/promotional-emails/route.js
+- app/api/promotional-emails/templates/route.js
+- app/api/whatsapp-test/route.js
+- app/api/tickets/route.js
+- app/api/tickets/[ticketId]/route.js
+- app/api/store/tickets/route.js
+
+J) Analytics/experiments/debug/test helpers
+- app/api/analytics/customer-behavior/route.js
+- app/api/analytics/track-attribution/route.js
+- app/api/debug/mongodb/route.js
+- app/api/debug/sliders/route.js
+- app/api/test/setup/route.js
+- app/api/test/create-sample-coupon/route.js
+
+-----------------------------------------------------------------------
+7) Data Model Catalog (Mongoose)
+-----------------------------------------------------------------------
+
+Core commerce models:
+- models/User.js
+- models/GuestUser.js
+- models/Address.js
+- models/Product.js
+- models/Category.js
+- models/Order.js
+- models/OrderCounter.js
+- models/Coupon.js
+- models/Wallet.js
+- models/Deal.js
+- models/Rating.js
+
+Engagement and personalization:
+- models/BrowseHistory.js
+- models/RecentSearch.js
+- models/PersonalizedOffer.js
+- models/CustomerBehaviorEvent.js
+- models/WishlistItem.js
+
+Store/seller operations:
+- models/Store.js
+- models/StoreUser.js
+- models/StoreMenu.js
+- models/StoreNotificationSetting.js
+- models/SitemapSettings.js
+- models/ShippingSetting.js
+- models/MarketingExpense.js
+- models/MetaIntegration.js
+
+Homepage and merchandising config:
+- models/FeaturedSection.js
+- models/GridSection.js
+- models/HomeSection.js
+- models/HomeCategorySettings.js
+- models/HomeMenuCategorySettings.js
+- models/HeroSliderSettings.js
+- models/CategorySlider.js
+- models/NavbarMenuSettings.js
+- models/MobileBannerSettings.js
+- models/Section4.js
+
+Promotions/referrals/spin:
+- models/SpinCampaign.js
+- models/SpinLog.js
+- models/ReferralCode.js
+- models/ReferralProgramSettings.js
+- models/CustomerReferral.js
+- models/AppDownloadPromotionSettings.js
+
+Service/support/ops:
+- models/Ticket.js
+- models/ReturnRequest.js
+- models/OtpChallenge.js
+- models/Waybill.js
+- models/EmailTemplate.js
+- models/EmailHistory.js
+
+Note:
+- If a route references a model not listed above, inspect route imports first before adding docs.
+
+-----------------------------------------------------------------------
+8) Key Shared Libraries (lib/) by Concern
+-----------------------------------------------------------------------
+
+Database and auth:
+- lib/mongodb.js
+- lib/prisma.js
+- lib/verifyAuth.js
+- lib/firebase.js
+- lib/firebaseAdmin.js
+- lib/firebase-admin.js
+
+Shipping and logistics:
+- lib/delhivery.js
+- lib/delhiveryLtl.js
+- lib/indiaPost.js
+- lib/seventeentrack.js
+- lib/shipping.js
+- lib/generateAwbBill.js
+
+Orders and commerce rules:
+- lib/orderNumber.js
+- lib/orderInventory.js
+- lib/offerUtils.js
+- lib/rateLimit.js
+
+Payments and analytics:
+- lib/razorpay.js
+- lib/metaPixelClient.js
+- lib/customerBehaviorTracking.js
+
+Email and messaging:
+- lib/nodemailer.js
+- lib/emailService.js
+- lib/email.js
+- lib/emailjs.js
+- lib/promotionalEmailTemplates.js
+- lib/whatsapp-webhook.js
+
+Frontend state hooks and providers:
+- lib/store.js
+- lib/ReduxProvider.js
+- lib/useAuth.js
+- lib/useLocationTracking.js
+- lib/features/cart/cartSlice.js
+- lib/features/product/productSlice.js
+- lib/features/address/addressSlice.js
+- lib/features/rating/ratingSlice.js
+
+Utilities:
+- lib/cache.js
+- lib/productionChecks.js
+- lib/generateInvoice.js
+- lib/otp.js
+
+-----------------------------------------------------------------------
+9) Documentation Map by Domain
+-----------------------------------------------------------------------
+
+Platform-wide and architecture:
+- QUICKFYND_FEATURES_DOCUMENTATION.md
+- IMPLEMENTATION_COMPLETE_INDEX.md
+- IMPLEMENTATION_REPORT.md
+- REDESIGN_COMPLETE.md
+- PHASE_2_COMPLETION_SUMMARY.md
+
+API and backend references:
+- API_DOCUMENTATION.md
+- API_MINIMAL_LIST.md
+- API_QUICK_REFERENCE.md
+- BACKEND_DOCUMENTATION_COMPLETE.md
+- BACKEND_DOCUMENTATION_INDEX.md
+- BACKEND_QUICK_REFERENCE.md
+- BACKEND_REQUIREMENTS.md
+- SECTION4_API_DOCUMENTATION.md
+- PRODUCT_API_LIST.json
+
+Deployment and operations:
+- DEPLOYMENT_CHECKLIST.md
+- BACKEND_DEPLOYMENT_CHECKLIST.md
+- BACKEND_ACCOUNT_LINKING_DEPLOYMENT.md
+- QUICK_CHECKLIST.md
+- SECURITY_CHECKLIST.md
+
+Cart and checkout:
+- CART_INDEX.md
+- CART_ARCHITECTURE.md
+- CART_IMPLEMENTATION_GUIDE.md
+- CART_QUICK_REFERENCE.md
+- CART_TESTING_GUIDE.md
+- CART_COMPLETE_CHANGELOG.md
+- CART_FIX_SUMMARY.md
+- CART_VISUAL_DIAGRAMS.md
+- CHECKOUT_PAGE_DESCRIPTION.md
+- CHECKOUT_FIXES.md
+- CHECKOUT_WALLET_COUPON_OFFERS_COMPLETE_GUIDE.md
+
+Coupons, offers, deals:
+- COUPON_SYSTEM_FINAL_GUIDE.md
+- COUPON_QUICK_REFERENCE.md
+- COUPON_DEBUG_GUIDE.md
+- COUPON_VISUAL_FLOWS.md
+- PERSONALIZED_OFFERS_GUIDE.md
+- PERSONALIZED_OFFERS_QUICKSTART.md
+- DEALS_FEATURE_SUMMARY.md
+
+Orders, payments, conversion, and returns:
+- ORDER_NOW_AND_ORDER_DETAILS_GUIDE.md
+- CUSTOMER_RETURNS_GUIDE.md
+- IMPLEMENTATION_SUMMARY_PAYMENT_SYSTEM.md
+- PAYMENT_SETTLEMENT_COMPLETE.md
+- RAZORPAY_SETTLEMENT_INTEGRATION.md
+- COD_MAX_AMOUNT_FEATURE.md
+- COD_TO_PREPAID_CONVERSION_5PERCENT_DISCOUNT.md
+- ORDER_OPERATIONS_CREDENTIALS_AND_TIMELINE_GUIDE.md
+
+Shipping and tracking:
+- DELHIVERY_INDEX.md
+- DELHIVERY_QUICKSTART.md
+- DELHIVERY_INTEGRATION_GUIDE.md
+- DELHIVERY_COMPLETE.md
+- DELHIVERY_IMPLEMENTATION_SUMMARY.md
+- DELHIVERY_SUMMARY.md
+- DELHIVERY_CHECKLIST.md
+- DELHIVERY_AUTO_REFRESH_GUIDE.md
+- DELHIVERY_PAYMENT_COLLECTION.md
+- AWB_STATUS_TRACKING_GUIDE.md
+- INDIA_POST_AWB_DIMENSIONS_GUIDE.md
+- INDIA_POST_AWB_QUICK_FIX.md
+- MOBILE_TRACKING_INTEGRATION_GUIDE.md
+
+Mobile app integration:
+- MOBILE_APP_DEVELOPER_QUICKSTART.md
+- MOBILE_API_HANDOFF.md
+- MOBILE_AUTH_PROFILE_ORDER_TRACKING_IMPLEMENTATION_GUIDE.md
+- MOBILE_APP_WALLET_COUPONS_CHECKOUT_GUIDE.md
+- MOBILE_BANNER_API_DOCUMENTATION.md
+- MOBILE_SPECS_API_GUIDE.md
+- MOBILE_SPECS_TABLE_GUIDE.md
+- MOBILE_SPECS_TABLE_IMPLEMENTATION_GUIDE.md
+- APP_PRODUCT_PAGE_BULK_OPTIONS_VARIANTS_HANDOFF.md
+
+Guest checkout and account linking:
+- GUEST_CHECKOUT_IMPLEMENTATION_SUMMARY.md
+- GUEST_CHECKOUT_QUICK_REFERENCE.md
+- GUEST_CHECKOUT_VISUAL_GUIDE.md
+- GUEST_CHECKOUT_ACCOUNT_LINKING.md
+- BACKEND_ACCOUNT_LINKING_DEPLOYMENT.md
+
+Marketing, ads, communication:
+- ADS_TRACKING_COMPLETE_GUIDE.md
+- META_ADS_INTEGRATION_GUIDE.md
+- EMAIL_NOTIFICATIONS.md
+- EMAIL_TRACKING_SETUP.md
+- EMAIL_DESIGN_ENHANCEMENTS.md
+- EMAIL_VISUAL_DESIGN.md
+- PREMIUM_EMAIL_REDESIGN_SUMMARY.md
+- PROMOTIONAL_EMAILS_GUIDE.md
+- PROMOTIONAL_EMAIL_TEMPLATES_GUIDE.md
+- TICKET_EMAIL_SETUP.md
+- WHATSAPP_WEBHOOK_INTEGRATION.md
+- WHATSAPP_DEBUG_GUIDE.md
+- WHATSAPP_FIX_AND_TEST.md
+
+Product and content experience:
+- PRODUCT_DETAILS_DOCUMENTATION.md
+- FBT_FEATURE_DOCUMENTATION.md
+- HERO_BANNER_PERFORMANCE.md
+- MEDIA_MANAGER_IMPLEMENTATION.md
+- MEDIA_MANAGER_QUICK_REF.md
+- MOBILE_DESCRIPTION_RENDER_GUIDE.md
+- IMAGE_SEARCH_ALGORITHM.md
+- STORE_CATEGORIES_REDESIGN.md
+
+Other business and support:
+- CUSTOMER_DASHBOARD_DOCUMENTATION.md
+- INVOICE_CUSTOMIZATION.md
+- SALES_REPORT_DOCUMENTATION.md
+- LINK_VERIFICATION_REPORT.md
+- VISUAL_BEFORE_AFTER.md
+- DELIVERY_TIME_FREE_SHIPPING_MOBILE_GUIDE.md
+
+App-specific promotional systems:
+- APP_SPIN_API_APP_DEVELOPER.md
+- APP_SPIN_DEPLOYMENT_CHECKLIST.md
+- APP_SPIN_PROMOTIONS_INTEGRATION_GUIDE.md
+- APP_REFERRAL_API_APP_DEVELOPER.md
+- APP_COUPONS_DISCOUNTS_INTEGRATION_GUIDE.md
+- SPIN_WHEEL_FULL_INTEGRATION_GUIDE.md
+
+-----------------------------------------------------------------------
+10) Environment Variable Contract (Names Only)
+-----------------------------------------------------------------------
+
+Rules:
+- Never output actual secret values in logs/docs/responses.
+- Use placeholders in examples.
+- Rotate any credential that may have been exposed outside secure channels.
+
+Expected variable groups in this project:
+
+App/runtime/public:
+- NEXT_PUBLIC_BASE_URL
+- NEXT_PUBLIC_APP_URL
+- NEXT_PUBLIC_CURRENCY_SYMBOL
+- NEXT_PUBLIC_ADMIN_EMAIL
+
+Database:
+- MONGODB_URI
+- DATABASE_URL
+- DIRECT_URL
+
+Firebase/auth:
+- NEXT_PUBLIC_FIREBASE_API_KEY
+- NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+- NEXT_PUBLIC_FIREBASE_PROJECT_ID
+- NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+- NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+- NEXT_PUBLIC_FIREBASE_APP_ID
+- NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID
+- FIREBASE_SERVICE_ACCOUNT_KEY
+- NEXT_PUBLIC_GOOGLE_ONE_TAP_CLIENT_ID
+
+Payment:
+- NEXT_PUBLIC_RAZORPAY_KEY_ID
+- RAZORPAY_KEY_SECRET
+- RAZORPAY_MERCHANT_ID
+- STRIPE_SECRET_KEY
+- STRIPE_WEBHOOK_SECRET
+
+Shipping/courier/tracking:
+- DELHIVERY_API_TOKEN
+- DELHIVERY_LTL_USERNAME
+- DELHIVERY_LTL_PASSWORD
+- DELHIVERY_LTL_BASE_URL
+- SEVENTEENTRACK_API_KEY
+
+Media/storage:
+- IMAGEKIT_PUBLIC_KEY
+- IMAGEKIT_PRIVATE_KEY
+- IMAGEKIT_URL_ENDPOINT
+- NEXT_PUBLIC_IMAGEKIT_PUBLIC_KEY
+- NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT
+
+Email and messaging:
+- SMTP_HOST
+- SMTP_PORT
+- SMTP_USER
+- SMTP_PASS
+- MAILJET_API_KEY
+- MAILJET_SECRET_KEY
+- RESEND_API_KEY
+- EMAIL_FROM
+- EMAIL_FROM_TRANSACTIONAL
+- EMAIL_FROM_MARKETING
+- WHATSPORTAL_WEBHOOK_URL
+- WHATSPORTAL_WEBHOOK_TOKEN
+
+AI and automation:
+- GEMINI_API_KEY
+- OPENAI_BASE_URL
+- OPENAI_MODEL
+- INNGEST_EVENT_KEY
+- INNGEST_SIGNING_KEY
+
+-----------------------------------------------------------------------
+11) Task-Oriented Playbooks for LLM Agents
+-----------------------------------------------------------------------
+
+If task is cart or checkout bug:
+- Read CART_INDEX.md, CART_IMPLEMENTATION_GUIDE.md, CHECKOUT_FIXES.md.
+- Inspect app/api/cart/* and app/api/store/checkout/route.js.
+- Validate coupon/wallet interplay via app/api/coupon*, app/api/wallet*.
+
+If task is mobile app API mismatch:
+- Read MOBILE_APP_DEVELOPER_QUICKSTART.md and MOBILE_API_HANDOFF.md.
+- Check profile/account-linking routes first.
+- Compare expected headers/source markers before payload-level debugging.
+
+If task is order placement or payment failure:
+- Inspect app/api/orders/route.js and razorpay/stripe routes.
+- Verify webhook route behavior and signature handling.
+- Cross-check COD/prepaid conversion docs and settlement guides.
+
+If task is customer returns, replacements, or refunds:
+- Read CUSTOMER_RETURNS_GUIDE.md (comprehensive end-to-end).
+- Inspect app/api/return-request/route.js and app/api/orders/delivery-review/route.js.
+- Check models/ReturnRequest.js and Order.returns sub-schema.
+- Verify seller return approval flow in app/api/store/return-requests/route.js.
+
+If task is courier/tracking issue:
+- Start with app/api/track-order/route.js and delhivery/indiapost routes.
+- Confirm AWB generation and pickup request routes.
+- Read DELHIVERY_* and INDIA_POST_* guides for expected status transitions.
+
+If task is store/admin dashboard issue:
+- Focus on app/api/store/* and app/api/admin/* family.
+- Inspect model relations in Store, StoreUser, Product, Order.
+- Verify permissions and role assumptions in route-level auth.
+
+If task is email/notification issue:
+- Inspect lib/nodemailer.js, lib/emailService.js, template/history models.
+- Verify route-specific triggers in send-* endpoints.
+- Check provider-specific setup docs before code changes.
+
+-----------------------------------------------------------------------
+12) Safety, Security, and Production Change Rules
+-----------------------------------------------------------------------
+
+Non-negotiables for agent behavior:
+- Never print credentials, keys, tokens, private keys, or full connection strings.
+- Never commit raw secrets into tracked files.
+- Prefer .env placeholders in documentation snippets.
+- For security-sensitive fixes, propose rotation and invalidation steps.
+- For migrations, run dry-run or verification scripts before apply.
+
+Production-safe workflow:
+1. Read relevant domain docs.
+2. Locate exact route/model/lib touched.
+3. Implement narrow change.
+4. Run lint/build or targeted checks.
+5. Verify no secret leakage in logs/diffs.
+6. Update docs and this llms.txt if behavior changed.
+
+-----------------------------------------------------------------------
+13) Known Cross-Cutting Concerns
+-----------------------------------------------------------------------
+
+- Hybrid data strategy (Mongo + Prisma/Postgres) requires care in assumptions.
+- Guest-to-user linking and identity normalization impacts profile/order visibility.
+- Checkout stack combines coupons, wallet, COD rules, and shipping decisions.
+- Multi-provider communications stack means fallback paths can diverge.
+- Route count is high; always identify exact handler path before changing logic.
+
+-----------------------------------------------------------------------
+14) Maintenance Policy for this File
+-----------------------------------------------------------------------
+
+Update this file whenever:
+- New major API families are introduced.
+- Data model structure changes materially.
+- New third-party integrations are added or replaced.
+- Deployment scripts or migration process changes.
+- Documentation entry points are renamed.
+
+Recommended PR rule:
+- Any significant architecture or API change should include llms.txt updates.
+
+Public availability:
+- Keep root llms.txt and public/llms.txt in sync.
