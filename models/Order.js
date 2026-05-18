@@ -83,7 +83,40 @@ const OrderSchema = new mongoose.Schema({
     approvedAt: Date,
     rejectionReason: String,
     sellerNotes: String,
+    // Return Shipment Tracking (Customer to Seller)
+    returnTrackingId: String,
+    returnCourier: String,
+    returnTrackingUrl: String,
+    returnShippingLabel: String,
+    returnAddress: {
+      name: String,
+      street: String,
+      city: String,
+      state: String,
+      zip: String,
+      country: String,
+      phone: String
+    },
+    returnShipmentStatus: String,
+    returnDeliveredAt: Date,
+    // Replacement Shipment Tracking (Seller to Customer)
+    replacementTrackingId: String,
+    replacementCourier: String,
+    replacementTrackingUrl: String,
+    replacementShippingLabel: String,
+    replacementShipmentStatus: String,
+    replacementDeliveredAt: Date,
+    replacementEta: String,
+    sellerInspectionNotes: String
   }],
+  
+  // Top-level tracking fields for easier access
+  returnTrackingId: String,
+  returnTrackingUrl: String,
+  returnCourier: String,
+  replacementTrackingId: String,
+  replacementTrackingUrl: String,
+  replacementCourier: String,
   
   // Delivery Review & Feedback
   deliveryReview: {

@@ -41,6 +41,12 @@ export async function PUT(request, { params }) {
             trackingId,
             trackingUrl,
             courier,
+            returnTrackingId,
+            returnTrackingUrl,
+            returnCourier,
+            replacementTrackingId,
+            replacementTrackingUrl,
+            replacementCourier,
             paymentMethod,
             shippingAddress,
             guestName,
@@ -75,6 +81,12 @@ export async function PUT(request, { params }) {
         if (trackingId !== undefined) updateData.trackingId = trackingId;
         if (trackingUrl !== undefined) updateData.trackingUrl = trackingUrl;
         if (courier !== undefined) updateData.courier = courier;
+        if (returnTrackingId !== undefined) updateData.returnTrackingId = returnTrackingId;
+        if (returnTrackingUrl !== undefined) updateData.returnTrackingUrl = returnTrackingUrl;
+        if (returnCourier !== undefined) updateData.returnCourier = returnCourier;
+        if (replacementTrackingId !== undefined) updateData.replacementTrackingId = replacementTrackingId;
+        if (replacementTrackingUrl !== undefined) updateData.replacementTrackingUrl = replacementTrackingUrl;
+        if (replacementCourier !== undefined) updateData.replacementCourier = replacementCourier;
 
         if (paymentMethod !== undefined) {
             const normalizedPaymentMethod = String(paymentMethod || '').toUpperCase().trim();

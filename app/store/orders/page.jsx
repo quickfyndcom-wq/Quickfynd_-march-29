@@ -162,7 +162,13 @@ export default function StoreOrders() {
     const [trackingData, setTrackingData] = useState({
         trackingId: '',
         trackingUrl: '',
-        courier: ''
+        courier: '',
+        returnTrackingId: '',
+        returnTrackingUrl: '',
+        returnCourier: '',
+        replacementTrackingId: '',
+        replacementTrackingUrl: '',
+        replacementCourier: ''
     });
     const [indiaPostAwb, setIndiaPostAwb] = useState('');
     const [indiaPostTracking, setIndiaPostTracking] = useState(null);
@@ -1053,19 +1059,35 @@ export default function StoreOrders() {
         let courierName = (trackingData.courier || selectedOrder?.courier || '').trim();
         let trackingUrl = (trackingData.trackingUrl || '').trim();
 
-        if (!awb) {
-            toast.error('AWB / Tracking ID is required');
+        // Return tracking fields
+        const returnAwb = (trackingData.returnTrackingId || '').trim();
+        const returnCourier = (trackingData.returnCourier || '').trim();
+        const returnTrackingUrl = (trackingData.returnTrackingUrl || '').trim();
+
+        // Replacement tracking fields
+        const replacementAwb = (trackingData.replacementTrackingId || '').trim();
+        const replacementCourier = (trackingData.replacementCourier || '').trim();
+        const replacementTrackingUrl = (trackingData.replacementTrackingUrl || '').trim();
+
+        if (!awb && !returnAwb && !replacementAwb) {
+            toast.error('At least one tracking ID (order, return, or replacement) is required');
             return;
         }
 
         // If courier is not set, assume Delhivery (for AWB-based tracking)
-        if (!courierName) {
+        if (!courierName && awb) {
             courierName = 'Delhivery';
         }
 
         // For Delhivery, if no tracking URL entered, auto-generate using AWB
-        if (!trackingUrl && courierName.toLowerCase() === 'delhivery') {
+        if (!trackingUrl && courierName.toLowerCase() === 'delhivery' && awb) {
             trackingUrl = `https://www.delhivery.com/track-v2/package/${encodeURIComponent(awb)}`;
+        }
+
+        // Auto-generate return tracking URL if not provided
+        if (!returnTrackingUrl && returnAwb && returnCourier.toLowerCase() === 'delhivery') {
+            const generatedReturnUrl = `https://www.delhivery.com/track-v2/package/${encodeURIComponent(returnAwb)}`;
+            trackingData.returnTrackingUrl = generatedReturnUrl;
         }
 
         // Auto-move status forward when tracking is added
@@ -1077,15 +1099,21 @@ export default function StoreOrders() {
         
         try {
             const token = await getToken();
-            await axios.put(`/api/store/orders/${selectedOrder._id}`, {
+            const updatePayload = {
                 status: nextStatus,
-                trackingId: awb,
-                trackingUrl,
-                courier: courierName
-            }, {
+                ...(awb && { trackingId: awb, courier: courierName }),
+                ...(trackingUrl && { trackingUrl }),
+                ...(returnAwb && { returnTrackingId: returnAwb, returnCourier }),
+                ...(returnTrackingUrl && { returnTrackingUrl }),
+                ...(replacementAwb && { replacementTrackingId: replacementAwb, replacementCourier }),
+                ...(replacementTrackingUrl && { replacementTrackingUrl })
+            };
+
+            await axios.put(`/api/store/orders/${selectedOrder._id}`, updatePayload, {
                 headers: { Authorization: `Bearer ${token}` }
             });
-            toast.success('Tracking details updated, status set to Shipped & customer notified!');
+            
+            toast.success('Tracking details updated and customer notified!');
 
             // Refresh orders list
             await fetchOrders();
@@ -1094,9 +1122,15 @@ export default function StoreOrders() {
             setSelectedOrder(prev => prev ? {
                 ...prev,
                 status: nextStatus,
-                trackingId: awb,
-                courier: courierName,
-                trackingUrl
+                trackingId: awb || prev.trackingId,
+                courier: courierName || prev.courier,
+                trackingUrl: trackingUrl || prev.trackingUrl,
+                returnTrackingId: returnAwb || prev.returnTrackingId,
+                returnCourier: returnCourier || prev.returnCourier,
+                returnTrackingUrl: returnTrackingUrl || prev.returnTrackingUrl,
+                replacementTrackingId: replacementAwb || prev.replacementTrackingId,
+                replacementCourier: replacementCourier || prev.replacementCourier,
+                replacementTrackingUrl: replacementTrackingUrl || prev.replacementTrackingUrl
             } : prev);
 
             // Trigger an immediate Delhivery refresh (if Delhivery courier)
@@ -2680,87 +2714,187 @@ export default function StoreOrders() {
                                     </div>
                                 ) : null}
 
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                    <div>
-                                        <label className="text-xs font-medium text-slate-700 block mb-1">AWB / Tracking ID *</label>
-                                        <input
-                                            type="text"
-                                            value={trackingData.trackingId}
-                                            onChange={e => setTrackingData({...trackingData, trackingId: e.target.value})}
-                                            placeholder="Enter Delhivery AWB or courier tracking ID"
-                                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                                        />
+                                <div className="bg-orange-50 border-2 border-orange-200 rounded-xl p-5">
+                                    <h4 className="text-lg font-semibold text-orange-900 mb-4 flex items-center gap-2">
+                                        <span>📦</span> Tracking Information
+                                    </h4>
+
+                                    {/* Order Tracking Section */}
+                                    <div className="space-y-4">
+                                        <div>
+                                            <h5 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
+                                                <span>📮</span> Order Tracking (Customer to Warehouse)
+                                            </h5>
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                                <div>
+                                                    <label className="text-xs font-medium text-slate-700 block mb-1">Tracking ID *</label>
+                                                    <input
+                                                        type="text"
+                                                        value={trackingData.trackingId}
+                                                        onChange={e => setTrackingData({...trackingData, trackingId: e.target.value})}
+                                                        placeholder="Enter Delhivery AWB or courier tracking ID"
+                                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="text-xs font-medium text-slate-700 block mb-1">Courier Name *</label>
+                                                    <input
+                                                        type="text"
+                                                        value={trackingData.courier}
+                                                        onChange={e => setTrackingData({...trackingData, courier: e.target.value})}
+                                                        placeholder="e.g., FedEx, DHL, UPS"
+                                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="text-xs font-medium text-slate-700 block mb-1">Tracking URL</label>
+                                                    <input
+                                                        type="url"
+                                                        value={trackingData.trackingUrl}
+                                                        onChange={e => setTrackingData({...trackingData, trackingUrl: e.target.value})}
+                                                        placeholder="https://..."
+                                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Return Tracking Section */}
+                                        {selectedOrder?.returns && selectedOrder.returns.length > 0 && (
+                                            <div className="border-t pt-4">
+                                                <h5 className="text-sm font-bold text-pink-700 mb-3 flex items-center gap-2">
+                                                    <span>↩️</span> Return Tracking (Customer to Seller)
+                                                </h5>
+                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                                    <div>
+                                                        <label className="text-xs font-medium text-slate-700 block mb-1">Return Tracking ID</label>
+                                                        <input
+                                                            type="text"
+                                                            value={trackingData.returnTrackingId}
+                                                            onChange={e => setTrackingData({...trackingData, returnTrackingId: e.target.value})}
+                                                            placeholder="Enter return AWB or tracking ID"
+                                                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-xs font-medium text-slate-700 block mb-1">Return Courier</label>
+                                                        <input
+                                                            type="text"
+                                                            value={trackingData.returnCourier}
+                                                            onChange={e => setTrackingData({...trackingData, returnCourier: e.target.value})}
+                                                            placeholder="e.g., DHL, Delhivery"
+                                                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-xs font-medium text-slate-700 block mb-1">Return Tracking URL</label>
+                                                        <input
+                                                            type="url"
+                                                            value={trackingData.returnTrackingUrl}
+                                                            onChange={e => setTrackingData({...trackingData, returnTrackingUrl: e.target.value})}
+                                                            placeholder="https://..."
+                                                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Replacement Tracking Section (only for REPLACEMENT type) */}
+                                        {selectedOrder?.returns && selectedOrder.returns.some(r => r.type === 'REPLACEMENT' && r.status === 'APPROVED') && (
+                                            <div className="border-t pt-4">
+                                                <h5 className="text-sm font-bold text-violet-700 mb-3 flex items-center gap-2">
+                                                    <span>📦</span> Replacement Tracking (Seller to Customer)
+                                                </h5>
+                                                <p className="text-xs text-slate-500 mb-3">Added after return is inspected and approved for replacement</p>
+                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                                    <div>
+                                                        <label className="text-xs font-medium text-slate-700 block mb-1">Replacement Tracking ID</label>
+                                                        <input
+                                                            type="text"
+                                                            value={trackingData.replacementTrackingId}
+                                                            onChange={e => setTrackingData({...trackingData, replacementTrackingId: e.target.value})}
+                                                            placeholder="Enter replacement tracking ID"
+                                                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-xs font-medium text-slate-700 block mb-1">Replacement Courier</label>
+                                                        <input
+                                                            type="text"
+                                                            value={trackingData.replacementCourier}
+                                                            onChange={e => setTrackingData({...trackingData, replacementCourier: e.target.value})}
+                                                            placeholder="e.g., Delhivery, DHL"
+                                                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-xs font-medium text-slate-700 block mb-1">Replacement Tracking URL</label>
+                                                        <input
+                                                            type="url"
+                                                            value={trackingData.replacementTrackingUrl}
+                                                            onChange={e => setTrackingData({...trackingData, replacementTrackingUrl: e.target.value})}
+                                                            placeholder="https://..."
+                                                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
-                                    <div>
-                                        <label className="text-xs font-medium text-slate-700 block mb-1">Courier Name *</label>
-                                        <input
-                                            type="text"
-                                            value={trackingData.courier}
-                                            onChange={e => setTrackingData({...trackingData, courier: e.target.value})}
-                                            placeholder="e.g., FedEx, DHL, UPS"
-                                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                                        />
+
+                                    {/* Action Buttons */}
+                                    <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        <button
+                                            onClick={updateTrackingDetails}
+                                            className="w-full bg-orange-500 hover:bg-orange-600 text-white font-medium py-2.5 rounded-lg transition-colors"
+                                        >
+                                            Update Tracking & Notify Customer
+                                        </button>
+
+                                        <button
+                                            onClick={autoSyncStatusFromTracking}
+                                            className="w-full bg-slate-800 hover:bg-slate-900 text-white font-medium py-2.5 rounded-lg transition-colors text-sm"
+                                        >
+                                            Auto Status from Tracking
+                                        </button>
                                     </div>
-                                    <div>
-                                        <label className="text-xs font-medium text-slate-700 block mb-1">Tracking URL</label>
-                                        <input
-                                            type="url"
-                                            value={trackingData.trackingUrl}
-                                            onChange={e => setTrackingData({...trackingData, trackingUrl: e.target.value})}
-                                            placeholder="https://..."
-                                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                                        />
-                                    </div>
+
+                                    {/* Delhivery Pickup Controls */}
+                                    {selectedOrder?.courier?.toLowerCase() === 'delhivery' && (
+                                        <div className="mt-4 space-y-2">
+                                            <button
+                                                onClick={schedulePickupWithDelhivery}
+                                                disabled={schedulingPickup || !selectedOrder?.trackingId}
+                                                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-medium py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2"
+                                            >
+                                                {schedulingPickup ? (
+                                                    <>
+                                                        <span className="animate-spin">⚙️</span>
+                                                        Scheduling Pickup...
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <MapPin size={18} />
+                                                        Schedule Delhivery Pickup
+                                                    </>
+                                                )}
+                                            </button>
+                                            
+                                            <button
+                                                onClick={() => setAutoRefreshEnabled(!autoRefreshEnabled)}
+                                                className={`w-full font-medium py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 ${
+                                                    autoRefreshEnabled
+                                                        ? 'bg-green-600 hover:bg-green-700 text-white'
+                                                        : 'bg-slate-200 hover:bg-slate-300 text-slate-700'
+                                                }`}
+                                            >
+                                                <RefreshCw size={18} />
+                                                {autoRefreshEnabled ? `Auto-Refresh ON (Every ${refreshInterval}s)` : 'Auto-Refresh OFF'}
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
-                                <button
-                                    onClick={updateTrackingDetails}
-                                    className="mt-3 w-full bg-orange-500 hover:bg-orange-600 text-white font-medium py-2.5 rounded-lg transition-colors"
-                                >
-                                    Update Tracking & Notify Customer
-                                </button>
-
-                                {/* Manual trigger to auto-sync status from courier tracking */}
-                                <button
-                                    onClick={autoSyncStatusFromTracking}
-                                    className="mt-2 w-full bg-slate-800 hover:bg-slate-900 text-white font-medium py-2.5 rounded-lg transition-colors text-sm"
-                                >
-                                    Auto Status from Tracking
-                                </button>
-
-                                {/* Delhivery Pickup & Auto-Refresh Controls */}
-                                {selectedOrder?.courier?.toLowerCase() === 'delhivery' && (
-                                    <div className="mt-4 space-y-2">
-                                        <button
-                                            onClick={schedulePickupWithDelhivery}
-                                            disabled={schedulingPickup || !selectedOrder?.trackingId}
-                                            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-medium py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2"
-                                        >
-                                            {schedulingPickup ? (
-                                                <>
-                                                    <span className="animate-spin">⚙️</span>
-                                                    Scheduling Pickup...
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <MapPin size={18} />
-                                                    Schedule Delhivery Pickup
-                                                </>
-                                            )}
-                                        </button>
-                                        
-                                        <button
-                                            onClick={() => setAutoRefreshEnabled(!autoRefreshEnabled)}
-                                            className={`w-full font-medium py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 ${
-                                                autoRefreshEnabled
-                                                    ? 'bg-green-600 hover:bg-green-700 text-white'
-                                                    : 'bg-slate-200 hover:bg-slate-300 text-slate-700'
-                                            }`}
-                                        >
-                                            <RefreshCw size={18} />
-                                            {autoRefreshEnabled ? `Auto-Refresh ON (Every ${refreshInterval}s)` : 'Auto-Refresh OFF'}
-                                        </button>
-                                    </div>
-                                )}
 
                                 {/* India Post Tracking Section */}
                                 <div className="mt-5 border border-red-200 rounded-xl overflow-hidden">
