@@ -325,14 +325,350 @@ When seller clicks **[+ Select Images from Product Gallery]**, modal opens:
         color: String,
         size: String,
         storage: String,
-        // ... other variant attributes
-      },
-      imageIds: [ObjectId],      // Array of image IDs from main product images
-      primaryImageId: ObjectId,  // Primary image for this variant
-      createdAt: Date,
-      updatedAt: Date
     }
-  ]
+}
+```
+
+## Production Form Component (NO Image URL Field)
+
+### Simplified AddVariantForm (Image Picker Only)
+
+```jsx
+/**
+ * COMPLETE REPLACEMENT - No Image URL field
+ * Sellers select images ONLY from product gallery using modal
+ */
+import React, { useState } from "react";
+import "./VariantForm.css";
+
+export function AddVariantForm({ productId, productImages = [], onSubmit }) {
+  const [formData, setFormData] = useState({
+    title: "",
+    color: "",
+    size: "",
+    sku: "",
+    stock: 0,
+    price: 0,
+    mrp: 0,
+    imageIds: [], // ← Images from product gallery ONLY
+    primaryImageId: null, // ← Required: primary display image
+  });
+
+  const [showImagePicker, setShowImagePicker] = useState(false);
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({
+      ...prev,
+      [name]:
+        name === "stock" || name === "price" || name === "mrp"
+          ? parseInt(value) || 0
+          : value,
+    }));
+  };
+
+  const handleImagesSelected = (selectedImageIds, primaryImageId) => {
+    setFormData((prev) => ({
+      ...prev,
+      imageIds: selectedImageIds,
+      primaryImageId: primaryImageId,
+    }));
+    setShowImagePicker(false);
+  };
+
+  const handleRemoveImage = (imageId) => {
+    setFormData((prev) => ({
+      ...prev,
+      imageIds: prev.imageIds.filter((id) => id !== imageId),
+      primaryImageId:
+        prev.primaryImageId === imageId ? null : prev.primaryImageId,
+    }));
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+
+    if (!formData.sku) {
+      alert("SKU is required");
+      return;
+    }
+    if (formData.imageIds.length === 0) {
+      alert("❌ Please select at least 1 image for the variant");
+      return;
+    }
+    if (!formData.primaryImageId) {
+      alert("❌ Please set a primary image");
+      return;
+    }
+
+    onSubmit(formData);
+  };
+
+  const getSelectedImages = () => {
+    return productImages.filter((img) => formData.imageIds.includes(img.id));
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="variant-form">
+      <div className="form-row">
+        <div className="form-group">
+          <label>Variant Title (Optional)</label>
+          <input
+            type="text"
+            name="title"
+            placeholder="Color"
+            value={formData.title}
+            onChange={handleInputChange}
+            maxLength={50}
+          />
+        </div>
+        <div className="form-group">
+          <label>SKU (Optional)</label>
+          <input
+            type="text"
+            name="sku"
+            placeholder="Variant SKU"
+            value={formData.sku}
+            onChange={handleInputChange}
+            maxLength={50}
+          />
+        </div>
+      </div>
+
+      <div className="form-row">
+        <div className="form-group">
+          <label>Color</label>
+          <input
+            type="text"
+            name="color"
+            placeholder="e.g., Black"
+            value={formData.color}
+            onChange={handleInputChange}
+          />
+        </div>
+        <div className="form-group">
+          <label>Size</label>
+          <input
+            type="text"
+            name="size"
+            placeholder="e.g., S, M, L"
+            value={formData.size}
+            onChange={handleInputChange}
+          />
+        </div>
+        <div className="form-group">
+          <label>Stock</label>
+          <input
+            type="number"
+            name="stock"
+            placeholder="0"
+            value={formData.stock}
+            onChange={handleInputChange}
+            min="0"
+          />
+        </div>
+      </div>
+
+      {/* IMAGE SECTION - NO URL INPUT */}
+      <div className="form-group full-width">
+        <label>
+          🖼️ Images for this Variant <span className="required">*</span>
+        </label>
+
+        {formData.imageIds.length > 0 && (
+          <div className="selected-images-preview">
+            {getSelectedImages().map((img) => (
+              <div key={img.id} className="preview-item">
+                <img src={img.thumbnail} alt={img.alt} />
+                {formData.primaryImageId === img.id && (
+                  <span className="badge primary">Primary</span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => handleRemoveImage(img.id)}
+                  className="btn-remove-img"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() => setShowImagePicker(true)}
+          className="btn-select-images"
+        >
+          + Select Images from Product Gallery
+        </button>
+
+        {formData.imageIds.length === 0 && (
+          <small style={{ color: "#dc3545" }}>
+            ⚠️ Required: Select at least 1 image
+          </small>
+        )}
+      </div>
+
+      {showImagePicker && (
+        <ImagePickerModal
+          selectedImageIds={formData.imageIds}
+          primaryImageId={formData.primaryImageId}
+          onSave={handleImagesSelected}
+          onCancel={() => setShowImagePicker(false)}
+          allImages={productImages}
+        />
+      )}
+
+      <div className="form-row">
+        <div className="form-group">
+          <label>Price (₹)</label>
+          <input
+            type="number"
+            name="price"
+            placeholder="0"
+            value={formData.price}
+            onChange={handleInputChange}
+            min="0"
+          />
+        </div>
+        <div className="form-group">
+          <label>MRP (₹)</label>
+          <input
+            type="number"
+            name="mrp"
+            placeholder="0"
+            value={formData.mrp}
+            onChange={handleInputChange}
+            min="0"
+          />
+        </div>
+      </div>
+
+      <div className="form-actions">
+        <button type="button" className="btn-remove">
+          Remove
+        </button>
+        <button type="submit" className="btn-submit">
+          ✓ Add Variant
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function ImagePickerModal({
+  selectedImageIds,
+  primaryImageId,
+  onSave,
+  onCancel,
+  allImages,
+}) {
+  const [localSelectedIds, setLocalSelectedIds] = useState(selectedImageIds);
+  const [localPrimaryId, setLocalPrimaryId] = useState(primaryImageId);
+
+  const handleToggleImage = (imageId) => {
+    setLocalSelectedIds((prev) =>
+      prev.includes(imageId)
+        ? prev.filter((id) => id !== imageId)
+        : [...prev, imageId],
+    );
+
+    if (!localPrimaryId && !localSelectedIds.includes(imageId)) {
+      setLocalPrimaryId(imageId);
+    }
+  };
+
+  const handleSetPrimary = (imageId) => {
+    setLocalPrimaryId(imageId);
+  };
+
+  const handleSave = () => {
+    if (localSelectedIds.length === 0) {
+      alert("Please select at least 1 image");
+      return;
+    }
+    if (!localPrimaryId) {
+      alert("Please set a primary image");
+      return;
+    }
+    onSave(localSelectedIds, localPrimaryId);
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3>Select Images for Variant</h3>
+          <button type="button" onClick={onCancel} className="btn-close">
+            ✕
+          </button>
+        </div>
+
+        <div className="modal-body">
+          <div className="images-grid">
+            {allImages.map((img) => (
+              <div
+                key={img.id}
+                className={`image-card ${
+                  localSelectedIds.includes(img.id) ? "selected" : ""
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={localSelectedIds.includes(img.id)}
+                  onChange={() => handleToggleImage(img.id)}
+                  id={`img_${img.id}`}
+                />
+                <label htmlFor={`img_${img.id}`}>
+                  <img src={img.thumbnail} alt={img.alt} />
+                  <small>{img.alt}</small>
+                </label>
+              </div>
+            ))}
+          </div>
+
+          {localSelectedIds.length > 0 && (
+            <div className="selected-images-section">
+              <h4>Selected Images ({localSelectedIds.length})</h4>
+              <div className="selected-list">
+                {localSelectedIds.map((imageId) => {
+                  const img = allImages.find((i) => i.id === imageId);
+                  return (
+                    <div key={imageId} className="selected-item">
+                      <img src={img.thumbnail} alt={img.alt} />
+                      <span className="img-name">{img.alt}</span>
+                      {localPrimaryId === imageId && (
+                        <span className="badge">✓ Primary</span>
+                      )}
+                      {localPrimaryId !== imageId && (
+                        <button
+                          type="button"
+                          onClick={() => handleSetPrimary(imageId)}
+                          className="btn-set-primary"
+                        >
+                          Set Primary
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="modal-footer">
+          <button type="button" onClick={onCancel} className="btn-cancel">
+            Cancel
+          </button>
+          <button type="button" onClick={handleSave} className="btn-save">
+            Save Selection
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 ```
 
