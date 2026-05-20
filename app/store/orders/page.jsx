@@ -651,6 +651,7 @@ export default function StoreOrders() {
         { value: 'DELIVERED', label: 'Delivered', color: 'bg-green-100 text-green-700' },
         { value: 'CANCELLED', label: 'Cancelled', color: 'bg-red-100 text-red-700' },
         { value: 'PAYMENT_FAILED', label: 'Payment Failed', color: 'bg-orange-100 text-orange-700' },
+        { value: 'PAYMENT_CAPTURED_REVIEW', label: 'Payment Captured Review', color: 'bg-rose-100 text-rose-700' },
         { value: 'RTO', label: 'RTO', color: 'bg-fuchsia-100 text-fuchsia-700' },
         { value: 'RETURNED', label: 'Returned', color: 'bg-indigo-100 text-indigo-700' },
         { value: 'RETURN_INITIATED', label: 'Return Initiated', color: 'bg-pink-100 text-pink-700' },
@@ -751,7 +752,7 @@ export default function StoreOrders() {
         const paymentStatus = String(order?.paymentStatus || '').trim().toLowerCase();
 
         if (orderStatus === 'RETURNED' || orderStatus === 'RETURNED_REFUNDED') return false;
-        if (orderStatus === 'PAYMENT_FAILED') return false;
+        if (orderStatus === 'PAYMENT_FAILED' || orderStatus === 'PAYMENT_CAPTURED_REVIEW') return false;
 
         // Explicit paid markers should always show paid.
         if (orderStatus === 'PAID' || paymentMethod === 'paid' || paymentStatus === 'paid' || order?.isPaid) return true;
@@ -794,7 +795,8 @@ export default function StoreOrders() {
             DELIVERED: orders.filter(o => isRegularStatusOrder(o) && o.status === 'DELIVERED').length,
             CANCELLED: orders.filter(o => isRegularStatusOrder(o) && o.status === 'CANCELLED').length,
             PAYMENT_FAILED: orders.filter(o => isRegularStatusOrder(o) && o.status === 'PAYMENT_FAILED').length,
-            FAILED_ORDER: orders.filter(o => isRegularStatusOrder(o) && (o.status === 'PAYMENT_FAILED' || o.paymentStatus === 'FAILED')).length,
+            PAYMENT_CAPTURED_REVIEW: orders.filter(o => isRegularStatusOrder(o) && o.status === 'PAYMENT_CAPTURED_REVIEW').length,
+            FAILED_ORDER: orders.filter(o => (isRegularStatusOrder(o) && ['PAYMENT_FAILED', 'PAYMENT_CAPTURED_REVIEW'].includes(o.status || '')) || (isRegularStatusOrder(o) && o.paymentStatus === 'FAILED')).length,
             RTO: orders.filter(o => isRegularStatusOrder(o) && o.status === 'RTO').length,
             RETURNED: orders.filter(o => hasLifecycleStatus(o, 'RETURNED')).length,
             RETURN_REQUESTED: orders.filter(o => hasLifecycleStatus(o, 'RETURN_REQUESTED')).length,
@@ -811,7 +813,7 @@ export default function StoreOrders() {
             PENDING_PAYMENT: orders.filter(o => {
                 // Exclude cancelled, returned, RTO, payment failed, and return-requested orders
                 const hasReturn = hasReturnWithStatus(o, 'REQUESTED');
-                return isRegularStatusOrder(o) && !isOrderPaid(o) && !hasReturn && o.status !== 'CANCELLED' && o.status !== 'RETURNED' && o.status !== 'RTO' && o.status !== 'PAYMENT_FAILED';
+                return isRegularStatusOrder(o) && !isOrderPaid(o) && !hasReturn && o.status !== 'CANCELLED' && o.status !== 'RETURNED' && o.status !== 'RTO' && o.status !== 'PAYMENT_FAILED' && o.status !== 'PAYMENT_CAPTURED_REVIEW';
             }).length,
             PENDING_SHIPMENT: orders.filter(o => isRegularStatusOrder(o) && !o.trackingId && ['ORDER_PLACED', 'PROCESSING'].includes(o.status)).length,
         };
@@ -838,10 +840,10 @@ export default function StoreOrders() {
     const getFilteredOrders = () => {
         const dateFiltered = orders.filter(isOrderInRange);
         let statusFiltered;
-        if (filterStatus === 'ALL') statusFiltered = dateFiltered.filter(o => o.status !== 'PAYMENT_FAILED' && o.paymentStatus !== 'FAILED');
+        if (filterStatus === 'ALL') statusFiltered = dateFiltered.filter(o => o.status !== 'PAYMENT_FAILED' && o.status !== 'PAYMENT_CAPTURED_REVIEW' && o.paymentStatus !== 'FAILED');
         else if (filterStatus === 'PENDING_PAYMENT') {
             const hasReturn = (o) => hasReturnWithStatus(o, 'REQUESTED');
-            statusFiltered = dateFiltered.filter(o => !getLifecycleBucket(o) && !isOrderPaid(o) && !hasReturn(o) && o.status !== 'CANCELLED' && o.status !== 'RETURNED' && o.status !== 'RTO' && o.status !== 'PAYMENT_FAILED');
+            statusFiltered = dateFiltered.filter(o => !getLifecycleBucket(o) && !isOrderPaid(o) && !hasReturn(o) && o.status !== 'CANCELLED' && o.status !== 'RETURNED' && o.status !== 'RTO' && o.status !== 'PAYMENT_FAILED' && o.status !== 'PAYMENT_CAPTURED_REVIEW');
         }
         else if (filterStatus === 'PENDING_SHIPMENT') statusFiltered = dateFiltered.filter(o => !getLifecycleBucket(o) && !o.trackingId && ['ORDER_PLACED', 'PROCESSING'].includes(o.status));
         else if (filterStatus === 'AWB_GENERATED') statusFiltered = dateFiltered.filter(o => hasAwbPendingDownload(o));
@@ -855,7 +857,8 @@ export default function StoreOrders() {
         else if (filterStatus === 'REPLACED') statusFiltered = dateFiltered.filter(o => hasLifecycleStatus(o, 'REPLACED'));
         else if (filterStatus === 'RETURNED_REFUNDED') statusFiltered = dateFiltered.filter(o => hasLifecycleStatus(o, 'RETURNED_REFUNDED'));
         else if (filterStatus === 'DAMAGED_REVIEW') statusFiltered = dateFiltered.filter(o => ['MINOR_DAMAGE', 'DAMAGED'].includes(o?.deliveryReview?.packageCondition));
-        else if (filterStatus === 'FAILED_ORDER') statusFiltered = dateFiltered.filter(o => !getLifecycleBucket(o) && (o.status === 'PAYMENT_FAILED' || o.paymentStatus === 'FAILED'));
+        else if (filterStatus === 'FAILED_ORDER') statusFiltered = dateFiltered.filter(o => !getLifecycleBucket(o) && (['PAYMENT_FAILED', 'PAYMENT_CAPTURED_REVIEW'].includes(o.status || '') || o.paymentStatus === 'FAILED'));
+        else if (filterStatus === 'PAYMENT_CAPTURED_REVIEW') statusFiltered = dateFiltered.filter(o => !getLifecycleBucket(o) && o.status === 'PAYMENT_CAPTURED_REVIEW');
         else statusFiltered = dateFiltered.filter(o => !getLifecycleBucket(o) && o.status === filterStatus);
 
         if (filterDelivery === 'ALL') {
@@ -1607,6 +1610,9 @@ export default function StoreOrders() {
         if (status === 'PAYMENT_FAILED') {
             return 'Payment Failed';
         }
+        if (status === 'PAYMENT_CAPTURED_REVIEW') {
+            return 'Payment Captured Review';
+        }
         return resolvedPaid ? '✓ Paid' : 'Pending';
     };
 
@@ -2119,11 +2125,18 @@ export default function StoreOrders() {
                     <p className="text-xs opacity-75">Failed Orders</p>
                     <p className="text-2xl font-bold">{stats.FAILED_ORDER}</p>
                 </div>
+                <div 
+                    onClick={() => setFilterStatus('PAYMENT_CAPTURED_REVIEW')}
+                    className={`p-4 rounded-lg cursor-pointer transition-all ${filterStatus === 'PAYMENT_CAPTURED_REVIEW' ? 'bg-pink-700 text-white shadow-lg' : 'bg-white border border-pink-200 text-pink-700'}`}
+                >
+                    <p className="text-xs opacity-75">Captured Review</p>
+                    <p className="text-2xl font-bold">{stats.PAYMENT_CAPTURED_REVIEW}</p>
+                </div>
             </div>
 
             {/* Status Filter Tabs */}
             <div className="mb-3 flex flex-wrap gap-2">
-                {['ALL', 'PROCESSING', 'MANIFESTED', 'PICKUP_SCHEDULED', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'PAYMENT_FAILED', 'FAILED_ORDER', 'RTO', 'RETURNED', 'RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED', 'REPLACEMENT_REQUESTED', 'REPLACEMENT_APPROVED', 'REPLACED', 'RETURNED_REFUNDED', 'DAMAGED_REVIEW', 'AWB_GENERATED', 'AWB_REFERENCE_MISSING', 'CONVERTED'].map(status => (
+                {['ALL', 'PROCESSING', 'MANIFESTED', 'PICKUP_SCHEDULED', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'PAYMENT_FAILED', 'PAYMENT_CAPTURED_REVIEW', 'FAILED_ORDER', 'RTO', 'RETURNED', 'RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED', 'REPLACEMENT_REQUESTED', 'REPLACEMENT_APPROVED', 'REPLACED', 'RETURNED_REFUNDED', 'DAMAGED_REVIEW', 'AWB_GENERATED', 'AWB_REFERENCE_MISSING', 'CONVERTED'].map(status => (
                     <button
                         key={status}
                         onClick={() => setFilterStatus(status)}
@@ -2133,12 +2146,12 @@ export default function StoreOrders() {
                                 : 'bg-gray-100 text-slate-700 hover:bg-gray-200'
                         }`}
                     >
-                        <span>{status === 'ALL' ? 'All Orders' : status === 'PAYMENT_FAILED' ? 'Payment Failed' : status === 'FAILED_ORDER' ? 'Failed Orders' : status === 'RETURN_REQUESTED' ? 'Return Requested' : status === 'RETURN_APPROVED' ? 'Return Approved' : status === 'RETURN_REJECTED' ? 'Return Rejected' : status === 'REPLACEMENT_REQUESTED' ? 'Replacement Requested' : status === 'REPLACEMENT_APPROVED' ? 'Replacement Approved' : status === 'REPLACED' ? 'Replaced' : status === 'RETURNED_REFUNDED' ? 'Returned & Refunded' : status === 'DAMAGED_REVIEW' ? 'Damaged Review' : status === 'AWB_GENERATED' ? 'AWB Generated' : status === 'AWB_REFERENCE_MISSING' ? 'AWB Ref Missing' : status === 'CONVERTED' ? 'Converted' : status.replace(/_/g, ' ')}</span>
-                        {(['FAILED_ORDER', 'RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED', 'REPLACEMENT_REQUESTED', 'REPLACEMENT_APPROVED', 'REPLACED', 'RETURNED_REFUNDED', 'DAMAGED_REVIEW', 'AWB_GENERATED', 'AWB_REFERENCE_MISSING', 'CONVERTED'].includes(status)) && (status === 'FAILED_ORDER' ? stats.FAILED_ORDER : status === 'RETURN_REQUESTED' ? stats.RETURN_REQUESTED : status === 'RETURN_APPROVED' ? stats.RETURN_APPROVED : status === 'RETURN_REJECTED' ? stats.RETURN_REJECTED : status === 'REPLACEMENT_REQUESTED' ? stats.REPLACEMENT_REQUESTED : status === 'REPLACEMENT_APPROVED' ? stats.REPLACEMENT_APPROVED : status === 'REPLACED' ? stats.REPLACED : status === 'RETURNED_REFUNDED' ? stats.RETURNED_REFUNDED : status === 'DAMAGED_REVIEW' ? stats.DAMAGED_REVIEW : status === 'AWB_GENERATED' ? stats.AWB_GENERATED : status === 'AWB_REFERENCE_MISSING' ? stats.AWB_REFERENCE_MISSING : stats.CONVERTED) > 0 && (
+                        <span>{status === 'ALL' ? 'All Orders' : status === 'PAYMENT_FAILED' ? 'Payment Failed' : status === 'PAYMENT_CAPTURED_REVIEW' ? 'Captured Review' : status === 'FAILED_ORDER' ? 'Failed Orders' : status === 'RETURN_REQUESTED' ? 'Return Requested' : status === 'RETURN_APPROVED' ? 'Return Approved' : status === 'RETURN_REJECTED' ? 'Return Rejected' : status === 'REPLACEMENT_REQUESTED' ? 'Replacement Requested' : status === 'REPLACEMENT_APPROVED' ? 'Replacement Approved' : status === 'REPLACED' ? 'Replaced' : status === 'RETURNED_REFUNDED' ? 'Returned & Refunded' : status === 'DAMAGED_REVIEW' ? 'Damaged Review' : status === 'AWB_GENERATED' ? 'AWB Generated' : status === 'AWB_REFERENCE_MISSING' ? 'AWB Ref Missing' : status === 'CONVERTED' ? 'Converted' : status.replace(/_/g, ' ')}</span>
+                        {(['PAYMENT_CAPTURED_REVIEW', 'FAILED_ORDER', 'RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED', 'REPLACEMENT_REQUESTED', 'REPLACEMENT_APPROVED', 'REPLACED', 'RETURNED_REFUNDED', 'DAMAGED_REVIEW', 'AWB_GENERATED', 'AWB_REFERENCE_MISSING', 'CONVERTED'].includes(status)) && (status === 'PAYMENT_CAPTURED_REVIEW' ? stats.PAYMENT_CAPTURED_REVIEW : status === 'FAILED_ORDER' ? stats.FAILED_ORDER : status === 'RETURN_REQUESTED' ? stats.RETURN_REQUESTED : status === 'RETURN_APPROVED' ? stats.RETURN_APPROVED : status === 'RETURN_REJECTED' ? stats.RETURN_REJECTED : status === 'REPLACEMENT_REQUESTED' ? stats.REPLACEMENT_REQUESTED : status === 'REPLACEMENT_APPROVED' ? stats.REPLACEMENT_APPROVED : status === 'REPLACED' ? stats.REPLACED : status === 'RETURNED_REFUNDED' ? stats.RETURNED_REFUNDED : status === 'DAMAGED_REVIEW' ? stats.DAMAGED_REVIEW : status === 'AWB_GENERATED' ? stats.AWB_GENERATED : status === 'AWB_REFERENCE_MISSING' ? stats.AWB_REFERENCE_MISSING : stats.CONVERTED) > 0 && (
                             <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-                                filterStatus === status ? 'bg-blue-800' : status === 'AWB_GENERATED' ? 'bg-emerald-500 text-white' : status === 'AWB_REFERENCE_MISSING' ? 'bg-amber-500 text-white' : status === 'RETURN_APPROVED' ? 'bg-green-500 text-white' : status === 'REPLACEMENT_APPROVED' ? 'bg-violet-600 text-white' : status === 'REPLACED' ? 'bg-green-500 text-white' : status === 'RETURNED_REFUNDED' ? 'bg-cyan-500 text-white' : status === 'CONVERTED' ? 'bg-cyan-600 text-white' : status === 'RETURN_REJECTED' ? 'bg-rose-500 text-white' : status === 'REPLACEMENT_REQUESTED' ? 'bg-violet-500 text-white' : 'bg-red-500 text-white'
+                                filterStatus === status ? 'bg-blue-800' : status === 'AWB_GENERATED' ? 'bg-emerald-500 text-white' : status === 'AWB_REFERENCE_MISSING' ? 'bg-amber-500 text-white' : status === 'RETURN_APPROVED' ? 'bg-green-500 text-white' : status === 'REPLACEMENT_APPROVED' ? 'bg-violet-600 text-white' : status === 'REPLACED' ? 'bg-green-500 text-white' : status === 'RETURNED_REFUNDED' ? 'bg-cyan-500 text-white' : status === 'CONVERTED' ? 'bg-cyan-600 text-white' : status === 'PAYMENT_CAPTURED_REVIEW' ? 'bg-pink-600 text-white' : status === 'RETURN_REJECTED' ? 'bg-rose-500 text-white' : status === 'REPLACEMENT_REQUESTED' ? 'bg-violet-500 text-white' : 'bg-red-500 text-white'
                             }`}>
-                                {status === 'FAILED_ORDER' ? stats.FAILED_ORDER : status === 'FAILED_ORDER' ? stats.FAILED_ORDER : status === 'RETURN_REQUESTED' ? stats.RETURN_REQUESTED : status === 'RETURN_APPROVED' ? stats.RETURN_APPROVED : status === 'RETURN_REJECTED' ? stats.RETURN_REJECTED : status === 'REPLACEMENT_REQUESTED' ? stats.REPLACEMENT_REQUESTED : status === 'REPLACEMENT_APPROVED' ? stats.REPLACEMENT_APPROVED : status === 'REPLACED' ? stats.REPLACED : status === 'RETURNED_REFUNDED' ? stats.RETURNED_REFUNDED : status === 'DAMAGED_REVIEW' ? stats.DAMAGED_REVIEW : status === 'AWB_GENERATED' ? stats.AWB_GENERATED : status === 'AWB_REFERENCE_MISSING' ? stats.AWB_REFERENCE_MISSING : stats.CONVERTED}
+                                {status === 'PAYMENT_CAPTURED_REVIEW' ? stats.PAYMENT_CAPTURED_REVIEW : status === 'FAILED_ORDER' ? stats.FAILED_ORDER : status === 'RETURN_REQUESTED' ? stats.RETURN_REQUESTED : status === 'RETURN_APPROVED' ? stats.RETURN_APPROVED : status === 'RETURN_REJECTED' ? stats.RETURN_REJECTED : status === 'REPLACEMENT_REQUESTED' ? stats.REPLACEMENT_REQUESTED : status === 'REPLACEMENT_APPROVED' ? stats.REPLACEMENT_APPROVED : status === 'REPLACED' ? stats.REPLACED : status === 'RETURNED_REFUNDED' ? stats.RETURNED_REFUNDED : status === 'DAMAGED_REVIEW' ? stats.DAMAGED_REVIEW : status === 'AWB_GENERATED' ? stats.AWB_GENERATED : status === 'AWB_REFERENCE_MISSING' ? stats.AWB_REFERENCE_MISSING : stats.CONVERTED}
                             </span>
                         )}
                     </button>
@@ -2577,7 +2590,7 @@ export default function StoreOrders() {
                                                 <div>
                                                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(mappedStatus)}`}>{mappedStatusLabel}</span>
                                                     {cancelBadge}
-                                                    {(mappedStatus === 'PAYMENT_FAILED' || order.paymentStatus === 'FAILED') && order.notes && (
+                                                    {(['PAYMENT_FAILED', 'PAYMENT_CAPTURED_REVIEW'].includes(mappedStatus) || order.paymentStatus === 'FAILED') && order.notes && (
                                                         <span className="mt-1 block text-[10px] px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 font-medium leading-snug">
                                                             ⚠ {order.notes.replace(/^Payment failed:\s*/i, '')}
                                                         </span>

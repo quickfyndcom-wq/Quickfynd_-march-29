@@ -72,6 +72,85 @@ function inferOrderSource(request, payload = {}) {
   return 'WEB';
 }
 
+async function createFallbackCapturedOrder({ request, paymentPayload, razorpay_payment_id, razorpay_order_id, razorpay_signature, failureReason }) {
+  const inferredOrderSource = inferOrderSource(request, paymentPayload || {});
+  const items = Array.isArray(paymentPayload?.items) ? paymentPayload.items : [];
+
+  const orderItems = items.map((item) => ({
+    productId: item?.id || item?.productId || undefined,
+    name: item?.name || item?.title || 'Product',
+    image: item?.image || item?.productImage || '',
+    productImage: item?.productImage || item?.image || '',
+    price: Number(item?.price || 0),
+    quantity: Number(item?.quantity || 1),
+    variantOptions: item?.variantOptions || null,
+  }));
+
+  const fallbackData = {
+    storeId: paymentPayload?.storeId,
+    total: Number(paymentPayload?.total || 0),
+    shippingFee: Number(paymentPayload?.shippingFee || 0),
+    status: 'PAYMENT_CAPTURED_REVIEW',
+    paymentMethod: 'CARD',
+    orderSource: inferredOrderSource,
+    paymentStatus: 'paid',
+    isPaid: true,
+    notes: `Payment captured but standard order creation failed: ${failureReason || 'Unknown reason'}`,
+    orderItems,
+    items,
+    razorpayPaymentId: razorpay_payment_id,
+    razorpayOrderId: razorpay_order_id,
+    razorpaySignature: razorpay_signature,
+  };
+
+  if (paymentPayload?.isGuest && paymentPayload?.guestInfo) {
+    fallbackData.isGuest = true;
+    fallbackData.guestName = paymentPayload.guestInfo.name;
+    fallbackData.guestEmail = paymentPayload.guestInfo.email;
+    fallbackData.guestPhone = paymentPayload.guestInfo.phone;
+    fallbackData.shippingAddress = {
+      name: paymentPayload.guestInfo.name,
+      email: paymentPayload.guestInfo.email,
+      phone: paymentPayload.guestInfo.phone,
+      phoneCode: paymentPayload.guestInfo.phoneCode || '',
+      alternatePhone: paymentPayload.guestInfo.alternatePhone || '',
+      alternatePhoneCode: paymentPayload.guestInfo.alternatePhoneCode || '',
+      houseNumber: paymentPayload.guestInfo.houseNumber || '',
+      street: paymentPayload.guestInfo.street || paymentPayload.guestInfo.address || '',
+      city: paymentPayload.guestInfo.city || '',
+      state: paymentPayload.guestInfo.state || '',
+      zip: paymentPayload.guestInfo.pincode || paymentPayload.guestInfo.zip || '',
+      country: paymentPayload.guestInfo.country || '',
+      district: paymentPayload.guestInfo.district || '',
+    };
+  } else {
+    if (paymentPayload?.addressId) fallbackData.addressId = paymentPayload.addressId;
+    if (paymentPayload?.addressData) fallbackData.shippingAddress = paymentPayload.addressData;
+
+    if (paymentPayload?.token) {
+      const auth = await verifyAuth(paymentPayload.token);
+      if (auth?.userId) fallbackData.userId = auth.userId;
+    }
+  }
+
+  if (!fallbackData.storeId) {
+    return null;
+  }
+
+  const existing = await Order.findOne({
+    $or: [
+      { razorpayPaymentId: razorpay_payment_id },
+      { razorpayOrderId: razorpay_order_id }
+    ]
+  }).lean();
+
+  if (existing?._id) {
+    return existing;
+  }
+
+  return Order.create(fallbackData);
+}
+
 export async function POST(request) {
   const startTime = Date.now();
   
@@ -107,6 +186,22 @@ export async function POST(request) {
 
     // Verify signature
     if (generated_signature === razorpay_signature) {
+      const existingByPayment = await Order.findOne({
+        $or: [
+          { razorpayPaymentId: razorpay_payment_id },
+          { razorpayOrderId: razorpay_order_id }
+        ]
+      }).lean();
+
+      if (existingByPayment?._id) {
+        return NextResponse.json({
+          success: true,
+          _id: existingByPayment._id.toString(),
+          orderId: existingByPayment._id.toString(),
+          message: 'Payment already verified and order exists'
+        });
+      }
+
       // If paying for an existing COD order, update that order instead of creating a new one
       if (paymentPayload && paymentPayload.existingOrderId) {
         try {
@@ -218,6 +313,27 @@ export async function POST(request) {
       } else {
         console.error('[Verify] Order creation failed:', orderData);
         console.error('[Verify] Response status:', orderResponse.status);
+
+        const fallbackOrder = await createFallbackCapturedOrder({
+          request,
+          paymentPayload,
+          razorpay_payment_id,
+          razorpay_order_id,
+          razorpay_signature,
+          failureReason: orderData?.error || `Orders API returned ${orderResponse.status}`,
+        });
+
+        if (fallbackOrder?._id) {
+          const fallbackId = fallbackOrder._id.toString();
+          console.warn('[Verify] Fallback captured order created:', fallbackId);
+          return NextResponse.json({
+            success: true,
+            _id: fallbackId,
+            orderId: fallbackId,
+            message: 'Payment verified. Order saved for manual review.',
+            fallback: true,
+          });
+        }
         
         return NextResponse.json({ 
           success: false, 
