@@ -234,6 +234,53 @@ export async function GET(request){
             });
         }
 
+        // Backfill missing item images for older converted/manual orders by matching product name.
+        const normalizeName = (value) => String(value || '')
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, ' ')
+            .trim();
+
+        const storeProducts = await Product.find({ storeId })
+            .select('name image images')
+            .lean();
+        const productImageByName = new Map();
+        for (const product of storeProducts) {
+            const key = normalizeName(product?.name);
+            if (!key || productImageByName.has(key)) continue;
+            const image = product?.image || product?.images?.[0] || '';
+            if (typeof image === 'string' && image.trim()) {
+                productImageByName.set(key, image.trim());
+            }
+        }
+
+        for (const order of orders) {
+            if (!Array.isArray(order?.orderItems)) continue;
+            order.orderItems = order.orderItems.map((item) => {
+                const existingImage =
+                    item?.image ||
+                    item?.productImage ||
+                    item?.productId?.image ||
+                    item?.productId?.images?.[0] ||
+                    item?.product?.image ||
+                    item?.product?.images?.[0] ||
+                    '';
+
+                if (typeof existingImage === 'string' && existingImage.trim() && existingImage !== '[object Object]') {
+                    return item;
+                }
+
+                const itemName = item?.name || item?.productId?.name || item?.product?.name || '';
+                const imageFromName = productImageByName.get(normalizeName(itemName));
+                if (!imageFromName) return item;
+
+                return {
+                    ...item,
+                    image: imageFromName,
+                    productImage: imageFromName,
+                };
+            });
+        }
+
         let enrichedOrders = orders;
         if (includeDelhivery) {
             const shouldFetchDelhivery = (order) => {

@@ -13,6 +13,7 @@ import { useEffect, useState } from "react"
 import toast from "react-hot-toast"
 import { useAuth } from '@/lib/useAuth'
 import CustomerLocationAnalytics from "@/components/CustomerLocationAnalytics"
+import ProductSelect from "@/components/ProductSelect"
 
 
 // Dynamically import CarouselProducts to avoid SSR issues
@@ -59,6 +60,11 @@ const getNetSoldQuantity = (order, item) => {
 }
 
 const getProductImageSrc = (item) => {
+    const isInvalidStringImage = (value) => {
+        const normalized = String(value || '').trim().toLowerCase()
+        return !normalized || normalized === '[object object]' || normalized === 'null' || normalized === 'undefined'
+    }
+
     const candidates = [
         item?.image,
         item?.productImage,
@@ -69,10 +75,10 @@ const getProductImageSrc = (item) => {
     ]
 
     for (const candidate of candidates) {
-        if (typeof candidate === 'string' && candidate.trim()) return candidate.trim()
+        if (typeof candidate === 'string' && !isInvalidStringImage(candidate)) return candidate.trim()
         if (candidate && typeof candidate === 'object') {
-            const resolved = candidate.url || candidate.src || candidate.secure_url || ''
-            if (resolved) return String(resolved).trim()
+            const resolved = candidate.url || candidate.src || candidate.secure_url || candidate.image || ''
+            if (!isInvalidStringImage(resolved)) return String(resolved).trim()
         }
     }
 
@@ -82,6 +88,21 @@ const getProductImageSrc = (item) => {
 export default function Dashboard() {
     const { user, loading: authLoading, getToken } = useAuth();
     console.log('[page.jsx] user:', user, 'authLoading:', authLoading);
+    // --- Create Order Modal State ---
+    const [showCreateOrderModal, setShowCreateOrderModal] = useState(false);
+    const [newOrder, setNewOrder] = useState({
+        customer: { name: '', email: '', phone: '', street: '', city: '', state: '', country: '', zip: '' },
+        items: [{ productId: '', name: '', price: '', quantity: 1 }],
+        paymentMethod: 'COD',
+        notes: '',
+        isPaid: false,
+        status: 'ORDER_PLACED',
+        orderDate: (() => {
+            const now = new Date();
+            return now.toISOString().slice(0, 16);
+        })(),
+    });
+    const [creatingOrder, setCreatingOrder] = useState(false);
     const currency = process.env.NEXT_PUBLIC_CURRENCY_SYMBOL || '₹'
     const router = useRouter()
     const [loading, setLoading] = useState(true)
@@ -95,6 +116,7 @@ export default function Dashboard() {
     })
     // Orders for detailed stats
     const [orders, setOrders] = useState([]);
+    const [productsList, setProductsList] = useState([])
     const [ordersLoading, setOrdersLoading] = useState(true);
     const [rangeFrom, setRangeFrom] = useState(() => {
         const now = new Date()
@@ -138,6 +160,19 @@ export default function Dashboard() {
         }
     };
 
+    const fetchProductsForOrder = async () => {
+        try {
+            const token = await getToken();
+            const { data } = await axios.get('/api/store/product', {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            setProductsList(data?.products || []);
+        } catch (error) {
+            console.error('Failed to fetch products for order:', error);
+            setProductsList([]);
+        }
+    }
+
     useEffect(() => {
         const fetchDashboard = async () => {
             if (!user) {
@@ -159,6 +194,8 @@ export default function Dashboard() {
                     headers: { Authorization: `Bearer ${token}` }
                 });
                 setOrders(ordersRes.data.orders || []);
+
+                await fetchProductsForOrder();
 
                 // Fetch team users
                 await fetchTeamUsers();
@@ -277,14 +314,267 @@ export default function Dashboard() {
         <div className="text-slate-500 mb-20 sm:mb-24 lg:mb-28 max-w-7xl mx-auto">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4 sm:mb-6">
                 <h1 className="text-2xl sm:text-3xl">Seller <span className="text-slate-800 font-medium">Dashboard</span></h1>
-                <Link 
-                    href="/store/settings/users" 
-                    className="inline-flex w-full sm:w-auto items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg transition shadow-sm text-sm sm:text-base"
-                >
-                    <UserPlusIcon size={18} />
-                    <span>Invite Team Members</span>
-                </Link>
+                <div className="flex gap-2">
+                    <button
+                        onClick={async () => {
+                            if (!productsList.length) {
+                                await fetchProductsForOrder();
+                            }
+                            setShowCreateOrderModal(true);
+                        }}
+                        className="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2.5 rounded-lg transition shadow-sm text-sm sm:text-base"
+                    >
+                        <ShoppingCartIcon size={18} />
+                        <span>Create Order</span>
+                    </button>
+                    <Link 
+                        href="/store/settings/users" 
+                        className="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg transition shadow-sm text-sm sm:text-base"
+                    >
+                        <UserPlusIcon size={18} />
+                        <span>Invite Team Members</span>
+                    </Link>
+                </div>
             </div>
+
+            {/* Create Order Modal */}
+            {showCreateOrderModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/55 backdrop-blur-sm p-3 sm:p-6">
+                    <div className="w-full max-w-3xl rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
+                        <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 px-5 py-4 sm:px-6">
+                            <div className="flex items-start justify-between gap-4">
+                                <div>
+                                    <h2 className="text-xl sm:text-2xl font-semibold text-white">Create New Order</h2>
+                                    <p className="mt-1 text-xs sm:text-sm text-emerald-100">Add customer details, choose products, and confirm payment setup.</p>
+                                </div>
+                                <button
+                                    className="h-9 w-9 rounded-full bg-white/20 text-white hover:bg-white/30 transition"
+                                    onClick={() => setShowCreateOrderModal(false)}
+                                >
+                                    <span className="text-xl leading-none">×</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="max-h-[78vh] overflow-y-auto p-4 sm:p-6 space-y-5">
+                            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
+                                <h3 className="text-sm font-semibold text-slate-800">Customer Information</h3>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Customer Name</label>
+                                    <input type="text" className="w-full border border-slate-300 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-500" value={newOrder.customer.name} onChange={e => setNewOrder(o => ({ ...o, customer: { ...o.customer, name: e.target.value } }))} />
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+                                        <input type="email" className="w-full border border-slate-300 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-500" value={newOrder.customer.email} onChange={e => setNewOrder(o => ({ ...o, customer: { ...o.customer, email: e.target.value } }))} />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Phone</label>
+                                        <input type="text" className="w-full border border-slate-300 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-500" value={newOrder.customer.phone} onChange={e => setNewOrder(o => ({ ...o, customer: { ...o.customer, phone: e.target.value } }))} />
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Street</label>
+                                        <input type="text" className="w-full border border-slate-300 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-500" value={newOrder.customer.street} onChange={e => setNewOrder(o => ({ ...o, customer: { ...o.customer, street: e.target.value } }))} />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">City</label>
+                                        <input type="text" className="w-full border border-slate-300 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-500" value={newOrder.customer.city} onChange={e => setNewOrder(o => ({ ...o, customer: { ...o.customer, city: e.target.value } }))} />
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">State</label>
+                                        <input type="text" className="w-full border border-slate-300 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-500" value={newOrder.customer.state} onChange={e => setNewOrder(o => ({ ...o, customer: { ...o.customer, state: e.target.value } }))} />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Country</label>
+                                        <input type="text" className="w-full border border-slate-300 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-500" value={newOrder.customer.country} onChange={e => setNewOrder(o => ({ ...o, customer: { ...o.customer, country: e.target.value } }))} />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Pincode</label>
+                                    <input type="text" className="w-full border border-slate-300 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-500" value={newOrder.customer.zip} onChange={e => setNewOrder(o => ({ ...o, customer: { ...o.customer, zip: e.target.value } }))} />
+                                </div>
+                            </div>
+
+                            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
+                                <h3 className="text-sm font-semibold text-slate-800">Order Items</h3>
+                                {newOrder.items.map((item, idx) => {
+                                    const selectedProduct = productsList.find((product) => String(product?._id || product?.id || '') === String(item?.productId || '')) || null
+                                    const selectedImage = selectedProduct?.image || selectedProduct?.images?.[0] || ''
+                                    const selectedName = item?.name || selectedProduct?.name || ''
+
+                                    return (
+                                        <div key={idx} className="grid grid-cols-12 gap-2 items-center rounded-lg border border-slate-200 bg-white p-2">
+                                            <div className="col-span-12 sm:col-span-7">
+                                                <ProductSelect
+                                                    value={item.productId}
+                                                    products={productsList}
+                                                    onChange={(val, pickedProduct) => setNewOrder(o => {
+                                                        const items = [...o.items];
+                                                        const resolvedProduct = pickedProduct || productsList.find((product) => String(product?._id || product?.id || '') === String(val || ''));
+                                                        items[idx].productId = val;
+                                                        items[idx].name = resolvedProduct?.name || items[idx].name || '';
+                                                        items[idx].price = resolvedProduct?.price ?? items[idx].price;
+                                                        return { ...o, items };
+                                                    })}
+                                                    selectedIds={newOrder.items.map(i => i.productId).filter(Boolean)}
+                                                />
+                                            </div>
+                                            <input type="number" placeholder="Price" className="col-span-5 sm:col-span-2 border border-slate-300 rounded-lg px-2 py-2" value={item.price} onChange={e => setNewOrder(o => { const items = [...o.items]; items[idx].price = e.target.value; return { ...o, items }; })} />
+                                            <input type="number" placeholder="Qty" className="col-span-4 sm:col-span-2 border border-slate-300 rounded-lg px-2 py-2" value={item.quantity} min={1} onChange={e => setNewOrder(o => { const items = [...o.items]; items[idx].quantity = e.target.value; return { ...o, items }; })} />
+                                            <button type="button" className="col-span-3 sm:col-span-1 text-red-500 font-semibold" onClick={() => setNewOrder(o => ({ ...o, items: o.items.filter((_, i) => i !== idx) }))}>×</button>
+
+                                            {(selectedName || selectedImage) && (
+                                                <div className="col-span-12 mt-1 flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 p-2">
+                                                    {selectedImage ? (
+                                                        <img
+                                                            src={selectedImage}
+                                                            alt={selectedName || 'Selected product'}
+                                                            className="h-10 w-10 rounded object-cover border border-slate-200"
+                                                            onError={(event) => {
+                                                                event.currentTarget.style.display = 'none'
+                                                            }}
+                                                        />
+                                                    ) : null}
+                                                    <input
+                                                        type="text"
+                                                        readOnly
+                                                        value={selectedName}
+                                                        placeholder="Selected product name"
+                                                        className="w-full bg-white border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700"
+                                                    />
+                                                </div>
+                                            )}
+                                        </div>
+                                    )
+                                })}
+                                <button type="button" className="text-xs font-semibold text-emerald-700 hover:text-emerald-800" onClick={() => setNewOrder(o => ({ ...o, items: [...o.items, { productId: '', name: '', price: '', quantity: 1 }] }))}>+ Add Item</button>
+                            </div>
+
+                            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
+                                <h3 className="text-sm font-semibold text-slate-800">Payment and Status</h3>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Payment Method</label>
+                                        <select className="w-full border border-slate-300 rounded-lg px-3 py-2.5" value={newOrder.paymentMethod} onChange={e => setNewOrder(o => ({ ...o, paymentMethod: e.target.value }))}>
+                                            <option value="COD">COD</option>
+                                            <option value="CARD">Card</option>
+                                            <option value="WALLET">Wallet</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Order Notes</label>
+                                        <input type="text" className="w-full border border-slate-300 rounded-lg px-3 py-2.5" value={newOrder.notes} onChange={e => setNewOrder(o => ({ ...o, notes: e.target.value }))} />
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Paid?</label>
+                                        <label className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2">
+                                            <input
+                                                type="checkbox"
+                                                checked={newOrder.isPaid}
+                                                onChange={e => setNewOrder(o => {
+                                                    const checked = e.target.checked;
+                                                    return {
+                                                        ...o,
+                                                        isPaid: checked,
+                                                        status: checked && o.status === 'ORDER_PLACED' ? 'PAID' : o.status,
+                                                    };
+                                                })}
+                                            />
+                                            <span className="text-sm text-slate-700">{newOrder.isPaid ? 'Yes' : 'No'}</span>
+                                        </label>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Status</label>
+                                        <select
+                                            className="w-full border border-slate-300 rounded-lg px-3 py-2.5"
+                                            value={newOrder.status}
+                                            onChange={e => setNewOrder(o => {
+                                                const nextStatus = e.target.value;
+                                                return {
+                                                    ...o,
+                                                    status: nextStatus,
+                                                    isPaid: nextStatus === 'PAID' ? true : o.isPaid,
+                                                };
+                                            })}
+                                        >
+                                            <option value="ORDER_PLACED">Order Placed</option>
+                                            <option value="PAID">Paid</option>
+                                            <option value="PROCESSING">Processing</option>
+                                            <option value="SHIPPED">Shipped</option>
+                                            <option value="DELIVERED">Delivered</option>
+                                            <option value="CANCELLED">Cancelled</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Order Date/Time</label>
+                                        <input type="datetime-local" className="w-full border border-slate-300 rounded-lg px-3 py-2.5" value={newOrder.orderDate} onChange={e => setNewOrder(o => ({ ...o, orderDate: e.target.value }))} />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="sticky bottom-0 bg-white pt-2">
+                                <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
+                                    <button type="button" className="px-4 py-2 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200" onClick={() => setShowCreateOrderModal(false)}>Cancel</button>
+                                    <button
+                                        type="button"
+                                        className={`px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold ${creatingOrder ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                        disabled={creatingOrder}
+                                        onClick={async () => {
+                                            setCreatingOrder(true);
+                                            try {
+                                                const token = await getToken();
+                                                const payload = {
+                                                    ...newOrder,
+                                                    items: newOrder.items.map(i => ({
+                                                        productId: i.productId,
+                                                        name: i.name,
+                                                        price: Number(i.price),
+                                                        quantity: Number(i.quantity)
+                                                    })),
+                                                    orderDate: newOrder.orderDate ? new Date(newOrder.orderDate).toISOString() : undefined
+                                                };
+                                                await axios.post('/api/store/orders/create', payload, {
+                                                    headers: { Authorization: `Bearer ${token}` }
+                                                });
+                                                toast.success('Order created!');
+                                                setShowCreateOrderModal(false);
+                                                const refreshedOrders = await axios.get('/api/store/orders', {
+                                                    headers: { Authorization: `Bearer ${token}` }
+                                                });
+                                                setOrders(refreshedOrders.data.orders || []);
+                                                setNewOrder({
+                                                    customer: { name: '', email: '', phone: '', street: '', city: '', state: '', country: '', zip: '' },
+                                                    items: [{ productId: '', name: '', price: '', quantity: 1 }],
+                                                    paymentMethod: 'COD',
+                                                    notes: '',
+                                                    isPaid: false,
+                                                    status: 'ORDER_PLACED',
+                                                    orderDate: (() => {
+                                                        const now = new Date();
+                                                        return now.toISOString().slice(0, 16);
+                                                    })(),
+                                                });
+                                            } catch (err) {
+                                                toast.error(err?.response?.data?.error || 'Failed to create order');
+                                            } finally {
+                                                setCreatingOrder(false);
+                                            }
+                                        }}
+                                    >
+                                        {creatingOrder ? 'Creating...' : 'Create Order'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Detailed Order/Earnings Summary */}
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-5 my-6 sm:my-8">

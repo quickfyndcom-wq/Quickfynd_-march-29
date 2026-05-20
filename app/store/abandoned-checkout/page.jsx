@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/useAuth";
 import axios from "axios";
 import Loading from "@/components/Loading";
+import toast from "react-hot-toast";
 
 export default function AbandonedCheckoutPage() {
   const { getToken } = useAuth();
@@ -13,6 +14,10 @@ export default function AbandonedCheckoutPage() {
   const [filter, setFilter] = useState("all"); // all, cart, guest-cart, checkout
   const [deletingId, setDeletingId] = useState("");
   const [clearing, setClearing] = useState(false);
+  const [convertingId, setConvertingId] = useState("");
+  const [activeConvertId, setActiveConvertId] = useState("");
+  const [employeeNames, setEmployeeNames] = useState({});
+  const [convertConfirmCart, setConvertConfirmCart] = useState(null);
 
   const asText = (value, fallback = "-") => {
     if (value === null || value === undefined) return fallback;
@@ -113,6 +118,75 @@ export default function AbandonedCheckoutPage() {
     } finally {
       setClearing(false);
     }
+  };
+
+  const handleConvertCart = async (cart) => {
+    const cartId = cart?._id;
+    if (!cartId || convertingId || deletingId) return;
+    const employeeName = String(employeeNames[cartId] || '').trim();
+    if (!employeeName) {
+      setError('Please enter employee name before conversion');
+      return;
+    }
+
+    try {
+      setError('');
+      setConvertingId(cartId);
+      const token = await getToken();
+      const { data } = await axios.post('/api/store/abandoned-checkout', {
+        action: 'convertToOrder',
+        cartId,
+        employeeName,
+      }, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      setCarts((prev) => prev.map((record) => {
+        if (record._id !== cartId) return record;
+        return {
+          ...record,
+          purchased: true,
+          purchasedAt: new Date().toISOString(),
+          purchasedOrderId: data?.orderId || record.purchasedOrderId,
+          convertedByEmployeeName: employeeName,
+          convertedAt: new Date().toISOString(),
+        };
+      }));
+
+      toast.custom((toastRef) => (
+        <div className={`max-w-sm w-full rounded-xl border border-emerald-200 bg-white shadow-lg transition ${toastRef.visible ? 'animate-enter' : 'animate-leave'}`}>
+          <div className="p-4">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 h-8 w-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">✓</div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-slate-900">Converted to Order</p>
+                <p className="mt-1 text-xs text-slate-600">Employee: <span className="font-semibold text-slate-800">{employeeName}</span></p>
+                <p className="mt-0.5 text-xs text-slate-500">Order ID: {String(data?.orderId || '').slice(-8)}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      ), { duration: 3500 });
+
+      setActiveConvertId('');
+      setConvertConfirmCart(null);
+    } catch (err) {
+      setError(err?.response?.data?.error || err.message || 'Failed to convert checkout to order');
+    } finally {
+      setConvertingId('');
+    }
+  };
+
+  const openConvertConfirm = (cart) => {
+    const cartId = cart?._id;
+    if (!cartId || convertingId || deletingId) return;
+    const employeeName = String(employeeNames[cartId] || '').trim();
+    if (!employeeName) {
+      setError('Please enter employee name before conversion');
+      return;
+    }
+    setError('');
+    setConvertConfirmCart(cart);
   };
 
   if (loading) return <Loading />;
@@ -226,12 +300,44 @@ export default function AbandonedCheckoutPage() {
                   </div>
                   <button
                     onClick={() => handleDeleteCart(c?._id)}
-                    disabled={deletingId === c?._id || clearing}
+                    disabled={deletingId === c?._id || clearing || convertingId === c?._id}
                     className="rounded-lg border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {deletingId === c?._id ? "Deleting..." : "Delete"}
                   </button>
+                  <button
+                    onClick={() => setActiveConvertId((prev) => (prev === c?._id ? '' : c?._id))}
+                    disabled={deletingId === c?._id || clearing || convertingId === c?._id || c?.purchased}
+                    className="rounded-lg border border-blue-300 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {c?.purchased ? 'Converted' : 'Conversion'}
+                  </button>
                 </div>
+
+                {activeConvertId === c?._id && !c?.purchased && (
+                  <div className="mb-3 rounded-lg border border-blue-100 bg-blue-50 p-3">
+                    <p className="mb-2 text-xs font-semibold text-blue-800">Convert to Placed Order</p>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <input
+                        type="text"
+                        placeholder="Enter employee name"
+                        value={employeeNames[c?._id] || ''}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setEmployeeNames((prev) => ({ ...prev, [c?._id]: value }));
+                        }}
+                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500"
+                      />
+                      <button
+                        onClick={() => openConvertConfirm(c)}
+                        disabled={convertingId === c?._id}
+                        className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {convertingId === c?._id ? 'Converting...' : 'Convert to Order'}
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
                   <div className="rounded-lg bg-slate-50 p-3">
@@ -258,6 +364,19 @@ export default function AbandonedCheckoutPage() {
                 <div className="mt-3 rounded-lg bg-slate-50 p-3">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Location</p>
                   <p className="mt-1 text-sm text-slate-700">{addressLine || "Not provided"}</p>
+                  {c?.purchased && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                      <span className="rounded-full bg-emerald-100 px-2 py-1 font-semibold text-emerald-700">Converted to order</span>
+                      {c?.convertedByEmployeeName && (
+                        <span className="rounded-full bg-blue-100 px-2 py-1 font-semibold text-blue-700">
+                          By {c.convertedByEmployeeName}
+                        </span>
+                      )}
+                      {c?.convertedAt && (
+                        <span className="text-slate-600">at {formatDate(c.convertedAt)}</span>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="mt-3 rounded-lg bg-slate-50 p-3">
@@ -282,6 +401,43 @@ export default function AbandonedCheckoutPage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {convertConfirmCart && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/55 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-600 to-cyan-500 px-5 py-4 text-white">
+              <p className="text-sm font-semibold tracking-wide">Confirm Conversion</p>
+              <p className="text-xs text-blue-100 mt-1">This will create a new order from this checkout.</p>
+            </div>
+            <div className="p-5 space-y-3">
+              <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 text-sm text-slate-700">
+                <p><span className="font-semibold text-slate-900">Customer:</span> {asText(convertConfirmCart?.name, 'Guest')}</p>
+                <p><span className="font-semibold text-slate-900">Employee:</span> {asText(employeeNames[convertConfirmCart?._id], '-')}</p>
+                <p><span className="font-semibold text-slate-900">Items:</span> {getItemCount(convertConfirmCart?.items)}</p>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setConvertConfirmCart(null)}
+                  disabled={convertingId === convertConfirmCart?._id}
+                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleConvertCart(convertConfirmCart)}
+                  disabled={convertingId === convertConfirmCart?._id}
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                >
+                  {convertingId === convertConfirmCart?._id ? 'Converting...' : 'Yes, Convert'}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

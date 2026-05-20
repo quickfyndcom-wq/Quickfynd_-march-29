@@ -20,6 +20,9 @@ const AbandonedCartSchema = new mongoose.Schema({
   purchased: { type: Boolean, default: false },
   purchasedAt: Date,
   purchasedOrderId: mongoose.Schema.Types.ObjectId,
+  convertedByUserId: String,
+  convertedByEmployeeName: String,
+  convertedAt: Date,
 }, { timestamps: true });
 
 // Index for better query performance

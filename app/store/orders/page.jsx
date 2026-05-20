@@ -80,10 +80,16 @@ export default function StoreOrders() {
     };
 
     const getImageSrc = (image) => {
+        const isInvalidString = (value) => {
+            const normalized = String(value || '').trim().toLowerCase()
+            return !normalized || normalized === '[object object]' || normalized === 'null' || normalized === 'undefined'
+        }
+
         if (Array.isArray(image)) return getImageSrc(image[0])
-        if (typeof image === 'string' && image.trim()) return image.trim()
+        if (typeof image === 'string' && !isInvalidString(image)) return image.trim()
         if (image && typeof image === 'object') {
-            return image.url || image.src || image.secure_url || image.image || '/placeholder.png'
+            const candidate = image.url || image.src || image.secure_url || image.image || image.thumbnail || ''
+            if (!isInvalidString(candidate)) return String(candidate).trim()
         }
         return '/placeholder.png'
     }
@@ -745,6 +751,10 @@ export default function StoreOrders() {
         const paymentStatus = String(order?.paymentStatus || '').trim().toLowerCase();
 
         if (orderStatus === 'RETURNED' || orderStatus === 'RETURNED_REFUNDED') return false;
+        if (orderStatus === 'PAYMENT_FAILED') return false;
+
+        // Explicit paid markers should always show paid.
+        if (orderStatus === 'PAID' || paymentMethod === 'paid' || paymentStatus === 'paid' || order?.isPaid) return true;
 
         // COD is paid only when delivered/collected
         if (paymentMethod === 'cod') {
@@ -762,6 +772,13 @@ export default function StoreOrders() {
         }
 
         return !!order?.isPaid;
+    };
+
+    const isConvertedOrder = (order) => {
+        if (String(order?.convertedByEmployeeName || '').trim()) return true;
+        if (Boolean(order?.convertedFromAbandonedCheckout)) return true;
+        const notes = String(order?.notes || '').trim();
+        return /converted from abandoned checkout by\s+(.+)$/i.test(notes);
     };
 
     // Calculate order statistics
@@ -790,6 +807,7 @@ export default function StoreOrders() {
             DAMAGED_REVIEW: orders.filter(o => ['MINOR_DAMAGE', 'DAMAGED'].includes(o?.deliveryReview?.packageCondition)).length,
             AWB_GENERATED: orders.filter(o => hasAwbPendingDownload(o)).length,
             AWB_REFERENCE_MISSING: orders.filter(o => hasGeneratedAwbMissingReference(o)).length,
+            CONVERTED: orders.filter(o => isConvertedOrder(o)).length,
             PENDING_PAYMENT: orders.filter(o => {
                 // Exclude cancelled, returned, RTO, payment failed, and return-requested orders
                 const hasReturn = hasReturnWithStatus(o, 'REQUESTED');
@@ -828,6 +846,7 @@ export default function StoreOrders() {
         else if (filterStatus === 'PENDING_SHIPMENT') statusFiltered = dateFiltered.filter(o => !getLifecycleBucket(o) && !o.trackingId && ['ORDER_PLACED', 'PROCESSING'].includes(o.status));
         else if (filterStatus === 'AWB_GENERATED') statusFiltered = dateFiltered.filter(o => hasAwbPendingDownload(o));
         else if (filterStatus === 'AWB_REFERENCE_MISSING') statusFiltered = dateFiltered.filter(o => hasGeneratedAwbMissingReference(o));
+        else if (filterStatus === 'CONVERTED') statusFiltered = dateFiltered.filter(o => isConvertedOrder(o));
         else if (filterStatus === 'RETURN_REQUESTED') statusFiltered = dateFiltered.filter(o => hasLifecycleStatus(o, 'RETURN_REQUESTED'));
         else if (filterStatus === 'RETURN_APPROVED') statusFiltered = dateFiltered.filter(o => hasLifecycleStatus(o, 'RETURN_APPROVED'));
         else if (filterStatus === 'RETURN_REJECTED') statusFiltered = dateFiltered.filter(o => hasLifecycleStatus(o, 'RETURN_REJECTED'));
@@ -919,6 +938,22 @@ export default function StoreOrders() {
     const getOrderSourceLabel = (order) => {
         const normalized = String(order?.orderSource || '').trim().toUpperCase();
         return normalized === 'APP' ? 'APP' : 'WEB';
+    };
+
+    const getConvertedEmployeeName = (order) => {
+        const explicitName = String(order?.convertedByEmployeeName || '').trim();
+        if (explicitName) return explicitName;
+
+        if (order?.convertedFromAbandonedCheckout) {
+            const creatorName = String(order?.createdByName || '').trim();
+            if (creatorName) return creatorName;
+        }
+
+        const notes = String(order?.notes || '').trim();
+        const matched = notes.match(/converted from abandoned checkout by\s+(.+)$/i);
+        if (matched?.[1]) return matched[1].trim();
+
+        return '';
     };
 
     const exportOrdersToCsv = () => {
@@ -2088,7 +2123,7 @@ export default function StoreOrders() {
 
             {/* Status Filter Tabs */}
             <div className="mb-3 flex flex-wrap gap-2">
-                {['ALL', 'PROCESSING', 'MANIFESTED', 'PICKUP_SCHEDULED', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'PAYMENT_FAILED', 'FAILED_ORDER', 'RTO', 'RETURNED', 'RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED', 'REPLACEMENT_REQUESTED', 'REPLACEMENT_APPROVED', 'REPLACED', 'RETURNED_REFUNDED', 'DAMAGED_REVIEW', 'AWB_GENERATED', 'AWB_REFERENCE_MISSING'].map(status => (
+                {['ALL', 'PROCESSING', 'MANIFESTED', 'PICKUP_SCHEDULED', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'PAYMENT_FAILED', 'FAILED_ORDER', 'RTO', 'RETURNED', 'RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED', 'REPLACEMENT_REQUESTED', 'REPLACEMENT_APPROVED', 'REPLACED', 'RETURNED_REFUNDED', 'DAMAGED_REVIEW', 'AWB_GENERATED', 'AWB_REFERENCE_MISSING', 'CONVERTED'].map(status => (
                     <button
                         key={status}
                         onClick={() => setFilterStatus(status)}
@@ -2098,12 +2133,12 @@ export default function StoreOrders() {
                                 : 'bg-gray-100 text-slate-700 hover:bg-gray-200'
                         }`}
                     >
-                        <span>{status === 'ALL' ? 'All Orders' : status === 'PAYMENT_FAILED' ? 'Payment Failed' : status === 'FAILED_ORDER' ? 'Failed Orders' : status === 'RETURN_REQUESTED' ? 'Return Requested' : status === 'RETURN_APPROVED' ? 'Return Approved' : status === 'RETURN_REJECTED' ? 'Return Rejected' : status === 'REPLACEMENT_REQUESTED' ? 'Replacement Requested' : status === 'REPLACEMENT_APPROVED' ? 'Replacement Approved' : status === 'REPLACED' ? 'Replaced' : status === 'RETURNED_REFUNDED' ? 'Returned & Refunded' : status === 'DAMAGED_REVIEW' ? 'Damaged Review' : status === 'AWB_GENERATED' ? 'AWB Generated' : status === 'AWB_REFERENCE_MISSING' ? 'AWB Ref Missing' : status.replace(/_/g, ' ')}</span>
-                        {(['FAILED_ORDER', 'RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED', 'REPLACEMENT_REQUESTED', 'REPLACEMENT_APPROVED', 'REPLACED', 'RETURNED_REFUNDED', 'DAMAGED_REVIEW', 'AWB_GENERATED', 'AWB_REFERENCE_MISSING'].includes(status)) && (status === 'FAILED_ORDER' ? stats.FAILED_ORDER : status === 'RETURN_REQUESTED' ? stats.RETURN_REQUESTED : status === 'RETURN_APPROVED' ? stats.RETURN_APPROVED : status === 'RETURN_REJECTED' ? stats.RETURN_REJECTED : status === 'REPLACEMENT_REQUESTED' ? stats.REPLACEMENT_REQUESTED : status === 'REPLACEMENT_APPROVED' ? stats.REPLACEMENT_APPROVED : status === 'REPLACED' ? stats.REPLACED : status === 'RETURNED_REFUNDED' ? stats.RETURNED_REFUNDED : status === 'DAMAGED_REVIEW' ? stats.DAMAGED_REVIEW : status === 'AWB_GENERATED' ? stats.AWB_GENERATED : stats.AWB_REFERENCE_MISSING) > 0 && (
+                        <span>{status === 'ALL' ? 'All Orders' : status === 'PAYMENT_FAILED' ? 'Payment Failed' : status === 'FAILED_ORDER' ? 'Failed Orders' : status === 'RETURN_REQUESTED' ? 'Return Requested' : status === 'RETURN_APPROVED' ? 'Return Approved' : status === 'RETURN_REJECTED' ? 'Return Rejected' : status === 'REPLACEMENT_REQUESTED' ? 'Replacement Requested' : status === 'REPLACEMENT_APPROVED' ? 'Replacement Approved' : status === 'REPLACED' ? 'Replaced' : status === 'RETURNED_REFUNDED' ? 'Returned & Refunded' : status === 'DAMAGED_REVIEW' ? 'Damaged Review' : status === 'AWB_GENERATED' ? 'AWB Generated' : status === 'AWB_REFERENCE_MISSING' ? 'AWB Ref Missing' : status === 'CONVERTED' ? 'Converted' : status.replace(/_/g, ' ')}</span>
+                        {(['FAILED_ORDER', 'RETURN_REQUESTED', 'RETURN_APPROVED', 'RETURN_REJECTED', 'REPLACEMENT_REQUESTED', 'REPLACEMENT_APPROVED', 'REPLACED', 'RETURNED_REFUNDED', 'DAMAGED_REVIEW', 'AWB_GENERATED', 'AWB_REFERENCE_MISSING', 'CONVERTED'].includes(status)) && (status === 'FAILED_ORDER' ? stats.FAILED_ORDER : status === 'RETURN_REQUESTED' ? stats.RETURN_REQUESTED : status === 'RETURN_APPROVED' ? stats.RETURN_APPROVED : status === 'RETURN_REJECTED' ? stats.RETURN_REJECTED : status === 'REPLACEMENT_REQUESTED' ? stats.REPLACEMENT_REQUESTED : status === 'REPLACEMENT_APPROVED' ? stats.REPLACEMENT_APPROVED : status === 'REPLACED' ? stats.REPLACED : status === 'RETURNED_REFUNDED' ? stats.RETURNED_REFUNDED : status === 'DAMAGED_REVIEW' ? stats.DAMAGED_REVIEW : status === 'AWB_GENERATED' ? stats.AWB_GENERATED : status === 'AWB_REFERENCE_MISSING' ? stats.AWB_REFERENCE_MISSING : stats.CONVERTED) > 0 && (
                             <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-                                filterStatus === status ? 'bg-blue-800' : status === 'AWB_GENERATED' ? 'bg-emerald-500 text-white' : status === 'AWB_REFERENCE_MISSING' ? 'bg-amber-500 text-white' : status === 'RETURN_APPROVED' ? 'bg-green-500 text-white' : status === 'REPLACEMENT_APPROVED' ? 'bg-violet-600 text-white' : status === 'REPLACED' ? 'bg-green-500 text-white' : status === 'RETURNED_REFUNDED' ? 'bg-cyan-500 text-white' : status === 'RETURN_REJECTED' ? 'bg-rose-500 text-white' : status === 'REPLACEMENT_REQUESTED' ? 'bg-violet-500 text-white' : 'bg-red-500 text-white'
+                                filterStatus === status ? 'bg-blue-800' : status === 'AWB_GENERATED' ? 'bg-emerald-500 text-white' : status === 'AWB_REFERENCE_MISSING' ? 'bg-amber-500 text-white' : status === 'RETURN_APPROVED' ? 'bg-green-500 text-white' : status === 'REPLACEMENT_APPROVED' ? 'bg-violet-600 text-white' : status === 'REPLACED' ? 'bg-green-500 text-white' : status === 'RETURNED_REFUNDED' ? 'bg-cyan-500 text-white' : status === 'CONVERTED' ? 'bg-cyan-600 text-white' : status === 'RETURN_REJECTED' ? 'bg-rose-500 text-white' : status === 'REPLACEMENT_REQUESTED' ? 'bg-violet-500 text-white' : 'bg-red-500 text-white'
                             }`}>
-                                {status === 'FAILED_ORDER' ? stats.FAILED_ORDER : status === 'FAILED_ORDER' ? stats.FAILED_ORDER : status === 'RETURN_REQUESTED' ? stats.RETURN_REQUESTED : status === 'RETURN_APPROVED' ? stats.RETURN_APPROVED : status === 'RETURN_REJECTED' ? stats.RETURN_REJECTED : status === 'REPLACEMENT_REQUESTED' ? stats.REPLACEMENT_REQUESTED : status === 'REPLACEMENT_APPROVED' ? stats.REPLACEMENT_APPROVED : status === 'REPLACED' ? stats.REPLACED : status === 'RETURNED_REFUNDED' ? stats.RETURNED_REFUNDED : status === 'DAMAGED_REVIEW' ? stats.DAMAGED_REVIEW : status === 'AWB_GENERATED' ? stats.AWB_GENERATED : stats.AWB_REFERENCE_MISSING}
+                                {status === 'FAILED_ORDER' ? stats.FAILED_ORDER : status === 'FAILED_ORDER' ? stats.FAILED_ORDER : status === 'RETURN_REQUESTED' ? stats.RETURN_REQUESTED : status === 'RETURN_APPROVED' ? stats.RETURN_APPROVED : status === 'RETURN_REJECTED' ? stats.RETURN_REJECTED : status === 'REPLACEMENT_REQUESTED' ? stats.REPLACEMENT_REQUESTED : status === 'REPLACEMENT_APPROVED' ? stats.REPLACEMENT_APPROVED : status === 'REPLACED' ? stats.REPLACED : status === 'RETURNED_REFUNDED' ? stats.RETURNED_REFUNDED : status === 'DAMAGED_REVIEW' ? stats.DAMAGED_REVIEW : status === 'AWB_GENERATED' ? stats.AWB_GENERATED : status === 'AWB_REFERENCE_MISSING' ? stats.AWB_REFERENCE_MISSING : stats.CONVERTED}
                             </span>
                         )}
                     </button>
@@ -2452,6 +2487,16 @@ export default function StoreOrders() {
                                             <span className={`text-xs px-2 py-0.5 rounded-full w-fit font-semibold ${getOrderSourceLabel(order) === 'APP' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-700'}`}>
                                                 {getOrderSourceLabel(order)}
                                             </span>
+                                            {getConvertedEmployeeName(order) && (
+                                                <span className="text-xs bg-cyan-100 text-cyan-700 px-2 py-0.5 rounded-full w-fit font-semibold">
+                                                    Converted by {getConvertedEmployeeName(order)}
+                                                </span>
+                                            )}
+                                            {order?.createdByName && (
+                                                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full w-fit font-semibold">
+                                                    Created by {order.createdByName}
+                                                </span>
+                                            )}
                                         </div>
                                     </td>
                                     <td className="px-4 py-3">
@@ -2662,48 +2707,49 @@ export default function StoreOrders() {
                 </div>
             )}
             {isModalOpen && selectedOrder && (
-                <div onClick={closeModal} className="fixed inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm text-slate-700 text-sm z-50 p-4" >
-                    <div onClick={e => e.stopPropagation()} className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+                <div onClick={closeModal} className="fixed inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm text-slate-700 text-sm z-50 p-2 sm:p-4" >
+                    <div onClick={e => e.stopPropagation()} className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto overflow-x-hidden">
                         {/* Header */}
-                        <div className="sticky top-0 bg-gradient-to-r from-blue-600 to-purple-600 text-white p-6 rounded-t-2xl">
-                            <div className="flex justify-between items-center">
-                                <div>
-                                    <h2 className="text-2xl font-bold mb-1">Order Details</h2>
+                        <div className="sticky top-0 bg-gradient-to-r from-blue-600 to-purple-600 text-white p-4 sm:p-6 rounded-t-2xl">
+                            <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                    <h2 className="text-xl sm:text-2xl font-bold mb-1">Order Details</h2>
                                     <p className="text-blue-100 text-xs">Order No: <span className='font-mono text-white'>{getDisplayOrderNumber(selectedOrder)}</span></p>
                                 </div>
-                                <div className="flex items-center gap-2">
+                                <button onClick={closeModal} className="p-2 hover:bg-white/20 rounded-full transition-colors shrink-0">
+                                    <X size={22} />
+                                </button>
+                            </div>
+
+                            <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center sm:gap-2">
                                     <button
                                         onClick={() => downloadInvoice(selectedOrder)}
-                                        className="flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors backdrop-blur-sm"
+                                        className="w-full sm:w-auto flex items-center justify-center gap-2 px-3 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors backdrop-blur-sm"
                                         title="Download Invoice"
                                     >
                                         <Download size={18} />
-                                        <span className="text-sm">Download</span>
+                                        <span className="text-xs sm:text-sm whitespace-nowrap">Download</span>
                                     </button>
                                     <button
                                         onClick={() => openAwbEditor(selectedOrder)}
-                                        className="flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors backdrop-blur-sm"
+                                        className="w-full sm:w-auto flex items-center justify-center gap-2 px-3 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors backdrop-blur-sm"
                                         title={hasGeneratedAwb(selectedOrder) ? 'Edit AWB' : 'Generate AWB'}
                                     >
                                         <Download size={18} />
-                                        <span className="text-sm">{hasGeneratedAwb(selectedOrder) ? 'Edit AWB' : 'Generate AWB'}</span>
+                                        <span className="text-xs sm:text-sm whitespace-nowrap">{hasGeneratedAwb(selectedOrder) ? 'Edit AWB' : 'Generate AWB'}</span>
                                     </button>
                                     <button
                                         onClick={() => printInvoice(selectedOrder)}
-                                        className="flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors backdrop-blur-sm"
+                                        className="col-span-2 sm:col-span-1 w-full sm:w-auto flex items-center justify-center gap-2 px-3 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors backdrop-blur-sm"
                                         title="Print Invoice"
                                     >
                                         <Printer size={18} />
-                                        <span className="text-sm">Print</span>
-                                    </button>
-                                    <button onClick={closeModal} className="p-2 hover:bg-white/20 rounded-full transition-colors">
-                                        <X size={24} />
+                                        <span className="text-xs sm:text-sm whitespace-nowrap">Print</span>
                                     </button>
                                 </div>
-                            </div>
                         </div>
 
-                        <div className="p-6 space-y-6">
+                        <div className="p-4 sm:p-6 space-y-6">
                             {/* Tracking Details Section */}
                             <div className="bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-200 rounded-xl p-5">
                                 <div className="flex items-center gap-2 mb-4">
@@ -3006,7 +3052,7 @@ export default function StoreOrders() {
                                         )}
                                     </div>
                                     <div className="bg-red-50 p-4 space-y-3">
-                                        <div className="flex gap-2">
+                                        <div className="flex flex-col sm:flex-row gap-2">
                                             <input
                                                 type="text"
                                                 value={indiaPostAwb}
@@ -3016,7 +3062,7 @@ export default function StoreOrders() {
                                             />
                                             <button
                                                 onClick={saveIndiaPostTracking}
-                                                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg text-sm transition-colors whitespace-nowrap"
+                                                className="w-full sm:w-auto px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg text-sm transition-colors whitespace-nowrap"
                                             >
                                                 Save &amp; Track
                                             </button>
@@ -3517,7 +3563,7 @@ export default function StoreOrders() {
                                     {selectedOrder.orderItems.map((item, i) => (
                                         <div key={i} className="flex items-center gap-4 border border-slate-200 rounded-xl p-3 bg-white hover:shadow-md transition-shadow">
                                             <img
-                                                src={getImageSrc(item.productId?.images?.[0] || item.product?.images?.[0] || item.productId?.image || item.product?.image || item.image)}
+                                                src={resolveOrderItemImage(item)}
                                                 alt={item.productId?.name || item.product?.name || item.name || 'Product'}
                                                 className="w-20 h-20 object-cover rounded-lg border border-slate-100"
                                                 onError={(e) => {
@@ -4105,7 +4151,7 @@ export default function StoreOrders() {
                                                             {/* Product Image */}
                                                             <div className="flex-shrink-0">
                                                                 <img 
-                                                                    src={getImageSrc(item.image || item.product?.image || item.productId?.image || item.product?.images?.[0] || item.productId?.images?.[0])} 
+                                                                    src={resolveOrderItemImage(item)} 
                                                                     alt={item.name || item.product?.name}
                                                                     className="w-16 h-16 object-cover rounded-lg border"
                                                                 />
