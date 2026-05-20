@@ -18,6 +18,8 @@ export default function AbandonedCheckoutPage() {
   const [activeConvertId, setActiveConvertId] = useState("");
   const [employeeNames, setEmployeeNames] = useState({});
   const [convertConfirmCart, setConvertConfirmCart] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   const asText = (value, fallback = "-") => {
     if (value === null || value === undefined) return fallback;
@@ -70,6 +72,10 @@ export default function AbandonedCheckoutPage() {
   useEffect(() => {
     fetchCarts();
   }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filter, pageSize]);
 
   const handleDeleteCart = async (cartId) => {
     if (!cartId || deletingId) return;
@@ -195,6 +201,8 @@ export default function AbandonedCheckoutPage() {
     "cart": "🛒 Added to Cart",
     "guest-cart": "👤 Guest Cart",
     "checkout": "💳 At Checkout",
+    "purchased": "✓ Purchased",
+    "abandoned": "⚠ Abandoned",
   };
 
   const filteredCarts = filter === "all" 
@@ -204,6 +212,13 @@ export default function AbandonedCheckoutPage() {
     : filter === "abandoned"
     ? carts.filter(c => !c.purchased)
     : carts.filter(c => c.source === filter);
+
+  const totalItems = filteredCarts.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (safeCurrentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, totalItems);
+  const paginatedCarts = filteredCarts.slice(startIndex, endIndex);
 
   return (
     <div className="w-full">
@@ -263,6 +278,24 @@ export default function AbandonedCheckoutPage() {
         </button>
       </div>
 
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2">
+        <p className="text-sm text-slate-600">
+          Showing {totalItems === 0 ? 0 : startIndex + 1}-{endIndex} of {totalItems}
+        </p>
+        <div className="flex items-center gap-2">
+          <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Per page</label>
+          <select
+            value={pageSize}
+            onChange={(event) => setPageSize(Number(event.target.value) || 10)}
+            className="rounded-md border border-slate-300 px-2 py-1 text-sm text-slate-700"
+          >
+            {[10, 20, 50].map((size) => (
+              <option key={size} value={size}>{size}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
       {filteredCarts.length === 0 ? (
         <div className="text-center py-10 text-slate-500 border rounded">
           {filter === "all" 
@@ -272,7 +305,7 @@ export default function AbandonedCheckoutPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4">
-          {filteredCarts.map((c) => {
+          {paginatedCarts.map((c) => {
             const customerName = asText(c?.name, "Name not provided");
             const email = asText(c?.email, "Email not provided");
             const phone = asText(c?.phone, "-");
@@ -401,6 +434,45 @@ export default function AbandonedCheckoutPage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {totalItems > 0 && totalPages > 1 && (
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+          <button
+            type="button"
+            onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+            disabled={safeCurrentPage <= 1}
+            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Previous
+          </button>
+
+          {Array.from({ length: totalPages }, (_, idx) => idx + 1)
+            .slice(Math.max(0, safeCurrentPage - 3), Math.max(0, safeCurrentPage - 3) + 5)
+            .map((page) => (
+              <button
+                key={page}
+                type="button"
+                onClick={() => setCurrentPage(page)}
+                className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+                  safeCurrentPage === page
+                    ? "bg-blue-600 text-white"
+                    : "border border-slate-300 text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                {page}
+              </button>
+            ))}
+
+          <button
+            type="button"
+            onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+            disabled={safeCurrentPage >= totalPages}
+            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Next
+          </button>
         </div>
       )}
 

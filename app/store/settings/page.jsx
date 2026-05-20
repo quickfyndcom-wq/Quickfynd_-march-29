@@ -2,21 +2,159 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/useAuth";
 import axios from "axios";
+import { useSearchParams } from "next/navigation";
+
+const SIDEBAR_PERMISSION_GROUPS = [
+    {
+        title: "Core",
+        items: [
+            { id: "/store", label: "Dashboard" },
+            { id: "/store/categories", label: "Categories" },
+            { id: "/store/add-product", label: "Add Product" },
+            { id: "/store/manage-product", label: "Manage Product" },
+        ],
+    },
+    {
+        title: "Storefront",
+        items: [
+            { id: "/store/home-preferences", label: "Home Preferences" },
+            { id: "/store/category-slider", label: "Featured Sections" },
+            { id: "/store/navbar-menu", label: "Navbar Menu" },
+            { id: "/store/storefront/home-menu-categories", label: "Home Categories" },
+            { id: "/store/storefront/hero-slider", label: "Hero Slider" },
+            { id: "/store/storefront/carousel-slider", label: "Carousel Slider" },
+            { id: "/store/storefront/deals", label: "Deals of the Day" },
+            { id: "/store/media", label: "Media" },
+            { id: "/store/mobile-features", label: "Mobile Features" },
+        ],
+    },
+    {
+        title: "Marketing",
+        items: [
+            { id: "/store/personalized-offers", label: "Promotional Offers" },
+            { id: "/store/coupons", label: "Coupons" },
+            { id: "/store/promotional-emails", label: "Promotional Emails" },
+            { id: "/store/ads-tracking", label: "Ad Tracking" },
+            { id: "/store/marketing-expenses", label: "Marketing Expenses" },
+        ],
+    },
+    {
+        title: "Sales & Operations",
+        items: [
+            { id: "/store/orders", label: "Orders" },
+            { id: "/store/abandoned-checkout", label: "Abandoned Checkout" },
+            { id: "/store/customer-tracking", label: "Customer Tracking" },
+            { id: "/store/shipping", label: "Shipping" },
+            { id: "/store/return-requests", label: "Return Requests" },
+            { id: "/store/balance", label: "Balance" },
+            { id: "/store/sales-report", label: "Sales Report" },
+            { id: "/store/most-selling-products", label: "Most Selling Products" },
+        ],
+    },
+    {
+        title: "Customers & Support",
+        items: [
+            { id: "/store/customers", label: "Customers" },
+            { id: "/store/settings/users", label: "Manage Users" },
+            { id: "/store/reviews", label: "Reviews" },
+            { id: "/store/tickets", label: "Support Tickets" },
+            { id: "/store/product-notifications", label: "Product Notifications" },
+            { id: "/store#contact-messages", label: "Contact Us Messages" },
+        ],
+    },
+    {
+        title: "Settings",
+        items: [
+            { id: "/store/settings", label: "Settings" },
+        ],
+    },
+];
+
+const LEGACY_GROUP_LINKS = {
+    overview: ["/store", "/store#contact-messages", "/store/settings"],
+    catalog: ["/store/categories", "/store/add-product", "/store/manage-product"],
+    orders: ["/store/orders", "/store/abandoned-checkout", "/store/customer-tracking", "/store/shipping", "/store/return-requests", "/store/balance", "/store/sales-report", "/store/most-selling-products"],
+    customers: ["/store/customers", "/store/settings/users", "/store/reviews", "/store/tickets", "/store/product-notifications"],
+    marketing: ["/store/personalized-offers", "/store/coupons", "/store/promotional-emails", "/store/ads-tracking", "/store/marketing-expenses"],
+    storefront: ["/store/home-preferences", "/store/category-slider", "/store/navbar-menu", "/store/storefront/home-menu-categories", "/store/storefront/hero-slider", "/store/storefront/carousel-slider", "/store/storefront/deals", "/store/media", "/store/mobile-features"],
+};
+
+const ALL_PERMISSION_IDS = SIDEBAR_PERMISSION_GROUPS.flatMap((group) => group.items.map((item) => item.id));
+
+const GROUP_PERMISSION_IDS = SIDEBAR_PERMISSION_GROUPS.reduce((acc, group) => {
+    acc[group.title] = group.items.map((item) => item.id);
+    return acc;
+}, {});
+
+const createDefaultPermissions = () => {
+    return ALL_PERMISSION_IDS.reduce((acc, id) => {
+        acc[id] = true;
+        return acc;
+    }, {});
+};
+
+const createLockedPermissions = () => {
+    return ALL_PERMISSION_IDS.reduce((acc, id) => {
+        acc[id] = false;
+        return acc;
+    }, {});
+};
+
+const mapLegacyPermissionsToMenuPermissions = (legacyPermissions = {}) => {
+    const mapped = createLockedPermissions();
+    Object.entries(LEGACY_GROUP_LINKS).forEach(([group, links]) => {
+        if (legacyPermissions[group] === true) {
+            links.forEach((link) => {
+                mapped[link] = true;
+            });
+        }
+    });
+    return mapped;
+};
+
+const applyGroupPermissionState = (basePermissions, groupTitle, allowed) => {
+    const next = { ...(basePermissions || {}) };
+    const ids = GROUP_PERMISSION_IDS[groupTitle] || [];
+    ids.forEach((id) => {
+        next[id] = allowed;
+    });
+    return next;
+};
+
+const normalizeStoredMenuPermissions = (member) => {
+    const defaults = createLockedPermissions();
+    if (member?.permissionsConfigured === true && Array.isArray(member?.allowedPaths)) {
+        const mapped = { ...defaults };
+        member.allowedPaths.forEach((path) => {
+            if (typeof path === "string" && path.startsWith("/store")) {
+                mapped[path] = true;
+            }
+        });
+        return mapped;
+    }
+    const rawMenu = member?.menuPermissions;
+    if (rawMenu && typeof rawMenu === "object" && Object.keys(rawMenu).length > 0) {
+        return { ...defaults, ...rawMenu };
+    }
+    if (member?.permissions && typeof member.permissions === "object") {
+        return mapLegacyPermissionsToMenuPermissions(member.permissions);
+    }
+    if (member?.role === "admin" && member?.permissionsConfigured !== true) {
+        return createDefaultPermissions();
+    }
+    return defaults;
+};
 
 export default function SettingsPage() {
     const { user, getToken } = useAuth();
+    const searchParams = useSearchParams();
+    const requestedTab = searchParams?.get("tab");
+    const permissionsOnly = searchParams?.get("permissionsOnly") === "1";
     const [activeTab, setActiveTab] = useState("profile");
     const [inviteOpen, setInviteOpen] = useState(false);
     const [inviteEmail, setInviteEmail] = useState("");
     const [inviteStatus, setInviteStatus] = useState("");
-    const [invitePermissions, setInvitePermissions] = useState({
-        overview: true,
-        catalog: true,
-        orders: true,
-        customers: true,
-        marketing: true,
-        storefront: true
-    });
+    const [invitePermissions, setInvitePermissions] = useState(() => createDefaultPermissions());
     
     // Profile fields
     const [name, setName] = useState("");
@@ -50,21 +188,22 @@ export default function SettingsPage() {
     // Dashboard Access fields
     const [teamMembers, setTeamMembers] = useState([]);
     const [memberPermissions, setMemberPermissions] = useState({});
+    const [memberRoles, setMemberRoles] = useState({});
+    const [selectedMemberForPermissions, setSelectedMemberForPermissions] = useState(null);
+    const [savingMemberPermissions, setSavingMemberPermissions] = useState(false);
     
-    const dashboardComponents = [
-        { id: 'overview', label: 'Overview', icon: '📊' },
-        { id: 'catalog', label: 'Catalog', icon: '📁' },
-        { id: 'orders', label: 'Orders', icon: '📋' },
-        { id: 'customers', label: 'Customers', icon: '👥' },
-        { id: 'marketing', label: 'Marketing', icon: '📢' },
-        { id: 'storefront', label: 'Storefront', icon: '✨' },
-    ];
     const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
     const [currencyPreference, setCurrencyPreference] = useState("INR");
     
     const [saving, setSaving] = useState(false);
     const [message, setMessage] = useState("");
     const [loadingTeam, setLoadingTeam] = useState(false);
+
+    useEffect(() => {
+        if (requestedTab === "dashboardAccess") {
+            setActiveTab("dashboardAccess");
+        }
+    }, [requestedTab]);
 
     // Populate fields when user is loaded or changes
     useEffect(() => {
@@ -153,17 +292,13 @@ export default function SettingsPage() {
                     setTeamMembers(res.data.users || []);
                     // Initialize permissions for each member
                     const permissions = {};
+                    const roles = {};
                     res.data.users?.forEach(member => {
-                        permissions[member.id] = member.permissions || {
-                            overview: true,
-                            catalog: true,
-                            orders: true,
-                            customers: true,
-                            marketing: true,
-                            storefront: true
-                        };
+                        permissions[member.id] = normalizeStoredMenuPermissions(member);
+                        roles[member.id] = member.role === 'admin' ? 'admin' : 'member';
                     });
                     setMemberPermissions(permissions);
+                    setMemberRoles(roles);
                 } catch (err) {
                     console.error('Failed to fetch team members:', err);
                     setMessage('Failed to load team members');
@@ -237,22 +372,23 @@ export default function SettingsPage() {
                 <p className="text-sm text-slate-500">Manage your store and account preferences</p>
             </div>
             
-            {/* Tabs */}
-            <div className="flex gap-0 border-b border-slate-200 px-6 bg-slate-50 overflow-x-auto">
-                {["profile", "store", "preferences", "dashboardAccess"].map(tab => (
-                    <button
-                        key={tab}
-                        onClick={() => setActiveTab(tab)}
-                        className={`px-4 py-3 font-medium text-sm transition border-b-2 whitespace-nowrap ${
-                            activeTab === tab 
-                                ? 'text-blue-600 border-blue-600' 
-                                : 'text-slate-600 border-transparent hover:text-slate-800'
-                        }`}
-                    >
-                        {tab === "dashboardAccess" ? "Dashboard Access" : tab.charAt(0).toUpperCase() + tab.slice(1)}
-                    </button>
-                ))}
-            </div>
+            {!permissionsOnly && (
+                <div className="flex gap-0 border-b border-slate-200 px-6 bg-slate-50 overflow-x-auto">
+                    {["profile", "store", "preferences", "dashboardAccess"].map(tab => (
+                        <button
+                            key={tab}
+                            onClick={() => setActiveTab(tab)}
+                            className={`px-4 py-3 font-medium text-sm transition border-b-2 whitespace-nowrap ${
+                                activeTab === tab 
+                                    ? 'text-blue-600 border-blue-600' 
+                                    : 'text-slate-600 border-transparent hover:text-slate-800'
+                            }`}
+                        >
+                            {tab === "dashboardAccess" ? "Dashboard Access" : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                        </button>
+                    ))}
+                </div>
+            )}
             
             {/* Content */}
             <div className="flex-1 overflow-y-auto">
@@ -479,14 +615,32 @@ export default function SettingsPage() {
                     
                     {/* Dashboard Access Tab */}
                     {activeTab === "dashboardAccess" && (
-                        <div className="space-y-4">
-                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                                <p className="text-sm text-blue-900">
-                                    <span className="font-semibold">💡 Manage Permissions:</span> Control which dashboard components each team member can access.
-                                </p>
+                        <div className="space-y-6">
+                            <div className="rounded-2xl border border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 p-4 md:p-5">
+                                <h3 className="font-semibold text-slate-900">Page-Level Access Control</h3>
+                                <p className="text-sm text-slate-600 mt-1">Choose exactly which sidebar pages each invited member can open. All unchecked pages are locked automatically.</p>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setInvitePermissions(createDefaultPermissions())}
+                                        className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                                    >
+                                        Default Template: Allow All
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const locked = createDefaultPermissions();
+                                            ALL_PERMISSION_IDS.forEach((id) => { locked[id] = false; });
+                                            setInvitePermissions(locked);
+                                        }}
+                                        className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                                    >
+                                        Default Template: Lock All
+                                    </button>
+                                </div>
                             </div>
-                            
-                            {/* Team Members Permissions */}
+
                             <div>
                                 <h3 className="font-semibold text-slate-900 mb-3">Team Member Access</h3>
                                 {loadingTeam ? (
@@ -499,114 +653,112 @@ export default function SettingsPage() {
                                     </div>
                                 ) : (
                                     <div className="space-y-4">
-                                        {teamMembers.map(member => (
-                                            <div key={member.id} className="border border-slate-200 rounded-lg p-4">
-                                                <div className="flex items-center justify-between mb-3">
+                                        {teamMembers.map((member) => (
+                                            <div key={member.id} className="border border-slate-200 rounded-xl bg-white p-4">
+                                                <div className="flex flex-wrap items-center justify-between gap-3">
                                                     <div>
-                                                        <p className="font-medium text-slate-900">{member.name || member.email}</p>
+                                                        <p className="font-semibold text-slate-900">{member.name || member.email}</p>
                                                         <p className="text-xs text-slate-500">{member.email}</p>
                                                     </div>
-                                                    <span className={`text-xs px-2 py-1 rounded-full ${member.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
-                                                        {member.role || 'member'}
-                                                    </span>
+                                                    <div className="flex items-center gap-2 flex-wrap justify-end">
+                                                        <span className={`text-xs px-2 py-1 rounded-full ${member.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                                                            {member.role === 'admin' ? 'admin' : 'staff'}
+                                                        </span>
+                                                        <span className="text-xs px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">
+                                                            {Object.values(memberPermissions[member.id] || createDefaultPermissions()).filter(Boolean).length} allowed
+                                                        </span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setSelectedMemberForPermissions(member);
+                                                                setMemberPermissions((prev) => ({
+                                                                    ...prev,
+                                                                    [member.id]: prev[member.id] || normalizeStoredMenuPermissions(member),
+                                                                }));
+                                                            }}
+                                                            className="px-3 py-1.5 rounded-lg text-xs bg-blue-600 text-white hover:bg-blue-700"
+                                                        >
+                                                            Manage Specific Permissions
+                                                        </button>
+                                                    </div>
                                                 </div>
-                                                
-                                                {/* Component Permissions */}
-                                                <div className="grid grid-cols-2 gap-2">
-                                                    {dashboardComponents.map(component => (
-                                                        <label key={component.id} className="flex items-center gap-2 p-2 rounded-lg hover:bg-slate-50 cursor-pointer">
-                                                            <input 
-                                                                type="checkbox" 
-                                                                checked={memberPermissions[member.id]?.[component.id] ?? true}
-                                                                onChange={(e) => {
-                                                                    setMemberPermissions(prev => ({
-                                                                        ...prev,
-                                                                        [member.id]: {
-                                                                            ...prev[member.id],
-                                                                            [component.id]: e.target.checked
-                                                                        }
-                                                                    }));
-                                                                }}
-                                                                className="w-4 h-4"
-                                                            />
-                                                            <span className="text-sm">
-                                                                {component.icon} {component.label}
-                                                            </span>
-                                                        </label>
-                                                    ))}
-                                                </div>
-                                                
-                                                <button 
-                                                    type="button"
-                                                    onClick={async () => {
-                                                        try {
-                                                            const token = await getToken();
-                                                            await axios.post('/api/store/users/update-permissions', {
-                                                                userId: member.id,
-                                                                permissions: memberPermissions[member.id]
-                                                            }, {
-                                                                headers: { Authorization: `Bearer ${token}` }
-                                                            });
-                                                            setMessage('Permissions updated successfully!');
-                                                        } catch (err) {
-                                                            setMessage(err?.response?.data?.error || 'Failed to update permissions');
-                                                        }
-                                                    }}
-                                                    className="mt-3 w-full bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded transition"
-                                                >
-                                                    Save Permissions
-                                                </button>
                                             </div>
                                         ))}
                                     </div>
                                 )}
                             </div>
-                            
-                            {/* Default Permissions for New Users */}
-                            <div className="border-t border-slate-200 pt-4 mt-4">
-                                <h3 className="font-semibold text-slate-900 mb-3">Default Permissions for New Team Members</h3>
-                                <p className="text-xs text-slate-600 mb-3">Select which components new invited users will have access to by default:</p>
-                                
-                                <div className="grid grid-cols-2 gap-3 bg-slate-50 p-4 rounded-lg">
-                                    {dashboardComponents.map(component => (
-                                        <label key={component.id} className="flex items-center gap-2 cursor-pointer">
-                                            <input 
-                                                type="checkbox" 
-                                                checked={invitePermissions[component.id] ?? true}
-                                                onChange={(e) => {
-                                                    setInvitePermissions(prev => ({
-                                                        ...prev,
-                                                        [component.id]: e.target.checked
-                                                    }));
-                                                }}
-                                                className="w-4 h-4"
-                                            />
-                                            <span className="text-sm">
-                                                {component.icon} {component.label}
-                                            </span>
-                                        </label>
+
+                            <div className="border border-slate-200 rounded-xl p-4 bg-slate-50">
+                                <h3 className="font-semibold text-slate-900 mb-1">Default Permissions for New Team Members</h3>
+                                <p className="text-xs text-slate-600 mb-3">This template is used when you invite a new user.</p>
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                                    {SIDEBAR_PERMISSION_GROUPS.map((group) => (
+                                        <div key={`default-${group.title}`} className="rounded-lg border border-slate-200 bg-white p-3">
+                                            <div className="mb-2 flex items-center justify-between gap-2">
+                                                <p className="text-xs uppercase tracking-wide font-semibold text-slate-600">{group.title}</p>
+                                                <div className="flex items-center gap-1">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setInvitePermissions((prev) => applyGroupPermissionState(prev, group.title, true));
+                                                        }}
+                                                        className="px-2 py-1 rounded border border-slate-200 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+                                                    >
+                                                        Allow All
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setInvitePermissions((prev) => applyGroupPermissionState(prev, group.title, false));
+                                                        }}
+                                                        className="px-2 py-1 rounded border border-slate-200 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+                                                    >
+                                                        Lock All
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div className="space-y-2">
+                                                {group.items.map((item) => (
+                                                    <label key={`default-${item.id}`} className="flex items-center gap-2 cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={invitePermissions[item.id] ?? true}
+                                                            onChange={(e) => {
+                                                                setInvitePermissions((prev) => ({
+                                                                    ...prev,
+                                                                    [item.id]: e.target.checked,
+                                                                }));
+                                                            }}
+                                                            className="w-4 h-4"
+                                                        />
+                                                        <span className="text-sm text-slate-700">{item.label}</span>
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        </div>
                                     ))}
                                 </div>
                             </div>
                         </div>
                     )}
                     
-                    {/* Buttons */}
-                    <div className="flex flex-col gap-2 pt-4 border-t border-slate-200">
-                        {activeTab !== "dashboardAccess" && (
-                            <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg font-medium transition" disabled={saving}>
-                                {saving ? "Saving..." : "Save Changes"}
+                    {(!permissionsOnly || activeTab === "dashboardAccess") && (
+                        <div className="flex flex-col gap-2 pt-4 border-t border-slate-200">
+                            {activeTab !== "dashboardAccess" && !permissionsOnly && (
+                                <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg font-medium transition" disabled={saving}>
+                                    {saving ? "Saving..." : "Save Changes"}
+                                </button>
+                            )}
+                            <button 
+                                type="button" 
+                                className="w-full bg-orange-500 hover:bg-orange-600 text-white px-4 py-2.5 rounded-lg font-medium transition"
+                                onClick={() => setInviteOpen(!inviteOpen)}
+                            >
+                                {inviteOpen ? "Cancel Invite" : "Invite User"}
                             </button>
-                        )}
-                        <button 
-                            type="button" 
-                            className="w-full bg-orange-500 hover:bg-orange-600 text-white px-4 py-2.5 rounded-lg font-medium transition"
-                            onClick={() => setInviteOpen(!inviteOpen)}
-                        >
-                            {inviteOpen ? "Cancel Invite" : "Invite User"}
-                        </button>
-                        {message && <div className={`text-center text-sm p-2 rounded ${message.includes('success') ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{message}</div>}
-                    </div>
+                            {message && <div className={`text-center text-sm p-2 rounded ${message.includes('success') ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{message}</div>}
+                        </div>
+                    )}
                 </form>
                 
                 {/* Invite Section */}
@@ -647,25 +799,52 @@ export default function SettingsPage() {
                             </label>
                             
                             <div>
-                                <p className="font-medium text-slate-700 text-sm mb-2">Dashboard Access Permissions:</p>
-                                <div className="grid grid-cols-2 gap-2 bg-white p-3 rounded-lg border border-slate-200">
-                                    {dashboardComponents.map(component => (
-                                        <label key={component.id} className="flex items-center gap-2 cursor-pointer">
-                                            <input 
-                                                type="checkbox" 
-                                                checked={invitePermissions[component.id] ?? true}
-                                                onChange={(e) => {
-                                                    setInvitePermissions(prev => ({
-                                                        ...prev,
-                                                        [component.id]: e.target.checked
-                                                    }));
-                                                }}
-                                                className="w-4 h-4"
-                                            />
-                                            <span className="text-xs">
-                                                {component.icon} {component.label}
-                                            </span>
-                                        </label>
+                                <p className="font-medium text-slate-700 text-sm mb-2">Sidebar Page Permissions:</p>
+                                <div className="space-y-3 bg-white p-3 rounded-lg border border-slate-200">
+                                    {SIDEBAR_PERMISSION_GROUPS.map((group) => (
+                                        <div key={`invite-${group.title}`}>
+                                            <div className="mb-1 flex items-center justify-between gap-2">
+                                                <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{group.title}</p>
+                                                <div className="flex items-center gap-1">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setInvitePermissions((prev) => applyGroupPermissionState(prev, group.title, true));
+                                                        }}
+                                                        className="px-2 py-1 rounded border border-slate-200 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+                                                    >
+                                                        Allow All
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setInvitePermissions((prev) => applyGroupPermissionState(prev, group.title, false));
+                                                        }}
+                                                        className="px-2 py-1 rounded border border-slate-200 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+                                                    >
+                                                        Lock All
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                                {group.items.map((item) => (
+                                                    <label key={`invite-${item.id}`} className="flex items-center gap-2 cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={invitePermissions[item.id] ?? true}
+                                                            onChange={(e) => {
+                                                                setInvitePermissions((prev) => ({
+                                                                    ...prev,
+                                                                    [item.id]: e.target.checked,
+                                                                }));
+                                                            }}
+                                                            className="w-4 h-4"
+                                                        />
+                                                        <span className="text-xs text-slate-700">{item.label}</span>
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        </div>
                                     ))}
                                 </div>
                             </div>
@@ -675,6 +854,193 @@ export default function SettingsPage() {
                             </button>
                             {inviteStatus && <div className={`text-center text-sm p-2 rounded ${inviteStatus.includes('sent') ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{inviteStatus}</div>}
                         </form>
+                    </div>
+                )}
+
+                {selectedMemberForPermissions && (
+                    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+                        <div className="w-full max-w-4xl bg-white rounded-2xl shadow-2xl border border-slate-200 max-h-[90vh] overflow-hidden">
+                            <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+                                <div>
+                                    <h3 className="font-semibold text-slate-900">Sidebar Permissions</h3>
+                                    <p className="text-xs text-slate-500 mt-0.5">{selectedMemberForPermissions.name || selectedMemberForPermissions.email}</p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <select
+                                        value={memberRoles[selectedMemberForPermissions.id] || 'member'}
+                                        onChange={(e) => {
+                                            setMemberRoles((prev) => ({
+                                                ...prev,
+                                                [selectedMemberForPermissions.id]: e.target.value,
+                                            }));
+                                        }}
+                                        className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm"
+                                    >
+                                        <option value="admin">Admin</option>
+                                        <option value="member">Staff</option>
+                                    </select>
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedMemberForPermissions(null)}
+                                        className="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm"
+                                    >
+                                        Close
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="p-5 overflow-y-auto max-h-[65vh]">
+                                <div className="flex gap-2 mb-4">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setMemberPermissions((prev) => ({
+                                                ...prev,
+                                                [selectedMemberForPermissions.id]: createDefaultPermissions(),
+                                            }));
+                                        }}
+                                        className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-700 hover:bg-slate-50"
+                                    >
+                                        Allow All
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const locked = createDefaultPermissions();
+                                            ALL_PERMISSION_IDS.forEach((id) => { locked[id] = false; });
+                                            setMemberPermissions((prev) => ({
+                                                ...prev,
+                                                [selectedMemberForPermissions.id]: locked,
+                                            }));
+                                        }}
+                                        className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-700 hover:bg-slate-50"
+                                    >
+                                        Lock All
+                                    </button>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    {SIDEBAR_PERMISSION_GROUPS.map((group) => (
+                                        <div key={`modal-${group.title}`} className="rounded-lg border border-slate-200 p-3">
+                                            <div className="mb-2 flex items-center justify-between gap-2">
+                                                <p className="text-xs uppercase tracking-wide font-semibold text-slate-600">{group.title}</p>
+                                                <div className="flex items-center gap-1">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setMemberPermissions((prev) => ({
+                                                                ...prev,
+                                                                [selectedMemberForPermissions.id]: applyGroupPermissionState(
+                                                                    {
+                                                                        ...createDefaultPermissions(),
+                                                                        ...prev[selectedMemberForPermissions.id],
+                                                                    },
+                                                                    group.title,
+                                                                    true
+                                                                ),
+                                                            }));
+                                                        }}
+                                                        className="px-2 py-1 rounded border border-slate-200 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+                                                    >
+                                                        Allow All
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setMemberPermissions((prev) => ({
+                                                                ...prev,
+                                                                [selectedMemberForPermissions.id]: applyGroupPermissionState(
+                                                                    {
+                                                                        ...createDefaultPermissions(),
+                                                                        ...prev[selectedMemberForPermissions.id],
+                                                                    },
+                                                                    group.title,
+                                                                    false
+                                                                ),
+                                                            }));
+                                                        }}
+                                                        className="px-2 py-1 rounded border border-slate-200 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+                                                    >
+                                                        Lock All
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div className="space-y-2">
+                                                {group.items.map((item) => (
+                                                    <label key={`modal-${item.id}`} className="flex items-center gap-2 cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={memberPermissions[selectedMemberForPermissions.id]?.[item.id] ?? true}
+                                                            onChange={(e) => {
+                                                                setMemberPermissions((prev) => ({
+                                                                    ...prev,
+                                                                    [selectedMemberForPermissions.id]: {
+                                                                        ...createDefaultPermissions(),
+                                                                        ...prev[selectedMemberForPermissions.id],
+                                                                        [item.id]: e.target.checked,
+                                                                    },
+                                                                }));
+                                                            }}
+                                                            className="w-4 h-4"
+                                                        />
+                                                        <span className="text-sm text-slate-700">{item.label}</span>
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="px-5 py-4 border-t border-slate-200 flex justify-end gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setSelectedMemberForPermissions(null)}
+                                    className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={savingMemberPermissions}
+                                    onClick={async () => {
+                                        try {
+                                            setSavingMemberPermissions(true);
+                                            const token = await getToken();
+                                            await axios.post('/api/store/users/make-admin', {
+                                                userEmail: selectedMemberForPermissions.email,
+                                                role: memberRoles[selectedMemberForPermissions.id] || 'member',
+                                            }, {
+                                                headers: { Authorization: `Bearer ${token}` }
+                                            });
+
+                                            await axios.post('/api/store/users/update-permissions', {
+                                                userId: selectedMemberForPermissions.id,
+                                                userEmail: selectedMemberForPermissions.email,
+                                                permissions: memberPermissions[selectedMemberForPermissions.id] || createDefaultPermissions(),
+                                            }, {
+                                                headers: { Authorization: `Bearer ${token}` }
+                                            });
+
+                                            setTeamMembers((prev) => prev.map((member) => (
+                                                member.id === selectedMemberForPermissions.id
+                                                    ? { ...member, role: memberRoles[selectedMemberForPermissions.id] || 'member' }
+                                                    : member
+                                            )));
+                                            setMessage('Permissions updated successfully!');
+                                            setSelectedMemberForPermissions(null);
+                                        } catch (err) {
+                                            setMessage(err?.response?.data?.error || 'Failed to update permissions');
+                                        } finally {
+                                            setSavingMemberPermissions(false);
+                                        }
+                                    }}
+                                    className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 text-sm disabled:opacity-60"
+                                >
+                                    {savingMemberPermissions ? 'Saving...' : 'Save Permissions'}
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 )}
             </div>
