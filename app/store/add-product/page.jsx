@@ -78,7 +78,7 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
         const [variants, setVariants] = useState([]);
         const [images, setImages] = useState({ "1": null, "2": null, "3": null, "4": null, "5": null, "6": null, "7": null, "8": null });
         const [productInfo, setProductInfo] = useState({
-            name: '', slug: '', brand: '', shortDescription: '', description: '', metaTitle: '', metaDescription: '', seoKeywords: [], mrp: '', price: '', category: '', sku: '', stockQuantity: 0, colors: [], sizes: [], fastDelivery: false, allowReturn: true, allowReplacement: true, reviews: [], badges: [], imageAspectRatio: '1:1', tags: [], deliveredBy: '', soldBy: '', paymentInfo: '', mobileSpecsEnabled: false, mobileSpecs: []
+            name: '', slug: '', brand: '', shortDescription: '', description: '', metaTitle: '', metaDescription: '', seoKeywords: [], mrp: '', price: '', category: '', sku: '', stockQuantity: 100, colors: [], sizes: [], fastDelivery: false, allowReturn: true, allowReplacement: true, reviews: [], badges: [], imageAspectRatio: '1:1', tags: [], deliveredBy: 'Quickfynd', soldBy: '', paymentInfo: '', mobileSpecsEnabled: false, mobileSpecs: []
         });
         const [tagInput, setTagInput] = useState('');
         const [seoKeywordInput, setSeoKeywordInput] = useState('');
@@ -87,6 +87,8 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
         const aspectRatioOptions = ['1:1', '4:5', '3:4', '16:9'];
         const [hasVariants, setHasVariants] = useState(false);
         const [bulkOptions, setBulkOptions] = useState([]);
+        const [autoFillLoading, setAutoFillLoading] = useState(false);
+        const [autoFillImageNotes, setAutoFillImageNotes] = useState('');
     const router = useRouter();
     // ...existing state declarations...
 
@@ -288,7 +290,7 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                 price: product.price || "",
                 category: product.category?._id || product.category || "",
                 sku: product.sku || "",
-                stockQuantity: product.stockQuantity || 0,
+                stockQuantity: product.stockQuantity ?? 100,
                 colors: product.colors || [],
                 sizes: product.sizes || [],
                 fastDelivery: product.fastDelivery || false,
@@ -298,7 +300,7 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                 tags: Array.isArray(product.tags) ? product.tags : [],
                 badges: product.attributes?.badges || [],
                 imageAspectRatio: product.imageAspectRatio || '1:1',
-                deliveredBy: product.attributes?.deliveredBy || '',
+                deliveredBy: 'Quickfynd',
                 soldBy: product.attributes?.soldBy || '',
                 paymentInfo: product.attributes?.paymentInfo || '',
                 mobileSpecsEnabled: Boolean(product.mobileSpecsEnabled),
@@ -399,6 +401,197 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
         }
     }
 
+    const createSlugFromName = (value = '') => {
+        return String(value)
+            .toLowerCase()
+            .trim()
+            .replace(/[^\w\s-]/g, '')
+            .replace(/\s+/g, '-')
+            .replace(/-+/g, '-')
+            .replace(/^-+|-+$/g, '')
+    }
+
+    const createSkuFromName = (value = '') => {
+        const words = String(value)
+            .toUpperCase()
+            .trim()
+            .replace(/[^A-Z0-9\s]/g, ' ')
+            .replace(/\s+/g, '-')
+            .split('-')
+            .filter(Boolean)
+            .slice(0, 3)
+            .map((part) => part.slice(0, 4));
+
+        const base = words.join('-') || 'QF-PROD'
+        const suffix = Date.now().toString().slice(-4)
+        return `${base}-${suffix}`
+    }
+
+    const pickFirstImageForAutoFill = () => {
+        const sortedEntries = Object.entries(images).sort(([a], [b]) => Number(a) - Number(b))
+
+        for (const [, media] of sortedEntries) {
+            if (!media) continue
+
+            if (media?.file?.type?.startsWith('image/')) {
+                return { file: media.file }
+            }
+
+            const imageUrl = resolveImageUrl(media)
+            if (imageUrl && !isVideoUrl(imageUrl)) {
+                return { url: imageUrl }
+            }
+        }
+
+        return null
+    }
+
+    const applyAutoFilledFields = (fields) => {
+        if (!fields || typeof fields !== 'object') return
+
+        const normalizeCategoryName = (value) => String(value || '')
+            .toLowerCase()
+            .replace(/&/g, ' and ')
+            .replace(/[^a-z0-9\s]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+
+        const suggestedCategoryIds = Array.isArray(fields.suggestedCategoryIds)
+            ? fields.suggestedCategoryIds.map((id) => String(id || '').trim()).filter(Boolean)
+            : []
+
+        const validCategoryIdSet = new Set(dbCategories.map((cat) => String(cat?._id || '')))
+        const matchedCategoryIdsById = suggestedCategoryIds
+            .filter((id) => validCategoryIdSet.has(id))
+            .slice(0, 3)
+
+        const suggestedCategories = Array.isArray(fields.suggestedCategories)
+            ? fields.suggestedCategories.map((cat) => normalizeCategoryName(cat)).filter(Boolean)
+            : []
+
+        const matchedCategoryIdsByName = dbCategories
+            .filter((cat) => {
+                const categoryName = normalizeCategoryName(cat?.name)
+                if (!categoryName) return false
+
+                return suggestedCategories.some((suggested) => (
+                    suggested === categoryName
+                    || suggested.includes(categoryName)
+                    || categoryName.includes(suggested)
+                ))
+            })
+            .map((cat) => cat._id)
+            .slice(0, 2)
+
+        const matchedCategoryIds = matchedCategoryIdsById.length > 0
+            ? matchedCategoryIdsById
+            : matchedCategoryIdsByName
+
+        if (matchedCategoryIds.length > 0) {
+            // Replace instead of merge so stale/wrong previous picks don't remain selected.
+            setSelectedCategories(matchedCategoryIds)
+        }
+
+        setProductInfo((prev) => {
+            const next = { ...prev }
+            const resolvedName = typeof fields.name === 'string' && fields.name.trim()
+                ? fields.name.trim()
+                : String(prev.name || '').trim()
+
+            if (typeof fields.name === 'string' && fields.name.trim()) {
+                next.name = resolvedName
+                next.slug = createSlugFromName(fields.name)
+            }
+            if (typeof fields.shortDescription === 'string' && fields.shortDescription.trim()) next.shortDescription = fields.shortDescription.trim()
+            if (typeof fields.metaTitle === 'string' && fields.metaTitle.trim()) next.metaTitle = fields.metaTitle.trim()
+            if (typeof fields.metaDescription === 'string' && fields.metaDescription.trim()) next.metaDescription = fields.metaDescription.trim()
+            if (typeof fields.sku === 'string' && fields.sku.trim()) {
+                next.sku = fields.sku.trim()
+            } else if (!String(prev.sku || '').trim()) {
+                next.sku = createSkuFromName(resolvedName)
+            }
+            if (Array.isArray(fields.seoKeywords) && fields.seoKeywords.length > 0) next.seoKeywords = fields.seoKeywords
+            if (Array.isArray(fields.tags) && fields.tags.length > 0) next.tags = fields.tags
+            if (Array.isArray(fields.badges) && fields.badges.length > 0) next.badges = fields.badges
+
+            if (Number.isFinite(Number(fields.stockQuantity))) {
+                next.stockQuantity = Math.max(0, Math.round(Number(fields.stockQuantity)))
+            }
+
+            if (typeof fields.fastDelivery === 'boolean') next.fastDelivery = fields.fastDelivery
+            if (typeof fields.allowReturn === 'boolean') next.allowReturn = fields.allowReturn
+            if (typeof fields.allowReplacement === 'boolean') next.allowReplacement = fields.allowReplacement
+
+            if (Array.isArray(fields.mobileSpecs) && fields.mobileSpecs.length > 0) {
+                next.mobileSpecsEnabled = Boolean(fields.mobileSpecsEnabled)
+                next.mobileSpecs = fields.mobileSpecs
+                    .map((spec) => ({
+                        label: String(spec?.label || '').trim(),
+                        value: String(spec?.value || '').trim(),
+                    }))
+                    .filter((spec) => spec.label && spec.value)
+            }
+
+            return next
+        })
+
+        if (typeof fields.description === 'string' && fields.description.trim()) {
+            setProductInfo((prev) => ({ ...prev, description: fields.description }))
+            if (editor) {
+                editor.commands.setContent(fields.description)
+            }
+        }
+    }
+
+    const handleAutoFillFromImage = async () => {
+        const imageSource = pickFirstImageForAutoFill()
+        if (!imageSource) {
+            toast.error('Please upload at least one product image first')
+            return
+        }
+
+        try {
+            setAutoFillLoading(true)
+            const token = await getToken()
+            const formData = new FormData()
+
+            if (imageSource.file) {
+                formData.append('image', imageSource.file)
+            } else if (imageSource.url) {
+                formData.append('imageUrl', imageSource.url)
+            }
+
+            formData.append('availableCategories', JSON.stringify(
+                dbCategories.map((cat) => ({
+                    id: String(cat?._id || ''),
+                    name: String(cat?.name || ''),
+                })).filter((cat) => cat.id && cat.name)
+            ))
+
+            if (autoFillImageNotes.trim()) {
+                formData.append('imageContext', autoFillImageNotes.trim())
+            }
+
+            const { data } = await axios.post('/api/store/product/auto-fill-image-details', formData, {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'multipart/form-data',
+                },
+            })
+
+            if (!data?.fields) {
+                throw new Error('No auto-fill data returned')
+            }
+
+            applyAutoFilledFields(data.fields)
+            toast.success('Product details auto-filled from image')
+        } catch (error) {
+            toast.error(normalizeErrorMessage(error?.response?.data?.error || error?.response?.data || error?.message, 'Auto-fill failed'))
+        } finally {
+            setAutoFillLoading(false)
+        }
+    }
+
     const addTag = () => {
         const trimmedTag = tagInput.trim();
         if (!trimmedTag) return;
@@ -441,6 +634,10 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
     }
 
     const handleImageUpload = async (key, file) => {
+        if (!(file instanceof Blob)) {
+            toast.error('Invalid file. Please select an image or video.');
+            return;
+        }
         const isVideo = file?.type?.startsWith('video/');
         if (isVideo && file.size > 50 * 1024 * 1024) {
             toast.error('Video file too large (max 50MB)');
@@ -563,7 +760,7 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                 brand: productInfo.brand,
                 shortDescription: productInfo.shortDescription,
                 badges: productInfo.badges || [],
-                deliveredBy: productInfo.deliveredBy,
+                deliveredBy: 'Quickfynd',
                 soldBy: productInfo.soldBy,
                 paymentInfo: productInfo.paymentInfo,
                 ...(bulkEnabled ? { variantType: 'bulk_bundles' } : {})
@@ -774,7 +971,7 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                         <input 
                             type="number" 
                             name="stockQuantity" 
-                            value={productInfo.stockQuantity || 0} 
+                            value={productInfo.stockQuantity ?? 100} 
                             onChange={onChangeHandler} 
                             className="w-full border-2 border-blue-100 rounded px-3 py-2" 
                             placeholder="Available stock quantity" 
@@ -907,13 +1104,13 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
-                        <label className="block text-sm font-medium mb-1">Delivered by (optional)</label>
+                        <label className="block text-sm font-medium mb-1">Delivered by</label>
                         <input
                             name="deliveredBy"
-                            value={productInfo.deliveredBy || ''}
-                            onChange={onChangeHandler}
-                            className="w-full border rounded px-3 py-2"
-                            placeholder="e.g. Quickfynd"
+                            value="Quickfynd"
+                            readOnly
+                            className="w-full border rounded px-3 py-2 bg-gray-100 text-gray-700 cursor-not-allowed"
+                            placeholder="Quickfynd"
                         />
                     </div>
                     <div>
@@ -1185,6 +1382,29 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                 {/* Media */}
                 <div>
                     <label className="block text-sm font-medium mb-2">Product Media (Images/Videos, up to 8)</label>
+                    <div className="mb-3 rounded border border-emerald-200 bg-emerald-50/40 p-3 space-y-3">
+                        <label className="block text-xs font-semibold text-emerald-800">Extra details for AI (optional)</label>
+                        <input
+                            type="text"
+                            value={autoFillImageNotes}
+                            onChange={(e) => setAutoFillImageNotes(e.target.value)}
+                            className="w-full border border-emerald-200 rounded px-3 py-2 text-sm"
+                            placeholder="Example: Capacity is 500ml, stainless steel body, includes USB cable"
+                        />
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <button
+                                type="button"
+                                onClick={handleAutoFillFromImage}
+                                disabled={autoFillLoading}
+                                className="px-4 py-2 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                            >
+                                {autoFillLoading ? 'Auto Filling...' : 'Auto Fill Details from Image'}
+                            </button>
+                            <p className="text-xs text-gray-600">
+                                AI uses image + your notes. Brand, Delivered by, Sold by, Payment text, and price stay manual.
+                            </p>
+                        </div>
+                    </div>
                     <div className="flex flex-wrap items-center gap-2 mb-3 text-sm">
                         <span className="text-gray-700 font-medium">Image Aspect Ratio:</span>
                         {aspectRatioOptions.map((ratio) => (
