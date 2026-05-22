@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState, useCallback, useEffect, useRef } from "react";
+import { Suspense, useMemo, useState, useCallback, useEffect, useRef } from "react";
 import ProductCard from "@/components/ProductCard"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useAuth } from '@/lib/useAuth'
@@ -912,5 +912,9 @@ function ShopContent() {
 }
 
 export default function Shop() {
-    return <ShopContent />;
+    return (
+        <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
+            <ShopContent />
+        </Suspense>
+    );
 }
