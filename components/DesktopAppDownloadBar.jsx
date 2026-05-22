@@ -49,7 +49,7 @@ export default function DesktopAppDownloadBar({ enabled = true }) {
 
   return (
     <div className="hidden lg:block border-b border-rose-950 bg-[linear-gradient(90deg,#2a0f16_0%,#4a1320_34%,#6b1d2c_68%,#2a0f16_100%)] text-white">
-      <div className="mx-auto flex max-w-[1280px] items-center justify-between gap-4 px-4 py-2 text-sm">
+      <div className="mx-auto flex max-w-[1700px] items-center justify-between gap-4 px-2 sm:px-3 lg:px-4 py-2 text-sm">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-white/15 bg-white/10 shadow-sm">
             <Image

@@ -52,7 +52,7 @@ export default function OffersPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-[1280px] mx-auto px-4 py-8">
+      <div className="max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4 py-8">
         {/* Header */}
         <div className="mb-8">
           <button
@@ -86,7 +86,7 @@ export default function OffersPage() {
                 🔥 Massive Savings!
               </div>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-6 gap-4">
               {offerProducts.map((product) => (
                 <ProductCard key={product._id || product.id} product={product} />
               ))}

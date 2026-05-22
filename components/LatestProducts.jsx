@@ -313,7 +313,7 @@ const ProductCard = ({ product }) => {
 
 // Featured selection component (only show admin-selected featured products)
 const BestSelling = () => {
-  const displayQuantity = 10
+  const displayQuantity = 12
   const [featuredProducts, setFeaturedProducts] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -353,14 +353,14 @@ const BestSelling = () => {
   }, [])
 
   return (
-    <div className="px-4 py-6 max-w-[1250px] w-full mx-auto bg-white relative z-10">
+    <div className="px-2 sm:px-3 lg:px-4 py-6 max-w-[1700px] w-full mx-auto bg-white relative z-10">
       <Title
         title="Craziest sale of the year!"
         description="Grab the best deals before they're gone!"
         visibleButton={false}
       />
 
-      <div className="mt-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-4">
+      <div className="mt-6 grid grid-flow-col auto-cols-[155px] sm:auto-cols-[175px] md:auto-cols-[185px] grid-rows-2 gap-2 sm:gap-4 overflow-x-auto pb-2 scrollbar-hide xl:grid-flow-row xl:auto-cols-auto xl:grid-rows-none xl:grid-cols-6 xl:overflow-visible xl:pb-0">
         {isLoading
           ? Array(displayQuantity).fill(0).map((_, idx) => (
               <div key={idx} className="bg-white rounded-xl shadow-sm animate-pulse">

@@ -9,10 +9,16 @@ import { useSearchParams } from 'next/navigation'
 function ProductsContent() {
     const dispatch = useDispatch();
     const products = useSelector(state => state.product.list)
+    const PRODUCTS_PER_PAGE = 25
+    const [isMounted, setIsMounted] = useState(false)
+
+    useEffect(() => {
+        setIsMounted(true)
+    }, [])
 
     // Always fetch latest products on mount
     useEffect(() => {
-        dispatch(fetchProducts({}))
+        dispatch(fetchProducts({ limit: 0, includeOutOfStock: true }))
     }, [dispatch])
     const searchParams = useSearchParams()
     const categoryParam = searchParams.get('category')
@@ -26,6 +32,7 @@ function ProductsContent() {
         inStock: false
     })
     const [sortBy, setSortBy] = useState('newest') // newest, price-low, price-high, rating
+    const [currentPage, setCurrentPage] = useState(1)
 
     // Get unique categories from products
     const categories = useMemo(() => {
@@ -140,20 +147,65 @@ function ProductsContent() {
         return filtered
     }, [products, filters, sortBy])
 
+    const totalPages = Math.max(1, Math.ceil(filteredProducts.length / PRODUCTS_PER_PAGE))
+
+    const paginatedProducts = useMemo(() => {
+        const start = (currentPage - 1) * PRODUCTS_PER_PAGE
+        return filteredProducts.slice(start, start + PRODUCTS_PER_PAGE)
+    }, [filteredProducts, currentPage])
+
+    useEffect(() => {
+        setCurrentPage(1)
+    }, [
+        filters.category,
+        filters.categories,
+        filters.priceRange,
+        filters.minRating,
+        filters.inStock,
+        sortBy,
+        products.length,
+    ])
+
+    useEffect(() => {
+        if (currentPage > totalPages) {
+            setCurrentPage(totalPages)
+        }
+    }, [currentPage, totalPages])
+
     const activeFiltersCount = 
         (filters.category ? 1 : 0) + 
         (filters.minRating > 0 ? 1 : 0) + 
         (filters.inStock ? 1 : 0) +
         (filters.priceRange[0] > 0 || filters.priceRange[1] < 100000 ? 1 : 0)
 
+    const paginationItems = useMemo(() => {
+        if (totalPages <= 7) return Array.from({ length: totalPages }, (_, idx) => idx + 1)
+
+        if (currentPage <= 4) return [1, 2, 3, 4, 5, '...', totalPages]
+        if (currentPage >= totalPages - 3) return [1, '...', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages]
+
+        return [1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages]
+    }, [currentPage, totalPages])
+
+    if (!isMounted) {
+        return <div className="min-h-screen bg-gray-50" />
+    }
+
     return (
-        <div className="bg-gray-50">
-            <div className="max-w-7xl mx-auto px-4 py-8">
+        <div className="min-h-screen bg-gray-50">
+            <div className="max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4 py-8">
                 {/* Header */}
                 <div className="flex items-center justify-between mb-6">
                     <div>
                         <h1 className="text-3xl font-bold text-gray-900">All Products</h1>
-                        <p className="text-gray-600 mt-1">{filteredProducts.length} products found</p>
+                        {filteredProducts.length > 0 && (
+                            <p className="text-xs text-gray-500 mt-1">
+                                Showing {(currentPage - 1) * PRODUCTS_PER_PAGE + 1}
+                                {' - '}
+                                {Math.min(currentPage * PRODUCTS_PER_PAGE, filteredProducts.length)}
+                                {' '}of {filteredProducts.length}
+                            </p>
+                        )}
                     </div>
 
                     {/* Mobile Filter Toggle */}
@@ -171,10 +223,10 @@ function ProductsContent() {
                     </button>
                 </div>
 
-                <div className="flex gap-6">
+                <div className="flex items-start gap-6">
                     {/* Sidebar Filters - Sticky on Desktop */}
                     <aside className={`
-                        lg:block lg:w-64 bg-white border border-gray-200 rounded-lg p-4 h-fit lg:sticky lg:top-4
+                        lg:block lg:w-64 bg-white border border-gray-200 rounded-lg p-4 h-fit lg:self-start lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto
                         ${showFilters ? 'fixed inset-0 z-50 w-full h-full overflow-y-auto' : 'hidden'}
                     `}>
                         {/* Mobile Close Button */}
@@ -341,11 +393,62 @@ function ProductsContent() {
 
                     {/* Products Grid */}
                     <div className="flex-1">
-                        {filteredProducts.length > 0 && (
-                            <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                                {filteredProducts.map((product) => (
+                        {filteredProducts.length > 0 ? (
+                            <>
+                            <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
+                                {paginatedProducts.map((product) => (
                                     <ProductCard key={product._id || product.id || product.slug} product={product} />
                                 ))}
+                            </div>
+
+                            {totalPages > 1 && (
+                                <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                                        disabled={currentPage === 1}
+                                        className="h-10 rounded-full border border-gray-300 bg-white px-4 text-sm font-medium text-gray-700 shadow-sm transition hover:border-gray-400 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                    >
+                                        Previous
+                                    </button>
+
+                                    <div className="flex items-center gap-2 rounded-full border border-orange-100 bg-white px-2 py-1 shadow-sm">
+                                        {paginationItems.map((item, idx) => (
+                                            item === '...'
+                                                ? (
+                                                    <span key={`products-page-ellipsis-${idx}`} className="px-1 text-sm text-gray-400">...</span>
+                                                )
+                                                : (
+                                                    <button
+                                                        key={`products-page-${item}`}
+                                                        type="button"
+                                                        onClick={() => setCurrentPage(item)}
+                                                        className={`h-8 min-w-[32px] rounded-full px-2 text-sm font-semibold transition ${
+                                                            currentPage === item
+                                                                ? 'bg-orange-500 text-white shadow-[0_6px_16px_rgba(249,115,22,0.3)]'
+                                                                : 'text-gray-700 hover:bg-orange-50'
+                                                        }`}
+                                                    >
+                                                        {item}
+                                                    </button>
+                                                )
+                                        ))}
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                                        disabled={currentPage === totalPages}
+                                        className="h-10 rounded-full border border-gray-300 bg-white px-4 text-sm font-medium text-gray-700 shadow-sm transition hover:border-gray-400 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                    >
+                                        Next
+                                    </button>
+                                </div>
+                            )}
+                            </>
+                        ) : (
+                            <div className="text-center py-16 bg-white rounded-lg border border-gray-200">
+                                <p className="text-gray-500 text-lg">No products match your filters.</p>
                             </div>
                         )}
                     </div>

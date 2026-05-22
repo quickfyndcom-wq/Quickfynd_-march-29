@@ -10,11 +10,11 @@ import { auth } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 
 // Skeleton Loader Components
-const ProductDetailsSkeleton = () => (
+const ProductDetailsSkeleton = ({ isFashionLayout = false }) => (
     <div className="bg-gray-50 animate-pulse">
         {/* Breadcrumb bar */}
         <div className="bg-white border-b border-gray-200">
-            <div className="max-w-[1450px] mx-auto px-4 sm:px-6 lg:px-8 py-3">
+            <div className="max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4 py-3">
                 <div className="flex items-center gap-2">
                     <div className="h-4 bg-slate-200 rounded w-10"></div>
                     <div className="h-3 bg-slate-200 rounded w-2"></div>
@@ -25,13 +25,13 @@ const ProductDetailsSkeleton = () => (
             </div>
         </div>
 
-        <div className="max-w-[1450px] mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-8">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 lg:gap-8 items-start">
+        <div className="max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4 py-6 pb-8">
+            <div className={`grid grid-cols-1 ${isFashionLayout ? 'md:grid-cols-2 items-start md:items-stretch' : 'lg:grid-cols-2 items-start lg:items-stretch'} gap-0 lg:gap-8`}>
 
                 {/* LEFT: Thumbnail strip + Main image (desktop) */}
                 <div className="space-y-4">
                     {/* Desktop layout */}
-                    <div className="hidden lg:flex gap-2">
+                    <div className={isFashionLayout ? 'hidden md:flex gap-2' : 'hidden lg:flex gap-2'}>
                         {/* Vertical thumbnail strip */}
                         <div className="flex flex-col gap-2 w-14 flex-shrink-0">
                             {[1, 2, 3, 4].map(i => (
@@ -39,13 +39,13 @@ const ProductDetailsSkeleton = () => (
                             ))}
                         </div>
                         {/* Main image */}
-                        <div className="flex-1 bg-slate-200 rounded h-[500px] xl:h-[560px]"></div>
+                        <div className={`flex-1 bg-slate-200 ${isFashionLayout ? 'rounded-lg aspect-[4/5]' : 'rounded aspect-square'}`}></div>
                     </div>
 
                     {/* Mobile layout: just the main image */}
-                    <div className="lg:hidden bg-slate-200 rounded h-80 w-full"></div>
+                    <div className={isFashionLayout ? 'md:hidden bg-slate-200 rounded-lg aspect-[4/5] w-full' : 'lg:hidden bg-slate-200 rounded-none sm:rounded-lg aspect-square w-full'}></div>
                     {/* Mobile thumbnails */}
-                    <div className="lg:hidden flex gap-2 px-4">
+                    <div className={isFashionLayout ? 'md:hidden flex gap-2 px-2 sm:px-0' : 'lg:hidden flex gap-2 px-2 sm:px-0'}>
                         {[1, 2, 3, 4].map(i => (
                             <div key={i} className="w-14 h-14 bg-slate-200 rounded flex-shrink-0"></div>
                         ))}
@@ -53,7 +53,7 @@ const ProductDetailsSkeleton = () => (
                 </div>
 
                 {/* RIGHT: Product details */}
-                <div className="px-4 lg:px-0 pt-4 lg:pt-0 space-y-4">
+                <div className={isFashionLayout ? 'bg-white -mx-4 sm:mx-0 rounded-t-3xl sm:rounded-lg p-4 lg:p-6 space-y-3 mt-2 lg:mt-0 border border-gray-200' : 'bg-white -mx-4 sm:mx-0 rounded-t-3xl sm:rounded-lg p-4 lg:p-6 space-y-5 mt-2 lg:mt-0 shadow-[0_-4px_24px_rgba(0,0,0,0.08)]'}>
                     {/* Title */}
                     <div className="h-7 bg-slate-200 rounded w-3/4"></div>
                     <div className="h-5 bg-slate-200 rounded w-1/2"></div>
@@ -68,15 +68,16 @@ const ProductDetailsSkeleton = () => (
                         <div className="h-4 bg-slate-200 rounded w-20"></div>
                         <div className="h-4 bg-slate-200 rounded w-16"></div>
                     </div>
-                    {/* Description lines */}
+                    {/* Details lines */}
                     <div className="space-y-2 pt-2">
                         <div className="h-4 bg-slate-200 rounded w-full"></div>
                         <div className="h-4 bg-slate-200 rounded w-5/6"></div>
                         <div className="h-4 bg-slate-200 rounded w-4/6"></div>
                     </div>
+                    <div className="h-28 bg-slate-200 rounded-lg w-full"></div>
                     {/* Action buttons */}
                     <div className="h-12 bg-slate-200 rounded-lg w-full mt-2"></div>
-                    <div className="h-12 bg-slate-200 rounded-lg w-full"></div>
+                    {isFashionLayout && <div className="h-12 bg-slate-200 rounded-lg w-full"></div>}
                 </div>
             </div>
         </div>
@@ -84,7 +85,7 @@ const ProductDetailsSkeleton = () => (
 );
 
 const ProductDescriptionSkeleton = () => (
-    <div className="animate-pulse max-w-[1450px] mx-auto px-4 sm:px-6 lg:px-8 space-y-4 mt-8 pb-8">
+    <div className="animate-pulse max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4 space-y-4 mt-8 pb-8">
         <div className="h-6 bg-slate-200 rounded w-1/4"></div>
         <div className="space-y-2">
             <div className="h-4 bg-slate-200 rounded w-full"></div>
@@ -97,7 +98,7 @@ const ProductDescriptionSkeleton = () => (
 const RelatedProductsSkeleton = () => (
     <div className="px-4 mt-12 mb-16">
         <div className="h-8 bg-slate-200 rounded w-48 mb-6 animate-pulse"></div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-5 xl:grid-cols-5 gap-6">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-4 xl:grid-cols-6 gap-6">
             {[1, 2, 3, 4, 5].map(i => (
                 <div key={i} className="animate-pulse">
                     <div className="bg-slate-200 rounded-lg h-48 mb-3"></div>
@@ -111,6 +112,7 @@ const RelatedProductsSkeleton = () => (
 
 export default function ProductBySlug() {
     const { slug } = useParams();
+    const [isHydrated, setIsHydrated] = useState(false);
     const [product, setProduct] = useState(null);
     const [loading, setLoading] = useState(true);
     const [relatedProducts, setRelatedProducts] = useState([]);
@@ -118,6 +120,14 @@ export default function ProductBySlug() {
     const [reviews, setReviews] = useState([]);
     const [loadingReviews, setLoadingReviews] = useState(false);
     const products = useSelector(state => state.product.list);
+    const cachedProduct = products.find((item) => item?.slug === slug);
+    const skeletonIsFashionLayout = Boolean(
+        product?.fashionLayoutEnabled ?? (isHydrated ? cachedProduct?.fashionLayoutEnabled : false)
+    );
+
+    useEffect(() => {
+        setIsHydrated(true);
+    }, []);
 
     const getCategoryCandidates = (baseProduct) => {
         const values = [];
@@ -210,12 +220,24 @@ export default function ProductBySlug() {
         try {
             let found = products.find((product) => product.slug === slug);
             
-            // If the Redux product is missing variants, refetch from backend to get full data
-            const needsFresh = !found || !Array.isArray(found.variants) || found.variants.length === 0;
+            // If the Redux product is missing variants or newer layout flags, refetch from backend to get full data
+            const needsFresh =
+                !found ||
+                !Array.isArray(found.variants) || found.variants.length === 0 ||
+                typeof found.fashionLayoutEnabled === 'undefined';
             
             if (needsFresh) {
-                const { data } = await axios.get(`/api/products/by-slug?slug=${encodeURIComponent(slug)}`);
-                found = data.product || found || null;
+                try {
+                    const { data } = await axios.get(`/api/products/by-slug?slug=${encodeURIComponent(slug)}`);
+                    found = data.product || found || null;
+                } catch (refreshError) {
+                    // Keep Redux-cached product when backend slug lookup returns 404.
+                    if (axios.isAxiosError(refreshError) && refreshError.response?.status === 404) {
+                        found = found || null;
+                    } else {
+                        throw refreshError;
+                    }
+                }
             }
             
             setProduct(found);
@@ -305,25 +327,47 @@ export default function ProductBySlug() {
 
     return (
         <div className="w-full">
-            <div className="max-w-[1250px] mx-auto px-0 sm:px-6 pb-8 sm:pb-24 lg:pb-0">
+            <div className={product?.fashionLayoutEnabled ? 'max-w-[1700px] mx-auto px-1 sm:px-2 lg:px-3 pb-8 sm:pb-24 lg:pb-0' : 'max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4 pb-8 sm:pb-24 lg:pb-0'}>
                 {/* Product Details */}
                 {loading ? (
                     <>
-                        <ProductDetailsSkeleton />
-                        <ProductDescriptionSkeleton />
+                        <ProductDetailsSkeleton isFashionLayout={skeletonIsFashionLayout} />
+                        {!skeletonIsFashionLayout && <ProductDescriptionSkeleton />}
                         <RelatedProductsSkeleton />
                     </>
                 ) : product ? (
                     <>
-                        <ProductDetails product={product} reviews={reviews} loadingReviews={loadingReviews} />
-                        <ProductDescription product={product} reviews={reviews || []} loadingReviews={loadingReviews} onReviewAdded={() => fetchReviews(product._id || product.id)} />
+                        <ProductDetails
+                            product={product}
+                            reviews={reviews}
+                            loadingReviews={loadingReviews}
+                            rightColumnContent={
+                                product?.fashionLayoutEnabled ? (
+                                    <ProductDescription
+                                        product={product}
+                                        reviews={reviews || []}
+                                        loadingReviews={loadingReviews}
+                                        onReviewAdded={() => fetchReviews(product._id || product.id)}
+                                        embedded={true}
+                                    />
+                                ) : null
+                            }
+                        />
+                        {!product?.fashionLayoutEnabled && (
+                            <ProductDescription
+                                product={product}
+                                reviews={reviews || []}
+                                loadingReviews={loadingReviews}
+                                onReviewAdded={() => fetchReviews(product._id || product.id)}
+                            />
+                        )}
                         {/* Related Products */}
                         {loadingRelated ? (
                             <RelatedProductsSkeleton />
                         ) : relatedProducts.length > 0 && (
                             <div className="px-4 mt-12 mb-4 sm:mb-16">
                                 <h2 className="text-2xl font-semibold text-slate-800 mb-6">Recommended Products</h2>
-                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-5 xl:grid-cols-5 gap-6">
+                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-4 xl:grid-cols-6 gap-6">
                                     {relatedProducts.map((prod) => (
                                         <ProductCard key={prod._id || prod.id || prod.slug} product={prod} />
                                     ))}

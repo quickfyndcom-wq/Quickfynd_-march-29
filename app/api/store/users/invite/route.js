@@ -14,6 +14,44 @@ const EMAIL_FROM = process.env.EMAIL_FROM;
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 const EMAIL_LOGO_URL = `${process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL || 'https://www.quickfynd.com'}/assets/logo/logo3.png`;
 
+const DEFAULT_PERMISSIONS = {
+  overview: false,
+  catalog: false,
+  orders: false,
+  customers: false,
+  marketing: false,
+  storefront: false,
+};
+
+function normalizePermissions(input) {
+  if (!input || typeof input !== 'object') return DEFAULT_PERMISSIONS;
+  return {
+    overview: input.overview === true,
+    catalog: input.catalog === true,
+    orders: input.orders === true,
+    customers: input.customers === true,
+    marketing: input.marketing === true,
+    storefront: input.storefront === true,
+  };
+}
+
+function normalizeMenuPermissions(input) {
+  if (!input || typeof input !== 'object') return {};
+  const normalized = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (typeof key === 'string' && key.startsWith('/store')) {
+      normalized[key] = value !== false;
+    }
+  }
+  return normalized;
+}
+
+function toAllowedPaths(menuPermissions) {
+  return Object.entries(menuPermissions)
+    .filter(([, allowed]) => allowed === true)
+    .map(([path]) => path);
+}
+
 export async function POST(request) {
   try {
     await connectDB();
@@ -25,8 +63,12 @@ export async function POST(request) {
     const idToken = authHeader.split('Bearer ')[1];
     const decodedToken = await getAuth().verifyIdToken(idToken);
     const userId = decodedToken.uid;
-    const { email } = await request.json();
-    if (!email) return NextResponse.json({ error: 'Missing email' }, { status: 400 });
+    const { email, permissions } = await request.json();
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (!normalizedEmail) return NextResponse.json({ error: 'Missing email' }, { status: 400 });
+    const normalizedPermissions = normalizePermissions(permissions);
+    const normalizedMenuPermissions = normalizeMenuPermissions(permissions);
+    const allowedPaths = toAllowedPaths(normalizedMenuPermissions);
 
     // Resolve store access for owner or team member
     const storeId = await authSeller(userId);
@@ -38,7 +80,7 @@ export async function POST(request) {
     // Check if already invited or member
     const existing = await StoreUser.findOne({ 
       storeId: storeId.toString(), 
-      email 
+      email: normalizedEmail 
     }).lean();
     if (existing && ["invited", "pending", "approved"].includes(existing.status)) {
       return NextResponse.json({ error: 'User already invited or member' }, { status: 400 });
@@ -51,12 +93,16 @@ export async function POST(request) {
     // Create invite in DB
     await StoreUser.create({
       storeId: storeId.toString(),
-      email,
+      email: normalizedEmail,
       role: 'member',
       status: 'invited',
       invitedById: userId,
       inviteToken,
       inviteExpiry,
+      permissions: normalizedPermissions,
+      menuPermissions: normalizedMenuPermissions,
+      allowedPaths,
+      permissionsConfigured: true,
     });
 
 
@@ -82,7 +128,7 @@ export async function POST(request) {
 
     console.log('[INVITE] Sending invite email via Resend SDK:', {
       from: EMAIL_FROM,
-      to: email,
+      to: normalizedEmail,
       subject: emailSubject,
       inviteUrl,
       RESEND_API_KEY_PRESENT: !!RESEND_API_KEY,
@@ -93,7 +139,7 @@ export async function POST(request) {
     const resend = new Resend(RESEND_API_KEY);
     const { data, error } = await resend.emails.send({
       from: EMAIL_FROM,
-      to: [email],
+      to: [normalizedEmail],
       subject: emailSubject,
       html: emailBody,
     });

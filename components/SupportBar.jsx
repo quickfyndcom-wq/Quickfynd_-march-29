@@ -2,8 +2,8 @@ import { MailIcon, InfoIcon } from "lucide-react";
 
 export default function SupportBar() {
   return (
-    <div className="w-full bg-[#f7f8fa] border-t border-gray-200 py-4 md:py-6 px-2 text-gray-700 text-sm">
-      <div className="max-w-[1240px] mx-auto flex flex-col md:flex-row items-center justify-between gap-4 md:gap-0">
+    <div className="w-full bg-[#f7f8fa] border-t border-gray-200 py-4 md:py-6 text-gray-700 text-sm">
+      <div className="max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4 flex flex-col md:flex-row items-center justify-between gap-4 md:gap-0">
 
         {/* Left Text (Hidden on Mobile) */}
         <div className="hidden md:block">

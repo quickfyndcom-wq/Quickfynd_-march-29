@@ -12,22 +12,38 @@ import { addToCart, uploadCart } from '@/lib/features/cart/cartSlice'
 import toast from 'react-hot-toast'
 
 // Pick a usable image source with graceful fallbacks
-const getImageSrc = (product) => {
-    if (Array.isArray(product.images) && product.images.length) {
-        const first = product.images[0]
-        if (first?.url) return first.url
-        if (first?.src) return first.src
-        if (typeof first === 'string' && first.trim() !== '') return first
+const resolveMediaUrl = (media) => {
+    if (typeof media === 'string' && media.trim() !== '') return media
+    if (media && typeof media === 'object') {
+        const resolved = media.url || media.src
+        if (typeof resolved === 'string' && resolved.trim() !== '') return resolved
     }
+    return ''
+}
+
+const getPrimaryMediaSrc = (product) => {
+    if (Array.isArray(product.images) && product.images.length) {
+        for (const media of product.images) {
+            const url = resolveMediaUrl(media)
+            if (url) return url
+        }
+    }
+
+    const fallbackImage = resolveMediaUrl(product.image)
+    if (fallbackImage) return fallbackImage
+
     return 'https://ik.imagekit.io/jrstupuke/placeholder.png'
+}
+
+const getImageSrc = (product) => {
+    return getPrimaryMediaSrc(product)
 }
 
 const getImageSrcAt = (product, index = 0) => {
     if (Array.isArray(product.images) && product.images.length > index) {
         const item = product.images[index]
-        if (item?.url) return item.url
-        if (item?.src) return item.src
-        if (typeof item === 'string' && item.trim() !== '') return item
+        const resolved = resolveMediaUrl(item)
+        if (resolved) return resolved
     }
     return ''
 }
@@ -39,10 +55,17 @@ const isVideoUrl = (url) => {
 
 const getVideoPreviewImageSrc = (product) => {
     const fallback = 'https://ik.imagekit.io/jrstupuke/placeholder.png'
-    const second = getImageSrcAt(product, 1)
-    const third = getImageSrcAt(product, 2)
-    if (second && !isVideoUrl(second) && second !== fallback) return second
-    if (third && !isVideoUrl(third) && third !== fallback) return third
+
+    if (Array.isArray(product.images) && product.images.length > 0) {
+        for (let index = product.images.length - 1; index >= 0; index -= 1) {
+            const candidate = getImageSrcAt(product, index)
+            if (candidate && !isVideoUrl(candidate) && candidate !== fallback) return candidate
+        }
+    }
+
+    const fallbackImage = resolveMediaUrl(product.image)
+    if (fallbackImage && !isVideoUrl(fallbackImage) && fallbackImage !== fallback) return fallbackImage
+
     return fallback
 }
 
@@ -241,7 +264,7 @@ const ProductCard = ({ product }) => {
                                 alt={displayName}
                                 fill
                                 unoptimized
-                                className={`object-contain p-1.5 transition-transform duration-300 scale-[1.06] group-hover:scale-[1.12] ${hovered && videoReady ? 'invisible' : 'visible'}`}
+                                className={`object-cover transition-transform duration-300 scale-[1.03] group-hover:scale-[1.08] ${hovered && videoReady ? 'invisible' : 'visible'}`}
                                 onError={(e) => {
                                     if (e.currentTarget.src !== 'https://ik.imagekit.io/jrstupuke/placeholder.png') {
                                         e.currentTarget.src = 'https://ik.imagekit.io/jrstupuke/placeholder.png'
@@ -277,7 +300,7 @@ const ProductCard = ({ product }) => {
                             alt={displayName}
                             fill
                             unoptimized
-                            className="object-contain p-1.5 transition-transform duration-300 scale-[1.06] group-hover:scale-[1.12]"
+                            className="object-cover transition-transform duration-300 scale-[1.03] group-hover:scale-[1.08]"
                             onError={(e) => {
                                 if (e.currentTarget.src !== 'https://ik.imagekit.io/jrstupuke/placeholder.png') {
                                     e.currentTarget.src = 'https://ik.imagekit.io/jrstupuke/placeholder.png'

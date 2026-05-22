@@ -42,6 +42,51 @@ const parseMobileSpecs = (rawValue) => {
     }
 };
 
+const parseStringArray = (rawValue) => {
+    if (!rawValue) return [];
+    try {
+        const parsed = JSON.parse(rawValue);
+        if (!Array.isArray(parsed)) return [];
+        return parsed
+            .map((item) => String(item || '').trim())
+            .filter(Boolean);
+    } catch {
+        return [];
+    }
+};
+
+const parseJsonObject = (rawValue, fallback = null) => {
+    if (!rawValue) return fallback;
+    try {
+        return JSON.parse(rawValue);
+    } catch {
+        return fallback;
+    }
+};
+
+const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const normalizeSku = (value) => {
+    if (value === null || value === undefined) return null;
+    const trimmed = String(value).trim();
+    return trimmed || null;
+};
+
+const findSkuConflict = async ({ sku, storeId, excludeProductId = null }) => {
+    if (!sku) return null;
+
+    const query = {
+        storeId,
+        sku: { $regex: `^${escapeRegex(sku)}$`, $options: 'i' },
+    };
+
+    if (excludeProductId) {
+        query._id = { $ne: excludeProductId };
+    }
+
+    return Product.findOne(query).select('_id sku').lean();
+};
+
 // Helper: Upload images to ImageKit
 const uploadImages = async (images) => {
     return Promise.all(
@@ -119,7 +164,7 @@ export async function POST(request) {
             categoriesRawType: typeof categoriesRaw
         });
         
-        const sku = formData.get("sku") || null;
+        const sku = normalizeSku(formData.get("sku"));
         const metaTitle = (formData.get("metaTitle") || "").toString().trim();
         const metaDescription = (formData.get("metaDescription") || "").toString().trim();
         const seoKeywordsRaw = formData.get("seoKeywords");
@@ -142,6 +187,17 @@ export async function POST(request) {
         const attributesRaw = formData.get("attributes"); // optional JSON of attribute definitions
         // Fast delivery toggle
         const fastDelivery = String(formData.get("fastDelivery") || "false").toLowerCase() === "true";
+        const sizeEnabled = String(formData.get("sizeEnabled") || "false").toLowerCase() === "true";
+        const sizes = parseStringArray(formData.get("sizes"));
+        const fashionLayoutEnabledRaw = formData.get("fashionLayoutEnabled");
+        const fashionLayoutEnabled = fashionLayoutEnabledRaw !== null
+            ? String(fashionLayoutEnabledRaw).toLowerCase() === "true"
+            : Boolean(product.fashionLayoutEnabled);
+        const sizeChartMode = String(formData.get("sizeChartMode") || 'upload').toLowerCase() === 'table' ? 'table' : 'upload';
+        const sizeChartEnabled = String(formData.get("sizeChartEnabled") || "false").toLowerCase() === "true";
+        const sizeChartName = String(formData.get("sizeChartName") || '').trim();
+        const sizeChartUrl = String(formData.get("sizeChartUrl") || '').trim();
+        const sizeChartTable = parseJsonObject(formData.get("sizeChartTable"), null);
         const mobileSpecsEnabled = String(formData.get("mobileSpecsEnabled") || "false").toLowerCase() === "true";
         const mobileSpecs = parseMobileSpecs(formData.get("mobileSpecs"));
         const imageAspectRatio = formData.get("imageAspectRatio") || "1:1";
@@ -166,6 +222,14 @@ export async function POST(request) {
         const existing = await Product.findOne({ slug }).lean();
         if (existing) {
             return NextResponse.json({ error: "Slug already exists. Please use a different slug." }, { status: 400 });
+        }
+
+        // Ensure SKU is unique per store (case-insensitive)
+        if (sku) {
+            const skuConflict = await findSkuConflict({ sku, storeId });
+            if (skuConflict) {
+                return NextResponse.json({ error: "SKU already exists. Please use a unique SKU." }, { status: 400 });
+            }
         }
 
         // Validate core fields
@@ -282,6 +346,14 @@ export async function POST(request) {
             attributes,
             inStock,
             fastDelivery,
+                fashionLayoutEnabled: Boolean(fashionLayoutEnabled),
+            sizeEnabled,
+            sizes,
+            sizeChartMode,
+            sizeChartEnabled,
+            sizeChartName,
+            sizeChartUrl,
+            sizeChartTable,
             mobileSpecsEnabled,
             mobileSpecs,
             imageAspectRatio,
@@ -294,6 +366,14 @@ export async function POST(request) {
             { _id: product._id },
             {
                 $set: {
+                    fashionLayoutEnabled: Boolean(fashionLayoutEnabled),
+                    sizeEnabled,
+                    sizes,
+                    sizeChartMode,
+                    sizeChartEnabled,
+                    sizeChartName,
+                    sizeChartUrl,
+                    sizeChartTable,
                     mobileSpecsEnabled,
                     mobileSpecs,
                 },
@@ -336,8 +416,44 @@ export async function GET(request) {
     try {
         await connectDB();
 
+        const { searchParams } = new URL(request.url);
+        const pageParam = Number(searchParams.get('page') || 1);
+        const limitParam = Number(searchParams.get('limit') || 0);
+        const search = String(searchParams.get('search') || '').trim();
+        const category = String(searchParams.get('category') || '').trim();
+        const sortBy = String(searchParams.get('sortBy') || 'newest').trim();
+
+        const page = Number.isFinite(pageParam) && pageParam > 0 ? Math.floor(pageParam) : 1;
+        const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.floor(limitParam) : 0;
+
+        const query = {};
+        if (search) {
+            query.name = { $regex: escapeRegex(search), $options: 'i' };
+        }
+        if (category) {
+            query.$or = [
+                { category },
+                { categories: category },
+            ];
+        }
+
+        const sort =
+            sortBy === 'oldest'
+                ? { createdAt: 1 }
+                : sortBy === 'name'
+                    ? { name: 1 }
+                    : { createdAt: -1 };
+
         // ADMIN/GLOBAL: Return all products, no auth required
-        const rawProducts = await Product.find({}).sort({ createdAt: -1 }).lean();
+        const totalProducts = await Product.countDocuments(query);
+
+        let findQuery = Product.find(query).sort(sort);
+        if (limit > 0) {
+            const skip = (page - 1) * limit;
+            findQuery = findQuery.skip(skip).limit(limit);
+        }
+
+        const rawProducts = await findQuery.lean();
         const products = rawProducts.map((product) => {
             const normalizedImages = Array.isArray(product.images)
                 ? product.images.map(resolveImageUrl).filter(Boolean)
@@ -345,20 +461,29 @@ export async function GET(request) {
 
             return {
                 ...product,
+                fashionLayoutEnabled: Boolean(product.fashionLayoutEnabled),
                 images: normalizedImages,
                 image: normalizedImages[0] || null,
             };
         });
-        return NextResponse.json(
-            { products },
-            {
-                headers: {
-                    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-                    Pragma: 'no-cache',
-                    Expires: '0',
-                },
-            }
-        );
+        const responsePayload = { products };
+
+        if (limit > 0) {
+            responsePayload.pagination = {
+                page,
+                limit,
+                totalProducts,
+                totalPages: Math.max(1, Math.ceil(totalProducts / limit)),
+            };
+        }
+
+        return NextResponse.json(responsePayload, {
+            headers: {
+                'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+                Pragma: 'no-cache',
+                Expires: '0',
+            },
+        });
     } catch (error) {
         console.error(error);
         return NextResponse.json({ error: error.code || error.message }, { status: 400 });
@@ -429,7 +554,7 @@ export async function PUT(request) {
         const description = formData.get("description");
         const category = formData.get("category"); // Kept for backward compatibility
         const categoriesRaw = formData.get("categories"); // New: JSON array of category IDs
-        const sku = formData.get("sku");
+        const sku = normalizeSku(formData.get("sku"));
         const metaTitle = formData.get("metaTitle")?.toString().trim();
         const metaDescription = formData.get("metaDescription")?.toString().trim();
         const seoKeywordsRaw = formData.get("seoKeywords");
@@ -453,6 +578,13 @@ export async function PUT(request) {
         const mrp = formData.get("mrp") ? Number(formData.get("mrp")) : undefined;
         const price = formData.get("price") ? Number(formData.get("price")) : undefined;
         const fastDelivery = String(formData.get("fastDelivery") || "").toLowerCase() === "true";
+        const sizeEnabledRaw = formData.get("sizeEnabled");
+        const sizesRaw = formData.get("sizes");
+        const sizeChartModeRaw = formData.get("sizeChartMode");
+        const sizeChartEnabledRaw = formData.get("sizeChartEnabled");
+        const sizeChartNameRaw = formData.get("sizeChartName");
+        const sizeChartUrlRaw = formData.get("sizeChartUrl");
+        const sizeChartTableRaw = formData.get("sizeChartTable");
         const mobileSpecsEnabledRaw = formData.get("mobileSpecsEnabled");
         const mobileSpecsRaw = formData.get("mobileSpecs");
         const imageAspectRatioRaw = formData.get("imageAspectRatio");
@@ -526,6 +658,31 @@ export async function PUT(request) {
         }
 
         const imageAspectRatio = imageAspectRatioRaw || product.imageAspectRatio || "1:1";
+        const sizeEnabled = sizeEnabledRaw !== null
+            ? String(sizeEnabledRaw).toLowerCase() === "true"
+            : Boolean(product.sizeEnabled);
+        const fashionLayoutEnabledRaw = formData.get("fashionLayoutEnabled");
+        const fashionLayoutEnabled = fashionLayoutEnabledRaw !== null
+            ? String(fashionLayoutEnabledRaw).toLowerCase() === "true"
+            : Boolean(product.fashionLayoutEnabled);
+        const sizes = sizesRaw !== null
+            ? parseStringArray(sizesRaw)
+            : (Array.isArray(product.sizes) ? product.sizes : []);
+        const sizeChartMode = sizeChartModeRaw !== null
+            ? (String(sizeChartModeRaw).toLowerCase() === 'table' ? 'table' : 'upload')
+            : String(product.sizeChartMode || 'upload');
+        const sizeChartEnabled = sizeChartEnabledRaw !== null
+            ? String(sizeChartEnabledRaw).toLowerCase() === "true"
+            : Boolean(product.sizeChartEnabled);
+        const sizeChartName = sizeChartNameRaw !== null
+            ? String(sizeChartNameRaw || '').trim()
+            : String(product.sizeChartName || '');
+        const sizeChartUrl = sizeChartUrlRaw !== null
+            ? String(sizeChartUrlRaw || '').trim()
+            : String(product.sizeChartUrl || '');
+        const sizeChartTable = sizeChartTableRaw !== null
+            ? parseJsonObject(sizeChartTableRaw, null)
+            : (product.sizeChartTable || null);
         const mobileSpecsEnabled = mobileSpecsEnabledRaw !== null
             ? String(mobileSpecsEnabledRaw).toLowerCase() === "true"
             : Boolean(product.mobileSpecsEnabled);
@@ -577,6 +734,14 @@ export async function PUT(request) {
             attributes,
             inStock,
             fastDelivery,
+                fashionLayoutEnabled: Boolean(fashionLayoutEnabled),
+            sizeEnabled,
+            sizes,
+            sizeChartMode,
+            sizeChartEnabled,
+            sizeChartName,
+            sizeChartUrl,
+            sizeChartTable,
             mobileSpecsEnabled,
             mobileSpecs,
             imageAspectRatio,
@@ -593,6 +758,14 @@ export async function PUT(request) {
             }
             updateData.slug = slug;
         }
+
+        // Ensure SKU is unique per store (case-insensitive)
+        if (sku) {
+            const skuConflict = await findSkuConflict({ sku, storeId, excludeProductId: productId });
+            if (skuConflict) {
+                return NextResponse.json({ error: "SKU already exists. Please use a unique SKU." }, { status: 400 });
+            }
+        }
         console.log('Product updateData:', updateData);
         console.log('PUT: Saving categories:', updateData.categories);
         product = await Product.findByIdAndUpdate(
@@ -606,6 +779,14 @@ export async function PUT(request) {
             { _id: product._id },
             {
                 $set: {
+                    fashionLayoutEnabled: Boolean(fashionLayoutEnabled),
+                    sizeEnabled,
+                    sizes,
+                    sizeChartMode,
+                    sizeChartEnabled,
+                    sizeChartName,
+                    sizeChartUrl,
+                    sizeChartTable,
                     mobileSpecsEnabled,
                     mobileSpecs,
                 },

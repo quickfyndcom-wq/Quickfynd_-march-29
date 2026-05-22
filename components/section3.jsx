@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import axios from "axios";
 import Dummy from '../assets/sp.webp';
@@ -8,13 +8,51 @@ import Dummy from '../assets/sp.webp';
 export default function TopDeals() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [pageIndex, setPageIndex] = useState(0);
+  const PRODUCTS_PER_PAGE = 12;
 
-  const getImageSrc = (image) => {
-    if (typeof image === "string" && image.trim()) return image;
-    if (image && typeof image === "object") {
-      const resolved = image.url || image.src;
+  const sortLatestFirst = (items) => {
+    return [...items].sort((a, b) => {
+      const aTime = new Date(a?.createdAt || a?.updatedAt || 0).getTime();
+      const bTime = new Date(b?.createdAt || b?.updatedAt || 0).getTime();
+
+      if (aTime !== bTime) return bTime - aTime;
+
+      const aId = String(a?._id || a?.id || "");
+      const bId = String(b?._id || b?.id || "");
+      return bId.localeCompare(aId);
+    });
+  };
+
+  const isVideoUrl = (url) => {
+    if (!url || typeof url !== "string") return false;
+    const lower = url.toLowerCase();
+    return /(\.mp4|\.webm|\.mov|\.m4v|\.avi|\.mkv)(\?|$)/.test(lower) || lower.includes('/video/upload/');
+  };
+
+  const resolveMediaUrl = (media) => {
+    if (typeof media === "string" && media.trim()) return media;
+    if (media && typeof media === "object") {
+      const resolved = media.url || media.src;
       if (typeof resolved === "string" && resolved.trim()) return resolved;
     }
+    return "";
+  };
+
+  const getImageSrc = (images, fallbackImage) => {
+    const mediaList = Array.isArray(images) ? images : [];
+
+    // If first media is video, choose a non-video image from the end.
+    for (let index = mediaList.length - 1; index >= 0; index -= 1) {
+      const mediaUrl = resolveMediaUrl(mediaList[index]);
+      if (mediaUrl && !isVideoUrl(mediaUrl)) {
+        return mediaUrl;
+      }
+    }
+
+    const fallbackUrl = resolveMediaUrl(fallbackImage);
+    if (fallbackUrl && !isVideoUrl(fallbackUrl)) return fallbackUrl;
+
     return "https://ik.imagekit.io/jrstupuke/placeholder.png";
   };
 
@@ -27,16 +65,18 @@ export default function TopDeals() {
         ]);
 
         const adminSections = sectionData.sections || [];
-        const allProducts = productData.products || productData;
+        const allProducts = Array.isArray(productData.products || productData)
+          ? (productData.products || productData)
+          : [];
 
-        const section = adminSections.find(s => s.category);
-// let result = allProducts.filter(p => p.category === "Trending Deals");
-let result = allProducts;
+        const section = adminSections.find((s) => s.category);
+        let result = allProducts;
+
         if (section && section.category) {
-          result = allProducts.filter(p => p.category === section.category);
+          result = allProducts.filter((p) => p.category === section.category);
         }
 
-        setProducts(result);
+        setProducts(sortLatestFirst(result));
       } catch {
         setProducts([]);
       } finally {
@@ -46,17 +86,45 @@ let result = allProducts;
     load();
   }, []);
 
+  useEffect(() => {
+    if (products.length <= PRODUCTS_PER_PAGE) {
+      setPageIndex(0);
+      return;
+    }
+
+    const totalPages = Math.ceil(products.length / PRODUCTS_PER_PAGE);
+    const timer = setInterval(() => {
+      setPageIndex((prev) => (prev + 1) % totalPages);
+    }, 60 * 1000);
+
+    return () => clearInterval(timer);
+  }, [products.length]);
+
+  const visibleProducts = useMemo(() => {
+    if (products.length <= PRODUCTS_PER_PAGE) return products.slice(0, PRODUCTS_PER_PAGE);
+
+    const start = pageIndex * PRODUCTS_PER_PAGE;
+    const page = products.slice(start, start + PRODUCTS_PER_PAGE);
+
+    // Wrap to beginning so each minute still renders a full set.
+    if (page.length < PRODUCTS_PER_PAGE) {
+      return [...page, ...products.slice(0, PRODUCTS_PER_PAGE - page.length)];
+    }
+
+    return page;
+  }, [products, pageIndex]);
+
   return (
-    <div className="w-full flex justify-center px-3 sm:px-4 mt-6 sm:mt-8">
-      <div className="w-full max-w-[1250px] flex flex-col lg:flex-row gap-4 lg:gap-6">
+    <div className="w-full flex justify-center px-2 sm:px-3 lg:px-4 mt-6 sm:mt-8">
+      <div className="w-full max-w-[1700px] flex flex-col lg:flex-row gap-4 lg:gap-6">
 
         {/* LEFT GRID PRODUCTS */}
         <div className="flex-1 w-full">
           <h2 className="text-base sm:text-lg md:text-[28px] font-semibold mb-4 sm:mb-5">Top Deals</h2>
 
           {loading ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 sm:gap-4 md:gap-6">
-              {[...Array(10)].map((_, index) => (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-6">
+              {[...Array(12)].map((_, index) => (
                 <div
                   key={`skeleton-${index}`}
                   className="cursor-pointer text-center flex flex-col items-center"
@@ -96,9 +164,9 @@ let result = allProducts;
           ) : products.length === 0 ? (
             <p className="text-gray-500 py-8 text-center text-sm sm:text-base">No Deals Found</p>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 sm:gap-4 md:gap-6">
-              {products?.slice(0, 10).map((item, i) => {
-                const img = getImageSrc(item.images?.[0] || item.image);
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-6">
+              {visibleProducts.map((item, i) => {
+                const img = getImageSrc(item.images, item.image);
 
                 return (
                   <a
@@ -128,23 +196,25 @@ let result = allProducts;
         </div>
 
         {/* RIGHT FIXED BANNER - HIDDEN ON MOBILE */}
-        <div className="w-full sm:w-[250px] md:w-[300px] hidden lg:block">
+        <div className="w-full sm:w-[250px] md:w-[300px] hidden lg:block lg:mt-[56px]">
           {loading ? (
             <div
-              className="w-full rounded-lg"
+              className="w-full rounded-lg overflow-hidden"
               style={{
-                height: 420,
+                height: 512,
                 background: 'linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%)',
                 backgroundSize: '200% 100%',
                 animation: 'shimmer 1.5s infinite',
               }}
             />
           ) : (
-            <Image
-              src={Dummy}
-              alt="Offer Banner"
-              className="w-full rounded-lg shadow"
-            />
+            <div className="w-full h-[512px] rounded-lg shadow overflow-hidden">
+              <Image
+                src={Dummy}
+                alt="Offer Banner"
+                className="w-full h-full object-cover"
+              />
+            </div>
           )}
         </div>
       </div>

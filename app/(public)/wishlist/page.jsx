@@ -223,7 +223,7 @@ function WishlistAuthed() {
     return (
       <>
         <PageTitle title="My Wishlist" />
-        <div className="max-w-[1250px] mx-auto px-4 sm:px-6 py-10">
+        <div className="max-w-[1450px] mx-auto px-4 sm:px-6 py-10">
           <div className="flex items-center justify-center py-16">
             <div className="h-10 w-10 rounded-full border-4 border-orange-200 border-t-orange-500 animate-spin" />
           </div>
@@ -236,7 +236,7 @@ function WishlistAuthed() {
     <>
       <PageTitle title="My Wishlist" />
 
-      <div className="max-w-[1250px] mx-auto px-4 sm:px-6 py-8">
+      <div className="max-w-[1450px] mx-auto px-4 sm:px-6 py-8">
         <div className={`${isSignedIn ? 'grid grid-cols-1 md:grid-cols-[260px_minmax(0,1fr)] gap-6' : ''} min-w-0`}>
           {isSignedIn && <DashboardSidebar />}
 

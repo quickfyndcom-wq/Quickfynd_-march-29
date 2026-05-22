@@ -16,6 +16,7 @@ import ProductForm from "../add-product/page"
 
 
 
+
 export default function StoreManageProducts() {
     const dispatch = useDispatch();
 
@@ -38,6 +39,11 @@ export default function StoreManageProducts() {
     const [fbtDiscountPercent, setFbtDiscountPercent] = useState('')
     const [savingFbt, setSavingFbt] = useState(false)
 
+    // --- PAGINATION HOOKS ---
+    const [pageSize, setPageSize] = useState(20);
+    const [currentPage, setCurrentPage] = useState(1);
+
+
     const getImageSrc = (image) => {
         if (typeof image === 'string' && image.trim()) return image
         if (image && typeof image === 'object') {
@@ -53,6 +59,21 @@ export default function StoreManageProducts() {
             }
         }
         return 'https://ik.imagekit.io/jrstupuke/placeholder.png'
+    }
+
+    const isVideoSrc = (src) => {
+        if (!src || typeof src !== 'string') return false
+        return /\.(mp4|webm|ogg|mov|m4v)(\?|#|$)/i.test(src)
+    }
+
+    const getProductThumbnailSrc = (product) => {
+        const mediaList = Array.isArray(product?.images) ? product.images : []
+        if (!mediaList.length) return getImageSrc(product?.image)
+
+        const normalized = mediaList.map((item) => getImageSrc(item)).filter(Boolean)
+        const firstImage = normalized.find((src) => !isVideoSrc(src))
+
+        return firstImage || normalized[0] || getImageSrc(product?.image)
     }
 
     const fetchStoreProducts = async () => {
@@ -217,8 +238,6 @@ export default function StoreManageProducts() {
         }  
     }, [user])
 
-    if (loading) return <Loading />
-
     // Filter products based on search query and selected category
     const filteredProducts = products.filter(product => {
         // Filter by selected category
@@ -251,6 +270,43 @@ export default function StoreManageProducts() {
         return false;
     });
 
+    // Pagination logic
+    const totalPages = Math.max(1, Math.ceil(filteredProducts.length / pageSize));
+    const paginatedProducts = filteredProducts.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+    // Keep pagination valid when filters/search/page-size change
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchQuery, selectedCategory, pageSize]);
+
+    useEffect(() => {
+        if (currentPage > totalPages) {
+            setCurrentPage(totalPages);
+        }
+    }, [currentPage, totalPages]);
+
+    const pageNumbers = (() => {
+        const pages = [];
+        const maxVisiblePages = 7;
+
+        if (totalPages <= maxVisiblePages) {
+            for (let i = 1; i <= totalPages; i += 1) pages.push(i);
+            return pages;
+        }
+
+        const start = Math.max(1, currentPage - 3);
+        const end = Math.min(totalPages, start + maxVisiblePages - 1);
+        const adjustedStart = Math.max(1, end - maxVisiblePages + 1);
+
+        for (let i = adjustedStart; i <= end; i += 1) {
+            pages.push(i);
+        }
+
+        return pages;
+    })();
+
+    if (loading) return <Loading />
+
     const fbtCandidates = (() => {
         if (!fbtBaseProduct?._id) return []
         const baseTags = Array.isArray(fbtBaseProduct.tags)
@@ -279,7 +335,7 @@ export default function StoreManageProducts() {
 
     return (
         <>
-            <div className="flex items-center justify-between gap-3 mb-5 max-w-5xl">
+            <div className="w-full flex items-center justify-between gap-3 mb-5">
                 <h1 className="text-2xl text-slate-500">Manage <span className="text-slate-800 font-medium">Products</span></h1>
                 <Link
                     href="/store/add-product"
@@ -290,7 +346,7 @@ export default function StoreManageProducts() {
             </div>
             
             {/* Search Bar and Category Filter */}
-            <div className="mb-6 max-w-5xl flex gap-4 flex-wrap">
+            <div className="mb-6 w-full flex gap-4 flex-wrap">
                 <div className="flex-1 min-w-xs">
                     <input
                         type="text"
@@ -299,11 +355,7 @@ export default function StoreManageProducts() {
                         onChange={(e) => setSearchQuery(e.target.value)}
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     />
-                    {searchQuery && (
-                        <p className="text-sm text-slate-600 mt-2">
-                            Found {filteredProducts.length} product{filteredProducts.length !== 1 ? 's' : ''}
-                        </p>
-                    )}
+                    {/* Removed product count display as requested */}
                 </div>
                 
                 {/* Category Filter */}
@@ -319,52 +371,82 @@ export default function StoreManageProducts() {
                 </select>
             </div>
 
-            {/* Quick Category Filter Buttons */}
-            <div className="mb-6 max-w-5xl">
-                <p className="text-sm text-gray-600 font-medium mb-3">Quick Filter by Category:</p>
-                <div className="flex flex-wrap gap-2 mb-3">
-                    {['Trending & Featured', "Men's Fashion", "Women's Fashion", 'Kids', 'Electronics', 'Mobile Accessories', 'Home & Kitchen', 'Beauty', 'Car Essentials'].map((categoryName) => {
-                        const categoryId = Object.entries(categoryMap).find(([_, name]) => name === categoryName)?.[0];
-                        const isSelected = selectedCategory === categoryId;
-                        return (
-                            <button
-                                key={categoryName}
-                                onClick={() => setSelectedCategory(isSelected ? '' : (categoryId || ''))}
-                                className={`px-4 py-2 rounded-full text-sm font-medium transition ${
-                                    isSelected ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300'
-                                }`}
-                            >
-                                {categoryName}
-                            </button>
-                        );
-                    })}
+
+            {/* Page Size Filter and Pagination */}
+            <div className="mb-6 w-full flex flex-wrap gap-4 items-center justify-between">
+                <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600 font-medium">Show</span>
+                    <select
+                        value={pageSize}
+                        onChange={e => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+                        className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm"
+                    >
+                        {[10, 20, 50, 100, 500, 1000].map(size => (
+                            <option key={size} value={size}>{size}</option>
+                        ))}
+                    </select>
+                    <span className="text-sm text-gray-600 font-medium">per page</span>
                 </div>
-                
-                {/* Selected Category Pills */}
-                {selectedCategory && (
-                    <div className="flex flex-wrap gap-2">
-                        {Object.entries(categoryMap)
-                            .filter(([id]) => id === selectedCategory)
-                            .map(([id, name]) => (
-                                <div
-                                    key={id}
-                                    className="inline-flex items-center gap-2 bg-blue-600 text-white px-3 py-1.5 rounded-full text-sm font-medium"
-                                >
-                                    {name}
-                                    <button
-                                        onClick={() => setSelectedCategory('')}
-                                        className="ml-1 hover:opacity-70 transition"
-                                    >
-                                        ✕
-                                    </button>
-                                </div>
-                            ))}
-                    </div>
-                )}
+                <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                        className="px-3 py-1 rounded border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={currentPage === 1}
+                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    >Prev</button>
+
+                    {pageNumbers[0] > 1 && (
+                        <>
+                            <button
+                                type="button"
+                                onClick={() => setCurrentPage(1)}
+                                className="w-8 h-8 text-sm rounded border border-gray-300 bg-white hover:bg-gray-50"
+                            >
+                                1
+                            </button>
+                            {pageNumbers[0] > 2 && <span className="px-1 text-gray-400">...</span>}
+                        </>
+                    )}
+
+                    {pageNumbers.map((page) => (
+                        <button
+                            key={page}
+                            type="button"
+                            onClick={() => setCurrentPage(page)}
+                            className={`w-8 h-8 text-sm rounded border ${
+                                currentPage === page
+                                    ? 'border-blue-600 bg-blue-600 text-white'
+                                    : 'border-gray-300 bg-white hover:bg-gray-50 text-gray-700'
+                            }`}
+                        >
+                            {page}
+                        </button>
+                    ))}
+
+                    {pageNumbers[pageNumbers.length - 1] < totalPages && (
+                        <>
+                            {pageNumbers[pageNumbers.length - 1] < totalPages - 1 && <span className="px-1 text-gray-400">...</span>}
+                            <button
+                                type="button"
+                                onClick={() => setCurrentPage(totalPages)}
+                                className="w-8 h-8 text-sm rounded border border-gray-300 bg-white hover:bg-gray-50"
+                            >
+                                {totalPages}
+                            </button>
+                        </>
+                    )}
+
+                    <span className="text-sm text-gray-700">Page {currentPage} of {totalPages}</span>
+                    <button
+                        className="px-3 py-1 rounded border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={currentPage === totalPages}
+                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    >Next</button>
+                </div>
             </div>
 
+            {/* Table or Empty State */}
             {filteredProducts.length === 0 ? (
-                <div className="w-full max-w-5xl ring ring-slate-200 rounded p-8 text-center bg-white">
+                <div className="w-full ring ring-slate-200 rounded p-8 text-center bg-white">
                     <p className="text-slate-600 mb-4">No products found. Add your first product to get started.</p>
                     <Link
                         href="/store/add-product"
@@ -374,32 +456,32 @@ export default function StoreManageProducts() {
                     </Link>
                 </div>
             ) : (
-            <table className="w-full max-w-5xl text-left  ring ring-slate-200  rounded overflow-hidden text-sm">
-                <thead className="bg-slate-50 text-gray-700 uppercase tracking-wider">
-                    <tr>
-                        <th className="px-4 py-3">Name</th>
-                        <th className="px-4 py-3 hidden lg:table-cell">SKU</th>
-                        <th className="px-4 py-3 hidden md:table-cell">Categories</th>
-                        <th className="px-4 py-3 hidden xl:table-cell">Tags</th>
-                        <th className="px-4 py-3 hidden md:table-cell">Description</th>
-                        <th className="px-4 py-3 hidden md:table-cell">MRP</th>
-                        <th className="px-4 py-3">Price</th>
-                        <th className="px-4 py-3 hidden sm:table-cell">Fast Delivery</th>
-                        <th className="px-4 py-3 hidden lg:table-cell">Frequently</th>
-                        <th className="px-4 py-3">Stock</th>
-                        <th className="px-4 py-3">Actions</th>
-                    </tr>
+                <div className="w-full overflow-x-auto ring ring-slate-200 rounded">
+                <table className="w-full min-w-[1050px] text-left text-sm">
+                    <thead className="bg-slate-50 text-gray-700 uppercase tracking-wider">
+                        <tr>
+                            <th className="px-4 py-3 w-96">Name</th>
+                            <th className="px-4 py-3 hidden lg:table-cell w-56">SKU</th>
+                            <th className="px-4 py-3 hidden md:table-cell">Categories</th>
+
+                            <th className="px-4 py-3 hidden md:table-cell w-32">MRP</th>
+                            <th className="px-4 py-3">Price</th>
+                            <th className="px-4 py-3 hidden sm:table-cell">Fast Delivery</th>
+                            <th className="px-4 py-3 hidden lg:table-cell">Frequently</th>
+                            <th className="px-4 py-3">Stock</th>
+                            <th className="px-4 py-3">Actions</th>
+                        </tr>
                 </thead>
                 <tbody className="text-slate-700">
-                    {filteredProducts.map((product) => (
+                    {paginatedProducts.map((product) => (
                         <tr key={product._id} className="border-t border-gray-200 hover:bg-gray-50">
-                            <td className="px-4 py-3">
+                            <td className="px-4 py-3 w-96">
                                 <div className="flex gap-2 items-center">
-                                    <Image width={40} height={40} unoptimized className='p-1 shadow rounded cursor-pointer' src={getImageSrc(product.images?.[0] || product.image)} alt="" />
-                                    {product.name}
+                                    <Image width={40} height={40} unoptimized className='p-1 shadow rounded cursor-pointer' src={getProductThumbnailSrc(product)} alt="" />
+                                    <span className="break-words">{product.name}</span>
                                 </div>
                             </td>
-                            <td className="px-4 py-3 text-slate-600 hidden lg:table-cell">{product.sku || '-'}</td>
+                            <td className="px-4 py-3 text-slate-600 hidden lg:table-cell w-56">{product.sku || '-'}</td>
                             <td className="px-4 py-3 hidden md:table-cell">
                                 {product.categories && product.categories.length > 0 ? (
                                     <div className="flex flex-wrap gap-1">
@@ -417,23 +499,8 @@ export default function StoreManageProducts() {
                                     <span className="text-slate-400">-</span>
                                 )}
                             </td>
-                            <td className="px-4 py-3 hidden xl:table-cell">
-                                {product.tags && product.tags.length > 0 ? (
-                                    <div className="flex flex-wrap gap-1 max-w-xs">
-                                        {product.tags.map((tag, idx) => (
-                                            <span key={idx} className="inline-block px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded">
-                                                {tag}
-                                            </span>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <span className="text-slate-400">-</span>
-                                )}
-                            </td>
-                            <td className="px-4 py-3 max-w-md text-slate-600 hidden md:table-cell truncate">
-                                {product.description?.replace(/<[^>]*>/g, ' ').trim().substring(0, 100)}...
-                            </td>
-                            <td className="px-4 py-3 hidden md:table-cell">{currency} {product.mrp.toLocaleString()}</td>
+
+                            <td className="px-4 py-3 hidden md:table-cell w-32">{currency} {product.mrp.toLocaleString()}</td>
                             <td className="px-4 py-3">{currency} {product.price.toLocaleString()}</td>
                             <td className="px-4 py-3 hidden sm:table-cell">
                                 <label className="relative inline-flex items-center cursor-pointer">
@@ -491,6 +558,7 @@ export default function StoreManageProducts() {
                     ))}
                 </tbody>
             </table>
+            </div>
             )}
 
             {showEditModal && (
@@ -571,7 +639,7 @@ export default function StoreManageProducts() {
                                         } ${!fbtEnabled ? 'opacity-60 cursor-not-allowed' : ''}`}
                                     >
                                         <div className="flex items-start gap-2">
-                                            <Image width={38} height={38} unoptimized src={getImageSrc(candidate.images?.[0] || candidate.image)} alt="" className="rounded border" />
+                                            <Image width={38} height={38} unoptimized src={getProductThumbnailSrc(candidate)} alt="" className="rounded border" />
                                             <div className="min-w-0">
                                                 <p className="text-sm font-medium text-slate-800 truncate">{candidate.name}</p>
                                                 <p className="text-xs text-slate-500">{currency} {Number(candidate.price || 0).toLocaleString()}</p>

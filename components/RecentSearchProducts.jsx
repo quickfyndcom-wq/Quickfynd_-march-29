@@ -139,7 +139,7 @@ export default function RecentSearchProducts() {
   if (loading) {
     return (
       <section className="w-full bg-white py-8 mb-6">
-        <div className="max-w-[1280px] mx-auto">
+        <div className="max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4">
           <div className="flex items-center justify-between mb-6 px-4">
             <div>
               <div className="h-4 w-24 bg-gray-200 rounded animate-pulse mb-2"></div>
@@ -169,7 +169,7 @@ export default function RecentSearchProducts() {
 
   return (
     <section className="w-full bg-white py-8 mb-6">
-      <div className="max-w-[1280px] mx-auto">
+      <div className="max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4">
         {/* Header */}
         <div className="flex items-center justify-between mb-6 px-4">
           <div>

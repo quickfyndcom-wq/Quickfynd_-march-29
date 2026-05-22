@@ -220,7 +220,7 @@ const Hero = () => {
   ----------------------------------------------------*/
   return (
     <div className="mx-0 sm:mx-6">
-      <div className="flex max-xl:flex-col gap-6 max-w-[1250px] mx-auto mt-0 sm:mt-8 mb-6 sm:mb-10">
+      <div className="flex max-xl:flex-col gap-6 max-w-[1450px] mx-auto mt-0 sm:mt-8 mb-6 sm:mb-10">
         {/* MAIN HERO BANNER - Responsive, image only, no border */}
         <Link
           href={buttonHref}

@@ -1,10 +1,10 @@
 "use client";
-import { Suspense, useMemo, useState, useCallback, useEffect, useRef } from "react";
+import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import ProductCard from "@/components/ProductCard"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useAuth } from '@/lib/useAuth'
 import axios from 'axios'
-import { SlidersHorizontal, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, SlidersHorizontal, X } from 'lucide-react'
 
 function ShopContent() {
     const searchParams = useSearchParams();
@@ -26,8 +26,12 @@ function ShopContent() {
     const [reviewFilter, setReviewFilter] = useState('all');
     const [bestSellerOnly, setBestSellerOnly] = useState(false);
     const [fastDeliveryOnly, setFastDeliveryOnly] = useState(false);
+    const [currentPage, setCurrentPage] = useState(1);
+    const productsPerPage = 48;
     const [showMobileFilters, setShowMobileFilters] = useState(false);
     const [fastSellingIndex, setFastSellingIndex] = useState(0);
+    const [categories, setCategories] = useState([]);
+    const [categoriesLoading, setCategoriesLoading] = useState(false);
     const { user, getToken } = useAuth();
 
     const getImageSrc = (image) => {
@@ -38,6 +42,32 @@ function ShopContent() {
 
     useEffect(() => {
         setMounted(true);
+    }, []);
+
+    useEffect(() => {
+        let isActive = true;
+
+        const fetchCategories = async () => {
+            setCategoriesLoading(true);
+            try {
+                const response = await fetch('/api/categories');
+                const data = await response.json();
+                if (!isActive) return;
+                setCategories(Array.isArray(data?.categories) ? data.categories : []);
+            } catch {
+                if (!isActive) return;
+                setCategories([]);
+            } finally {
+                if (!isActive) return;
+                setCategoriesLoading(false);
+            }
+        };
+
+        fetchCategories();
+
+        return () => {
+            isActive = false;
+        };
     }, []);
 
     const fetchAllProducts = useCallback(async ({ category }) => {
@@ -262,6 +292,33 @@ function ShopContent() {
 
     const sourceProducts = categoryParam ? categoryProducts : allProducts;
 
+    const categoryOptions = useMemo(() => {
+        if (!Array.isArray(categories) || categories.length === 0) return [];
+
+        const uniqueBySlug = new Map();
+        categories.forEach((category) => {
+            const slug = String(category?.slug || '').trim();
+            const name = String(category?.name || '').trim();
+            if (!slug || !name) return;
+            if (!uniqueBySlug.has(slug)) {
+                uniqueBySlug.set(slug, { slug, name });
+            }
+        });
+
+        return Array.from(uniqueBySlug.values()).sort((a, b) => a.name.localeCompare(b.name));
+    }, [categories]);
+
+    const buildShopUrl = useCallback((nextCategorySlug = null) => {
+        const params = new URLSearchParams(searchParams.toString());
+        if (nextCategorySlug) {
+            params.set('category', nextCategorySlug);
+        } else {
+            params.delete('category');
+        }
+        const queryString = params.toString();
+        return queryString ? `/shop?${queryString}` : '/shop';
+    }, [searchParams]);
+
     // Filter by search
     const filteredProducts = useMemo(() => {
         let filtered = sourceProducts;
@@ -404,6 +461,56 @@ function ShopContent() {
         return list;
     }, [sourceProducts, getReviewCount, getAverageRating]);
 
+    const totalPages = useMemo(() => {
+        return Math.max(1, Math.ceil(visibleProducts.length / productsPerPage));
+    }, [visibleProducts.length]);
+
+    const paginatedProducts = useMemo(() => {
+        const start = (currentPage - 1) * productsPerPage;
+        return visibleProducts.slice(start, start + productsPerPage);
+    }, [visibleProducts, currentPage]);
+
+    const pageNumbers = useMemo(() => {
+        const pages = [];
+        const maxVisiblePages = 7;
+        if (totalPages <= maxVisiblePages) {
+            for (let i = 1; i <= totalPages; i++) pages.push(i);
+            return pages;
+        }
+
+        const start = Math.max(1, currentPage - 3);
+        const end = Math.min(totalPages, start + maxVisiblePages - 1);
+        const adjustedStart = Math.max(1, end - maxVisiblePages + 1);
+
+        for (let i = adjustedStart; i <= end; i++) {
+            pages.push(i);
+        }
+
+        return pages;
+    }, [currentPage, totalPages]);
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [
+        search,
+        categoryParam,
+        sortBy,
+        priceFilter,
+        minPrice,
+        maxPrice,
+        stockFilter,
+        ratingFilter,
+        reviewFilter,
+        bestSellerOnly,
+        fastDeliveryOnly,
+    ]);
+
+    useEffect(() => {
+        if (currentPage > totalPages) {
+            setCurrentPage(totalPages);
+        }
+    }, [currentPage, totalPages]);
+
     useEffect(() => {
         if (fastSellingProducts.length <= 1) return;
 
@@ -445,7 +552,7 @@ function ShopContent() {
 
     return (
         <div className="min-h-screen bg-gray-50">
-            <div className="max-w-[1250px] mx-auto px-4 py-8">
+            <div className="max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4 py-8">
                 {/* Header */}
                 <div className="mb-6 mt-6">
                     <h1 className="text-3xl font-bold text-gray-900 mb-2">
@@ -474,8 +581,9 @@ function ShopContent() {
                             </button>
                         </div>
 
-                        <div className="grid grid-cols-1 lg:grid-cols-[250px_1fr] gap-3 lg:gap-4 items-start">
-                            <aside className={`${showMobileFilters ? 'block' : 'hidden'} lg:block space-y-3 lg:sticky lg:top-24`}>
+                        <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-3 lg:gap-4 items-start">
+                            <aside className={`${showMobileFilters ? 'block' : 'hidden'} lg:block lg:self-start lg:pr-1`}>
+                            <div className="space-y-3">
                             <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm">
                                 <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
                                     <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
@@ -502,6 +610,50 @@ function ShopContent() {
                                 </div>
 
                                 <div className="space-y-3">
+                                    <div>
+                                        <label className="text-[11px] font-medium text-gray-500 mb-1.5 block">Categories</label>
+                                        <div className="max-h-52 overflow-y-auto border border-gray-200 rounded-md p-1 bg-gray-50">
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    router.push(buildShopUrl(null));
+                                                    setShowMobileFilters(false);
+                                                }}
+                                                className={`w-full text-left px-2 py-1.5 rounded text-sm ${
+                                                    !categoryParam
+                                                        ? 'bg-orange-100 text-orange-700 font-semibold'
+                                                        : 'text-gray-700 hover:bg-white'
+                                                }`}
+                                            >
+                                                All Categories
+                                            </button>
+
+                                            {categoriesLoading ? (
+                                                <p className="px-2 py-1.5 text-xs text-gray-500">Loading categories...</p>
+                                            ) : categoryOptions.length > 0 ? (
+                                                categoryOptions.map((category) => (
+                                                    <button
+                                                        key={category.slug}
+                                                        type="button"
+                                                        onClick={() => {
+                                                            router.push(buildShopUrl(category.slug));
+                                                            setShowMobileFilters(false);
+                                                        }}
+                                                        className={`w-full text-left px-2 py-1.5 rounded text-sm ${
+                                                            categoryParam === category.slug
+                                                                ? 'bg-orange-100 text-orange-700 font-semibold'
+                                                                : 'text-gray-700 hover:bg-white'
+                                                        }`}
+                                                    >
+                                                        {category.name}
+                                                    </button>
+                                                ))
+                                            ) : (
+                                                <p className="px-2 py-1.5 text-xs text-gray-500">No categories found</p>
+                                            )}
+                                        </div>
+                                    </div>
+
                                     <div>
                                         <label className="text-[11px] font-medium text-gray-500 mb-1.5 block">Sort</label>
                                         <select
@@ -654,11 +806,13 @@ function ShopContent() {
                                     </button>
                                 </div>
                             )}
+                            </div>
                             </aside>
 
-                            <div>
+                            <div className="flex min-h-[calc(100vh-13rem)] flex-col pb-24 lg:pb-28">
                                 <div className="mb-4 flex flex-wrap items-center gap-2 text-sm text-gray-600">
-                                    Showing {visibleProducts.length} {visibleProducts.length === 1 ? 'product' : 'products'}
+                                    Showing {visibleProducts.length === 0 ? 0 : (currentPage - 1) * productsPerPage + 1}-
+                                    {Math.min(currentPage * productsPerPage, visibleProducts.length)} of {visibleProducts.length} {visibleProducts.length === 1 ? 'product' : 'products'}
                                     {(bestSellerOnly || fastDeliveryOnly || reviewFilter !== 'all' || minPrice || maxPrice) && (
                                         <span className="text-xs bg-orange-50 text-orange-700 border border-orange-200 rounded-full px-2 py-1">
                                             Advanced filters active
@@ -677,11 +831,76 @@ function ShopContent() {
                                         </button>
                                     </div>
                                 ) : (
-                                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-3 lg:gap-4">
-                                        {visibleProducts.map((product) => (
-                                            <ProductCard key={product._id || product.id} product={product} />
-                                        ))}
-                                    </div>
+                                    <>
+                                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3 lg:gap-4">
+                                            {paginatedProducts.map((product) => (
+                                                <ProductCard key={product._id || product.id} product={product} />
+                                            ))}
+                                        </div>
+
+                                        {totalPages > 1 && (
+                                            <div className="mx-auto mt-8 flex w-fit items-center justify-center gap-1.5 flex-wrap rounded-2xl border border-gray-200/80 bg-gradient-to-b from-white to-gray-50 px-2.5 py-2 shadow-[0_8px_22px_rgba(15,23,42,0.12)] backdrop-blur">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                                                    disabled={currentPage === 1}
+                                                    className="inline-flex h-10 items-center gap-1 rounded-xl border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition hover:border-orange-200 hover:bg-orange-50 disabled:cursor-not-allowed disabled:opacity-45"
+                                                >
+                                                    <ChevronLeft size={15} /> Prev
+                                                </button>
+
+                                                {pageNumbers[0] > 1 && (
+                                                    <>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setCurrentPage(1)}
+                                                            className="h-10 min-w-10 rounded-xl border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition hover:border-orange-200 hover:bg-orange-50"
+                                                        >
+                                                            1
+                                                        </button>
+                                                        {pageNumbers[0] > 2 && <span className="px-1 text-sm text-gray-400">...</span>}
+                                                    </>
+                                                )}
+
+                                                {pageNumbers.map((page) => (
+                                                    <button
+                                                        key={page}
+                                                        type="button"
+                                                        onClick={() => setCurrentPage(page)}
+                                                        className={`h-10 min-w-10 rounded-xl border px-3 text-sm font-semibold transition ${
+                                                            currentPage === page
+                                                                ? 'border-orange-500 bg-orange-500 text-white shadow-[0_6px_14px_rgba(249,115,22,0.35)]'
+                                                                : 'border-gray-300 bg-white text-gray-700 hover:border-orange-200 hover:bg-orange-50'
+                                                        }`}
+                                                    >
+                                                        {page}
+                                                    </button>
+                                                ))}
+
+                                                {pageNumbers[pageNumbers.length - 1] < totalPages && (
+                                                    <>
+                                                        {pageNumbers[pageNumbers.length - 1] < totalPages - 1 && <span className="px-1 text-gray-400">...</span>}
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setCurrentPage(totalPages)}
+                                                            className="h-10 min-w-10 rounded-xl border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition hover:border-orange-200 hover:bg-orange-50"
+                                                        >
+                                                            {totalPages}
+                                                        </button>
+                                                    </>
+                                                )}
+
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                                                    disabled={currentPage === totalPages}
+                                                    className="inline-flex h-10 items-center gap-1 rounded-xl border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 transition hover:border-orange-200 hover:bg-orange-50 disabled:cursor-not-allowed disabled:opacity-45"
+                                                >
+                                                    Next <ChevronRight size={15} />
+                                                </button>
+                                            </div>
+                                        )}
+                                    </>
                                 )}
                             </div>
                         </div>
@@ -693,9 +912,5 @@ function ShopContent() {
 }
 
 export default function Shop() {
-  return (
-    <Suspense fallback={<div>Loading shop...</div>}>
-      <ShopContent />
-    </Suspense>
-  );
+    return <ShopContent />;
 }

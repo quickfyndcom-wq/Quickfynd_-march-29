@@ -165,14 +165,14 @@ export default function CategoriesPage() {
 
     return (
         <div className="min-h-screen bg-slate-100">
-            <div className="max-w-7xl mx-auto px-4 py-8">
+            <div className="max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4 py-8">
                 <div className="mb-8 rounded-2xl border border-slate-200 bg-white/70 backdrop-blur-sm px-5 py-5 sm:px-6">
                     <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">Shop by Category</h1>
                     <p className="text-slate-600 mt-1">Browse our wide selection of products</p>
                 </div>
 
                 {parentCategories.length > 0 ? (
-                    <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5">
+                    <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4 sm:gap-5">
                         {parentCategories.map((parent) => {
                             const categorySlug = parent?.slug || parent?.name || ''
                             return (

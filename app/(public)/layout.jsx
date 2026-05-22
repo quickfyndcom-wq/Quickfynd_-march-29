@@ -17,18 +17,19 @@ function PublicLayoutContent({ children }) {
     const isHomePage = pathname === '/';
     const isCheckout = pathname === '/checkout';
     const isCartPage = pathname === '/cart';
+    const isProductsPage = pathname === '/products';
     const isProductDetailPage = pathname?.startsWith('/product/') || pathname?.startsWith('/offer/');
     const isShopCategoryPage = pathname === '/shop' && Boolean(searchParams.get('category'));
 
     useEffect(() => { 
         // Defer product fetch to allow critical content to load first
         const timer = setTimeout(() => {
-            if (!isShopCategoryPage) {
+            if (!isShopCategoryPage && !isProductsPage) {
                 dispatch(fetchProducts({ limit: 100 })); // Increased limit to fetch all products
             }
         }, 100);
         return () => clearTimeout(timer);
-    }, [dispatch, isShopCategoryPage]);
+    }, [dispatch, isShopCategoryPage, isProductsPage]);
 
     return (
         <div className={`flex flex-col ${isCartPage ? '' : 'min-h-screen'}`}>

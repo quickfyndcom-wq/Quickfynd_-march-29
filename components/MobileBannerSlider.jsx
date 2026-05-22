@@ -74,7 +74,17 @@ export default function MobileBannerSlider({ onNoData = null, onLoaded = null })
 
   const hasSlides = useMemo(() => enabled && slides.length > 0, [enabled, slides.length]);
 
-  if (loading || !hasSlides) return null;
+  if (loading) {
+    return (
+      <div className="md:hidden w-full px-3 pt-3">
+        <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm animate-pulse">
+          <div className="w-full aspect-[16/7] bg-gray-200" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!hasSlides) return null;
 
   return (
     <div className="md:hidden w-full px-3 pt-3">

@@ -31,11 +31,11 @@ export default function StoreShop() {
     }, [])
 
     return !loading ? (
-        <div className="min-h-[70vh] mx-6">
+        <div className="min-h-[70vh] px-2 sm:px-3 lg:px-4">
 
             {/* Store Info Banner */}
             {storeInfo && (
-                <div className="max-w-7xl mx-auto bg-slate-50 rounded-xl p-6 md:p-10 mt-6 flex flex-col md:flex-row items-center gap-6 shadow-xs">
+                <div className="max-w-[1700px] mx-auto bg-slate-50 rounded-xl p-6 md:p-10 mt-6 flex flex-col md:flex-row items-center gap-6 shadow-xs">
                     <Image
                         src={storeInfo.logo}
                         alt={storeInfo.name}
@@ -63,9 +63,9 @@ export default function StoreShop() {
             )}
 
             {/* Products */}
-            <div className=" max-w-7xl mx-auto mb-40">
+            <div className="max-w-[1700px] mx-auto mb-40">
                 <h1 className="text-2xl mt-12">Shop <span className="text-slate-800 font-medium">Products</span></h1>
-                <div className="mt-5 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 mx-auto">
+                <div className="mt-5 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-6 mx-auto">
                     {products.map((product) => <ProductCard key={product.id} product={product} />)}
                 </div>
             </div>

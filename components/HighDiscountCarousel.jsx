@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FaChevronLeft, FaChevronRight } from "react-icons/fa";
 import { useSelector } from "react-redux";
 import Image from "next/image";
@@ -60,11 +60,13 @@ export default function HighDiscountCarousel() {
   const products = useSelector((state) => state.product.list || []);
   const [mounted, setMounted] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [visibleCount, setVisibleCount] = useState(5);
+  const [visibleCount, setVisibleCount] = useState(6);
   const [apiProducts, setApiProducts] = useState([]);
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [hourlyBgColor, setHourlyBgColor] = useState(HOURLY_BG_COLORS[0]);
-  const [dragStartX, setDragStartX] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartXRef = useRef(null);
+  const didDragRef = useRef(false);
 
   useEffect(() => {
     setMounted(true);
@@ -138,19 +140,39 @@ export default function HighDiscountCarousel() {
 
   const handleDragStart = (clientX) => {
     if (!shouldSlide || typeof clientX !== "number") return;
-    setDragStartX(clientX);
+    dragStartXRef.current = clientX;
+    didDragRef.current = false;
+    setIsDragging(true);
+  };
+
+  const handleDragMove = (clientX) => {
+    if (!shouldSlide || dragStartXRef.current === null || typeof clientX !== "number") return;
+
+    const deltaX = clientX - dragStartXRef.current;
+    if (Math.abs(deltaX) >= SWIPE_THRESHOLD) {
+      didDragRef.current = true;
+      if (deltaX < 0) goNext();
+      if (deltaX > 0) goPrev();
+      dragStartXRef.current = clientX;
+    }
   };
 
   const handleDragEnd = (clientX) => {
-    if (!shouldSlide || dragStartX === null || typeof clientX !== "number") return;
+    if (!shouldSlide || dragStartXRef.current === null || typeof clientX !== "number") {
+      dragStartXRef.current = null;
+      setIsDragging(false);
+      return;
+    }
 
-    const deltaX = clientX - dragStartX;
+    const deltaX = clientX - dragStartXRef.current;
     if (Math.abs(deltaX) >= SWIPE_THRESHOLD) {
+      didDragRef.current = true;
       if (deltaX < 0) goNext();
       if (deltaX > 0) goPrev();
     }
 
-    setDragStartX(null);
+    dragStartXRef.current = null;
+    setIsDragging(false);
   };
 
   useEffect(() => {
@@ -159,8 +181,10 @@ export default function HighDiscountCarousel() {
         setVisibleCount(2);
       } else if (window.innerWidth < 768) {
         setVisibleCount(3);
+      } else if (window.innerWidth < 1024) {
+        setVisibleCount(4);
       } else {
-        setVisibleCount(5);
+        setVisibleCount(6);
       }
     };
 
@@ -190,10 +214,10 @@ export default function HighDiscountCarousel() {
   }, [visibleCount, discountProducts.length, currentIndex, maxIndex]);
 
   const renderSkeleton = () => (
-    <section className="max-w-[1250px] mx-auto px-3 sm:px-6 mt-2 mb-8">
-      <div className="rounded-2xl p-4 sm:p-5" style={{ backgroundColor: hourlyBgColor }}>
+    <section className="max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4 mt-2 mb-8">
+      <div className="rounded-3xl p-3 sm:p-4 shadow-lg" style={{ background: `linear-gradient(135deg, ${hourlyBgColor}, #111827)` }}>
         <div className="mb-3 h-7 w-48 rounded-md animate-pulse" style={{ backgroundColor: BRAND_COLORS.lightPeach }} />
-        <div className="overflow-hidden rounded-xl p-2 sm:p-3" style={{ backgroundColor: BRAND_COLORS.lightPeach }}>
+        <div className="overflow-hidden rounded-2xl p-2 sm:p-3" style={{ backgroundColor: 'rgba(255,255,255,0.9)' }}>
           <div className="flex">
             {Array.from({ length: visibleCount }).map((_, index) => (
               <div
@@ -201,8 +225,8 @@ export default function HighDiscountCarousel() {
                 className="block shrink-0"
                 style={{ flex: `0 0 ${cardWidth}`, maxWidth: cardWidth }}
               >
-                <div className="px-1.5 sm:px-2 h-full">
-                  <div className="h-full rounded-xl overflow-hidden border shadow-sm flex flex-col animate-pulse" style={{ backgroundColor: BRAND_COLORS.white, borderColor: BRAND_COLORS.lightPeach }}>
+                <div className="px-1 sm:px-1.5 lg:px-1 h-full">
+                  <div className="h-full rounded-2xl overflow-hidden border shadow-sm flex flex-col animate-pulse" style={{ backgroundColor: BRAND_COLORS.white, borderColor: '#E2E8F0' }}>
                     <div className="w-full aspect-[4/3]" style={{ backgroundColor: BRAND_COLORS.lightPeach }} />
                     <div className="p-2 sm:p-3 space-y-2">
                       <div className="h-4 rounded" style={{ backgroundColor: BRAND_COLORS.lightPeach }} />
@@ -227,7 +251,7 @@ export default function HighDiscountCarousel() {
 
   if (!loadingProducts && discountProducts.length === 0) {
     return (
-      <section className="max-w-[1250px] mx-auto px-3 sm:px-6 mt-6">
+      <section className="max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4 mt-6">
         <div className="rounded-2xl p-4 sm:p-5" style={{ backgroundColor: hourlyBgColor }}>
           <h2 className="text-xl font-bold mb-3" style={{ color: BRAND_COLORS.white }}>Mega 50% OFF Sale</h2>
           <div className="rounded-xl p-4 text-sm" style={{ backgroundColor: BRAND_COLORS.lightPeach, color: BRAND_COLORS.darkGrey }}>
@@ -241,8 +265,8 @@ export default function HighDiscountCarousel() {
   if (discountProducts.length === 0) return null;
 
   return (
-    <section className="max-w-[1250px] mx-auto px-3 sm:px-6 mt-2 mb-8">
-      <div className="rounded-2xl p-4 sm:p-5" style={{ backgroundColor: hourlyBgColor }}>
+    <section className="max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4 mt-2 mb-8">
+      <div className="rounded-3xl p-3 sm:p-4 shadow-lg" style={{ background: `linear-gradient(135deg, ${hourlyBgColor}, #111827)` }}>
         <div className="mb-3 flex items-center justify-between gap-2">
           <h2 className="text-xl font-bold" style={{ color: BRAND_COLORS.white }}>Mega 75% OFF Sale</h2>
           {shouldSlide && (
@@ -273,15 +297,20 @@ export default function HighDiscountCarousel() {
           )}
         </div>
         <div
-          className="overflow-hidden rounded-xl p-2 sm:p-3"
-          style={{ backgroundColor: BRAND_COLORS.lightPeach }}
+          className={`overflow-hidden rounded-2xl p-2 sm:p-3 ${shouldSlide ? (isDragging ? 'cursor-grabbing' : 'cursor-grab') : ''}`}
+          style={{ backgroundColor: 'rgba(255,255,255,0.92)', userSelect: 'none', touchAction: 'pan-y' }}
+          onDragStart={(event) => event.preventDefault()}
           onTouchStart={(event) => handleDragStart(event.touches[0]?.clientX)}
+          onTouchMove={(event) => handleDragMove(event.touches[0]?.clientX)}
           onTouchEnd={(event) => handleDragEnd(event.changedTouches[0]?.clientX)}
-          onMouseDown={(event) => handleDragStart(event.clientX)}
-          onMouseUp={(event) => handleDragEnd(event.clientX)}
-          onMouseLeave={(event) => {
-            if (dragStartX !== null) handleDragEnd(event.clientX);
+          onPointerDown={(event) => {
+            if (!shouldSlide) return;
+            event.currentTarget.setPointerCapture(event.pointerId);
+            handleDragStart(event.clientX);
           }}
+          onPointerMove={(event) => handleDragMove(event.clientX)}
+          onPointerUp={(event) => handleDragEnd(event.clientX)}
+          onPointerCancel={(event) => handleDragEnd(event.clientX)}
         >
           <div
             className={`flex ${shouldSlide ? "transition-transform duration-500 ease-in-out" : "justify-start"}`}
@@ -292,27 +321,37 @@ export default function HighDiscountCarousel() {
                 key={product._id || product.id || product.slug}
                 href={`/product/${product.slug || product._id || ""}`}
                 className="block shrink-0"
+                draggable={false}
+                onDragStart={(event) => event.preventDefault()}
+                onClick={(event) => {
+                  if (didDragRef.current) {
+                    event.preventDefault();
+                    didDragRef.current = false;
+                  }
+                }}
                 style={{ flex: `0 0 ${cardWidth}`, maxWidth: cardWidth }}
               >
-                <div className="px-1.5 sm:px-2 h-full">
-                  <div className="h-full rounded-xl overflow-hidden border shadow-sm flex flex-col" style={{ backgroundColor: BRAND_COLORS.white, borderColor: BRAND_COLORS.lightPeach }}>
+                <div className="px-1 sm:px-1.5 lg:px-1 h-full">
+                  <div className="h-full rounded-2xl overflow-hidden border shadow-sm hover:shadow-md transition-shadow flex flex-col" style={{ backgroundColor: BRAND_COLORS.white, borderColor: '#E2E8F0' }}>
                     <div className="relative w-full aspect-[4/3] bg-slate-100">
                       <Image
                         src={getImageSrc(product)}
                         alt={product.name || "Product"}
                         fill
                         unoptimized
+                        draggable={false}
+                        onDragStart={(event) => event.preventDefault()}
                         className="object-cover"
                       />
-                      <div className="absolute left-2 top-2 rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ backgroundColor: BRAND_COLORS.red, color: BRAND_COLORS.white }}>
+                      <div className="absolute left-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wide" style={{ backgroundColor: BRAND_COLORS.red, color: BRAND_COLORS.white }}>
                         {product.discount}% OFF
                       </div>
                     </div>
-                    <div className="p-2 sm:p-3">
-                      <p className="text-sm sm:text-[15px] font-medium line-clamp-2 min-h-[2.5rem]" style={{ color: BRAND_COLORS.darkGrey }}>
+                    <div className="p-3 sm:p-3.5">
+                      <p className="text-sm sm:text-[14px] font-semibold line-clamp-2 min-h-[2.8rem]" style={{ color: BRAND_COLORS.darkGrey }}>
                         {product.name || "Product"}
                       </p>
-                      <p className="text-base sm:text-lg font-bold" style={{ color: BRAND_COLORS.darkRed }}>Up to {product.discount}% OFF</p>
+                      <p className="text-base sm:text-lg font-extrabold" style={{ color: BRAND_COLORS.darkRed }}>Up to {product.discount}% OFF</p>
                     </div>
                   </div>
                 </div>

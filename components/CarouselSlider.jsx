@@ -5,32 +5,53 @@ import axios from "axios";
 import Image from "next/image";
 import Link from "next/link";
 import { Heart, ChevronRight } from "lucide-react";
-import Banner from '../assets/common/bann.jpg'
+
+const MIN_ITEMS_FOR_SLIDE = 6;
 
 export default function CarouselSlider() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const scrollRef = useRef(null);
   const containerRef = useRef(null);
+  const dragRafRef = useRef(null);
+  const dragTargetScrollRef = useRef(0);
   const [showNextArrow, setShowNextArrow] = useState(false);
   const [showPrevArrow, setShowPrevArrow] = useState(false);
+  const [isCursorDragging, setIsCursorDragging] = useState(false);
+
+  const getCardStride = () => {
+    const slider = scrollRef.current;
+    if (!slider) return 232;
+
+    const firstCard = slider.querySelector('.carousel-product-card');
+    if (!firstCard) return 232;
+
+    const styles = window.getComputedStyle(slider);
+    const gap = parseFloat(styles.columnGap || styles.gap || '0') || 0;
+    return firstCard.getBoundingClientRect().width + gap;
+  };
 
   const scrollNext = () => {
     if (scrollRef.current) {
-      const scrollAmount = 232;
+      const scrollAmount = getCardStride();
       scrollRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
     }
   };
 
   const scrollPrev = () => {
     if (scrollRef.current) {
-      const scrollAmount = 232;
+      const scrollAmount = getCardStride();
       scrollRef.current.scrollBy({ left: -scrollAmount, behavior: 'smooth' });
     }
   };
 
   const checkScroll = () => {
     if (scrollRef.current) {
+      if (products.length <= MIN_ITEMS_FOR_SLIDE) {
+        setShowPrevArrow(false);
+        setShowNextArrow(false);
+        return;
+      }
       const { scrollLeft, scrollWidth, clientWidth } = scrollRef.current;
       setShowPrevArrow(scrollLeft > 0);
       setShowNextArrow(scrollLeft < scrollWidth - clientWidth - 10);
@@ -56,7 +77,7 @@ export default function CarouselSlider() {
         );
 
         setProducts(validProducts);
-        setShowNextArrow(validProducts.length > 4);
+        setShowNextArrow(validProducts.length > MIN_ITEMS_FOR_SLIDE);
       } catch {
         setProducts([]);
       } finally {
@@ -64,7 +85,7 @@ export default function CarouselSlider() {
       }
     }
     fetchCarouselProducts();
-  }, []);
+  }, [products.length]);
 
   /* Check scroll position on mount and after scroll */
   useEffect(() => {
@@ -82,68 +103,100 @@ export default function CarouselSlider() {
     const slider = scrollRef.current;
     if (!slider) return;
     
-    let isDown = false;
+    let isPointerDown = false;
+    let pointerId = null;
     let startX = 0;
-    let scrollLeft = 0;
+    let startScrollLeft = 0;
 
-    const onMouseDown = (e) => {
-      isDown = true;
+    const commitDragScroll = () => {
+      slider.scrollLeft = dragTargetScrollRef.current;
+      dragRafRef.current = null;
+    };
+
+    const snapToNearestCard = () => {
+      const stride = getCardStride();
+      if (!stride) return;
+      const target = Math.round(slider.scrollLeft / stride) * stride;
+      slider.scrollTo({ left: target, behavior: 'smooth' });
+    };
+
+    const queueDragScroll = (nextScrollLeft) => {
+      dragTargetScrollRef.current = nextScrollLeft;
+      if (dragRafRef.current === null) {
+        dragRafRef.current = requestAnimationFrame(commitDragScroll);
+      }
+    };
+
+    const stopDrag = (shouldSnap = true) => {
+      isPointerDown = false;
+      pointerId = null;
+      slider.classList.remove('active');
+      document.body.classList.remove('carousel-noselect');
+      setIsCursorDragging(false);
+      if (shouldSnap && products.length > MIN_ITEMS_FOR_SLIDE) {
+        snapToNearestCard();
+      }
+    };
+
+    const onPointerDown = (e) => {
+      if (products.length <= MIN_ITEMS_FOR_SLIDE) return;
+      isPointerDown = true;
+      pointerId = e.pointerId;
       slider.classList.add('active');
-      startX = e.pageX - slider.offsetLeft;
-      scrollLeft = slider.scrollLeft;
+      setIsCursorDragging(true);
+      startX = e.clientX;
+      startScrollLeft = slider.scrollLeft;
       document.body.classList.add('carousel-noselect');
+      slider.setPointerCapture(e.pointerId);
     };
 
-    const onMouseLeave = () => {
-      isDown = false;
-      slider.classList.remove('active');
-      document.body.classList.remove('carousel-noselect');
-    };
-
-    const onMouseUp = () => {
-      isDown = false;
-      slider.classList.remove('active');
-      document.body.classList.remove('carousel-noselect');
-    };
-
-    const onMouseMove = (e) => {
-      if (!isDown) return;
+    const onPointerMove = (e) => {
+      if (!isPointerDown || e.pointerId !== pointerId) return;
       e.preventDefault();
-      const x = e.pageX - slider.offsetLeft;
-      const walk = (x - startX) * 1.5;
-      slider.scrollLeft = scrollLeft - walk;
+      const walk = (e.clientX - startX) * 1.1;
+      queueDragScroll(startScrollLeft - walk);
     };
 
-    slider.addEventListener('mousedown', onMouseDown);
-    slider.addEventListener('mouseleave', onMouseLeave);
-    slider.addEventListener('mouseup', onMouseUp);
-    slider.addEventListener('mousemove', onMouseMove);
-    
-    // Touch events for mobile
-    let touchStartX = 0;
-    let touchScrollLeft = 0;
-    const onTouchStart = (e) => {
-      touchStartX = e.touches[0].pageX;
-      touchScrollLeft = slider.scrollLeft;
+    const onPointerUp = (e) => {
+      if (pointerId !== null && e.pointerId === pointerId) {
+        try {
+          slider.releasePointerCapture(e.pointerId);
+        } catch {
+          // Ignore when capture is already released.
+        }
+      }
+      stopDrag();
     };
-    const onTouchMove = (e) => {
-      const x = e.touches[0].pageX;
-      const walk = (x - touchStartX) * 1.2;
-      slider.scrollLeft = touchScrollLeft - walk;
+
+    const onPointerCancel = () => {
+      stopDrag();
     };
-    slider.addEventListener('touchstart', onTouchStart);
-    slider.addEventListener('touchmove', onTouchMove);
+
+    const onDragStart = (e) => {
+      e.preventDefault();
+    };
+
+    slider.addEventListener('pointerdown', onPointerDown);
+    slider.addEventListener('pointermove', onPointerMove);
+    slider.addEventListener('pointerup', onPointerUp);
+    slider.addEventListener('pointercancel', onPointerCancel);
+    slider.addEventListener('dragstart', onDragStart);
     
     return () => {
-      slider.removeEventListener('mousedown', onMouseDown);
-      slider.removeEventListener('mouseleave', onMouseLeave);
-      slider.removeEventListener('mouseup', onMouseUp);
-      slider.removeEventListener('mousemove', onMouseMove);
-      slider.removeEventListener('touchstart', onTouchStart);
-      slider.removeEventListener('touchmove', onTouchMove);
+      slider.removeEventListener('pointerdown', onPointerDown);
+      slider.removeEventListener('pointermove', onPointerMove);
+      slider.removeEventListener('pointerup', onPointerUp);
+      slider.removeEventListener('pointercancel', onPointerCancel);
+      slider.removeEventListener('dragstart', onDragStart);
+      if (dragRafRef.current !== null) {
+        cancelAnimationFrame(dragRafRef.current);
+        dragRafRef.current = null;
+      }
       document.body.classList.remove('carousel-noselect');
+      stopDrag(false);
+      setIsCursorDragging(false);
     };
-  }, []);
+  }, [products.length]);
 
   return (
     <div style={{
@@ -155,18 +208,15 @@ export default function CarouselSlider() {
       overflowX: 'hidden',
     }}>
       {/* Container for carousel and banner */}
-      <div ref={containerRef} className="carousel-container" style={{
-        maxWidth: '1250px',
-        margin: '0 auto',
+      <div ref={containerRef} className="carousel-container max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4" style={{
         position: 'relative',
         display: 'flex',
-        gap: 16,
+        gap: 12,
         width: '100%',
-        padding: '0 16px',
         boxSizing: 'border-box',
       }}>
         {/* Left Side - Carousel */}
-        <div className="carousel-wrapper" style={{ flex: 1, position: 'relative', minHeight: 400 }}>
+        <div className="carousel-wrapper" style={{ flex: 1, minWidth: 0, position: 'relative', minHeight: 400 }}>
           {/* Title and subtitle */}
           <div style={{
             marginBottom: 24,
@@ -189,28 +239,32 @@ export default function CarouselSlider() {
             style={{
               display: 'flex',
               gap: 8,
-              overflowX: products.length > 4 ? 'auto' : 'hidden',
+              overflowX: loading || products.length > MIN_ITEMS_FOR_SLIDE ? 'auto' : 'hidden',
               paddingBottom: 16,
               scrollBehavior: 'smooth',
               paddingRight: 20,
               alignItems: 'flex-start',
-              cursor: products.length > 4 ? 'grab' : 'default',
+              cursor: products.length > MIN_ITEMS_FOR_SLIDE ? (isCursorDragging ? 'grabbing' : 'grab') : 'default',
               scrollbarWidth: 'none',
               msOverflowStyle: 'none',
               WebkitOverflowScrolling: 'touch',
-              maxWidth: 'calc((220px * 4.25) + (8px * 4))',
+              maxWidth: 'none',
+              userSelect: 'none',
+              WebkitUserSelect: 'none',
+              touchAction: 'pan-y',
+              scrollSnapType: 'x mandatory',
             }}
             className="carousel-scroll"
           >
             {loading ? (
               // Skeleton Loaders
-              [...Array(5)].map((_, index) => (
+              [...Array(6)].map((_, index) => (
                 <div
+                  className="carousel-product-card"
                   key={`skeleton-${index}`}
                   style={{
-                    minWidth: 220,
-                    maxWidth: 220,
-                    width: 220,
+                    scrollSnapAlign: 'start',
+                    scrollSnapStop: 'always',
                     background: '#fff',
                     borderRadius: 8,
                     padding: 0,
@@ -227,7 +281,7 @@ export default function CarouselSlider() {
                   {/* Skeleton Image */}
                   <div style={{
                     width: '100%',
-                    height: 220,
+                    height: 236,
                     background: 'linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%)',
                     backgroundSize: '200% 100%',
                     animation: 'shimmer 1.5s infinite',
@@ -284,15 +338,14 @@ export default function CarouselSlider() {
                 const reviewCount = product.ratingCount || product.reviewCount || product.reviews || 0;
                 return (
                   <Link
+                    className="carousel-product-card"
                     key={product.slug || product.id || product.name}
                     href={`/product/${product.slug}`}
-                    style={{ textDecoration: 'none', color: 'inherit' }}
+                    style={{ textDecoration: 'none', color: 'inherit', scrollSnapAlign: 'start', scrollSnapStop: 'always', display: 'block' }}
                   >
                   <div
                     style={{
-                      minWidth: 220,
-                      maxWidth: 220,
-                      width: 220,
+                      width: '100%',
                       background: '#fff',
                       borderRadius: 8,
                       padding: 0,
@@ -340,7 +393,7 @@ export default function CarouselSlider() {
                     {/* Product Image */}
                     <div style={{
                       width: '100%',
-                      height: 220,
+                      height: 236,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -382,7 +435,7 @@ export default function CarouselSlider() {
                       flexDirection: 'column',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      minHeight: 80,
+                      minHeight: 94,
                       textAlign: 'center',
                     }}>
                       <div style={{
@@ -522,64 +575,6 @@ export default function CarouselSlider() {
           )}
         </div>
 
-        {/* Right Side - Promotional Banner */}
-        <div className="banner-container" style={{
-          width: 240,
-          marginLeft: 0,
-          flexShrink: 0,
-          position: 'relative',
-        }}>
-          {loading ? (
-            <div
-              style={{
-                width: '100%',
-                height: 380,
-                borderRadius: 14,
-                background: 'linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%)',
-                backgroundSize: '200% 100%',
-                animation: 'shimmer 1.5s infinite',
-                boxShadow: '0 4px 16px rgba(0,0,0,0.1)',
-                position: 'sticky',
-                top: 20,
-              }}
-            />
-          ) : (
-            <div
-              style={{
-                width: '100%',
-                height: 'auto',
-                maxHeight: 420,
-                background: '#f9f9f9',
-                borderRadius: 14,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: 0,
-                boxShadow: '0 4px 16px rgba(40,116,240,0.2)',
-                overflow: 'hidden',
-                position: 'sticky',
-                top: 20,
-              }}
-            >
-              {/* Banner Image Only */}
-              <Image 
-                src={Banner}
-                alt="Promo Banner" 
-                width={240}
-                height={380}
-                priority
-                style={{ 
-                  width: '100%', 
-                  height: '100%', 
-                  objectFit: 'cover',
-                  borderRadius: 16,
-                  display: 'block',
-                }} 
-              />
-            </div>
-          )}
-        </div>
       </div>
 
       <style jsx global>{`
@@ -598,6 +593,21 @@ export default function CarouselSlider() {
         }
         .carousel-scroll::-webkit-scrollbar {
           display: none;
+        }
+
+        .carousel-product-card {
+          min-width: 220px;
+          max-width: 220px;
+          width: 220px;
+          flex: 0 0 auto;
+        }
+
+        @media (min-width: 1280px) {
+          .carousel-product-card {
+            min-width: calc((100% - 40px) / 6) !important;
+            max-width: calc((100% - 40px) / 6) !important;
+            width: calc((100% - 40px) / 6) !important;
+          }
         }
 
         /* Mobile Responsive Styles */
@@ -628,6 +638,28 @@ export default function CarouselSlider() {
           .prev-arrow-button,
           .next-arrow-button {
             display: none !important;
+          }
+        }
+
+        @media (max-width: 1366px) {
+          .carousel-container {
+            max-width: 1400px !important;
+            gap: 10px !important;
+          }
+
+          .carousel-product-card {
+            min-width: 200px !important;
+            max-width: 200px !important;
+            width: 200px !important;
+          }
+
+        }
+
+        @media (max-width: 1100px) {
+          .carousel-product-card {
+            min-width: 180px !important;
+            max-width: 180px !important;
+            width: 180px !important;
           }
         }
 

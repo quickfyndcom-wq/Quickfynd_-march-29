@@ -7,7 +7,7 @@ import axios from 'axios'
 import Image from 'next/image'
 import Loading from '@/components/Loading'
 import ProductImageViewer from './ProductImageViewer'
-import { ChevronDown, Download, ImageIcon } from 'lucide-react'
+import { ImageIcon } from 'lucide-react'
 
 export default function StoreMediaPage() {
   const { user, getToken } = useAuth()
@@ -21,6 +21,11 @@ export default function StoreMediaPage() {
   const [sortBy, setSortBy] = useState('newest') // newest, oldest, name
   const [filterCategory, setFilterCategory] = useState('')
   const [categories, setCategories] = useState([])
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [totalProducts, setTotalProducts] = useState(0)
+
+  const pageSize = 24
 
   const getImageSrc = (image) => {
     if (typeof image === 'string' && image.trim()) return image
@@ -28,29 +33,31 @@ export default function StoreMediaPage() {
     return 'https://ik.imagekit.io/jrstupuke/placeholder.png'
   }
 
-  // Fetch products
+  // Fetch products (server-side pagination)
   const fetchProducts = async () => {
     try {
+      setLoading(true)
       const token = await getToken()
       const { data } = await axios.get('/api/store/product', {
+        params: {
+          page: currentPage,
+          limit: pageSize,
+          search: searchQuery,
+          category: filterCategory,
+          sortBy,
+        },
         headers: { Authorization: `Bearer ${token}` }
       })
-      let sorted = data.products
 
-      // Sort by selected option
-      if (sortBy === 'newest') {
-        sorted = sorted.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-      } else if (sortBy === 'oldest') {
-        sorted = sorted.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
-      } else if (sortBy === 'name') {
-        sorted = sorted.sort((a, b) => a.name.localeCompare(b.name))
-      }
-
-      setProducts(sorted)
+      setProducts(Array.isArray(data.products) ? data.products : [])
+      const pagination = data.pagination || {}
+      setTotalPages(Math.max(1, Number(pagination.totalPages || 1)))
+      setTotalProducts(Number(pagination.totalProducts || 0))
     } catch (error) {
       toast.error(error?.response?.data?.error || error.message)
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   // Fetch categories
@@ -65,21 +72,19 @@ export default function StoreMediaPage() {
 
   useEffect(() => {
     if (user) {
-      fetchProducts()
       fetchCategories()
     }
-  }, [user, sortBy])
+  }, [user])
 
-  // Filter products based on search and category
-  const filteredProducts = products.filter(product => {
-    const searchTerm = searchQuery.toLowerCase().trim()
-    const matchesSearch = searchTerm === '' || 
-      new RegExp(`\\b${searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(product.name.toLowerCase())
-    const matchesCategory = !filterCategory || 
-      (product.category && product.category._id === filterCategory) ||
-      (product.categories && product.categories.some(c => c._id === filterCategory))
-    return matchesSearch && matchesCategory
-  })
+  useEffect(() => {
+    if (user) {
+      fetchProducts()
+    }
+  }, [user, sortBy, filterCategory, searchQuery, currentPage])
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [sortBy, filterCategory, searchQuery])
 
   const handleProductSelect = (product) => {
     setSelectedProduct(product)
@@ -157,8 +162,8 @@ export default function StoreMediaPage() {
 
       {/* Products Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-        {filteredProducts.length > 0 ? (
-          filteredProducts.map(product => (
+        {products.length > 0 ? (
+          products.map(product => (
             <div
               key={product._id}
               className="group bg-white rounded-lg shadow-md hover:shadow-lg transition-all duration-300 overflow-hidden cursor-pointer"
@@ -215,13 +220,40 @@ export default function StoreMediaPage() {
           <div className="col-span-full py-12 text-center">
             <ImageIcon size={48} className="mx-auto text-slate-300 mb-4" />
             <p className="text-slate-600">
-              {products.length === 0
+              {totalProducts === 0
                 ? 'No products found. Add products to see their images here.'
                 : 'No products match your search or filter.'}
             </p>
           </div>
         )}
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="mt-8 flex items-center justify-between gap-4 border-t border-slate-200 pt-6">
+          <p className="text-sm text-slate-600">
+            Showing page {currentPage} of {totalPages} ({totalProducts} products)
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+              disabled={currentPage === 1 || loading}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+              disabled={currentPage === totalPages || loading}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Image Viewer Modal */}
       {showViewer && selectedProduct && (

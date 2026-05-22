@@ -94,10 +94,11 @@ export default function TrendingNowPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-[1250px] mx-auto px-4 py-8">
+      <div className="max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4 py-8">
         <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Trending Now</h1>
-          <p className="text-gray-600">Hot Deal products trending right now</p>
+          <div className="mb-2 h-1 w-14 rounded-full bg-gradient-to-r from-orange-500 to-amber-400" />
+          <h1 className="text-[30px] sm:text-[34px] font-black tracking-tight text-slate-900 leading-none">Trending</h1>
+          <p className="mt-2 text-sm sm:text-base text-slate-500">Live deals right now</p>
         </div>
 
         <div className="flex gap-6">
@@ -129,7 +130,7 @@ export default function TrendingNowPage() {
                 </button>
               </div>
             ) : (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 gap-4 lg:gap-6">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4 lg:gap-6">
                 {filteredAndSortedProducts.map((product, idx) => (
                   <ProductCard
                     key={product._id || product.id || product.slug || idx}

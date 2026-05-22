@@ -16,8 +16,8 @@ const Section4 = ({ sections }) => {
   if (!sections || sections.length === 0) return null
 
   return (
-    <div className="w-full bg-white py-8 px-4">
-      <div className="max-w-[1300px] mx-auto space-y-12">
+    <div className="w-full bg-white py-8">
+      <div className="max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4 space-y-12">
         {sections.map((section, sectionIdx) => (
           <HorizontalSlider key={section._id || sectionIdx} section={section} router={router} allProducts={products} />
         ))}
@@ -32,7 +32,7 @@ const SkeletonLoader = () => {
       {[...Array(5)].map((_, idx) => (
         <div
           key={idx}
-          className="flex-shrink-0 w-56 sm:w-64 bg-white rounded-xl overflow-hidden border border-gray-100 animate-pulse"
+          className="flex-shrink-0 w-60 sm:w-72 bg-white rounded-xl overflow-hidden border border-gray-100 animate-pulse"
         >
           <div className="w-full h-56 sm:h-64 bg-gray-100"></div>
           <div className="p-4 space-y-2.5">
@@ -349,7 +349,7 @@ const HorizontalSlider = ({ section, router, allProducts }) => {
                 href={`/product/${encodeURIComponent(String(product.slug || product._id || product.id || ''))}`}
                 onDragStart={(e) => e.preventDefault()}
                 draggable="false"
-                className="product-card-item snap-start flex-shrink-0 w-56 sm:w-64 bg-white rounded-xl overflow-hidden group cursor-pointer transition-all duration-300 select-none border border-gray-100 hover:border-gray-200 hover:shadow-lg"
+                className="product-card-item snap-start flex-shrink-0 w-60 sm:w-72 bg-white rounded-xl overflow-hidden group cursor-pointer transition-all duration-300 select-none border border-gray-100 hover:border-gray-200 hover:shadow-lg"
               >
                 {/* Product Image */}
                 <div className="relative w-full h-56 sm:h-64 bg-gray-50 overflow-hidden">
@@ -362,7 +362,7 @@ const HorizontalSlider = ({ section, router, allProducts }) => {
                         unoptimized
                         draggable="false"
                         className="object-cover group-hover:scale-110 transition-transform duration-500 pointer-events-none select-none"
-                        sizes="(max-width: 640px) 224px, 256px"
+                        sizes="(max-width: 640px) 240px, 288px"
                       />
                       
                       {/* Fast Delivery Badge */}

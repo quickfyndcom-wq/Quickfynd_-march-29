@@ -1,12 +1,67 @@
 "use client"
 import { usePathname } from "next/navigation"
-import { HomeIcon, LayoutListIcon, SquarePenIcon, SquarePlusIcon, StarIcon, FolderIcon, TicketIcon, TruckIcon, RefreshCw, User as UserIcon, Users as UsersIcon, MessageSquare, Sparkles, BellIcon, MailIcon, Image as ImageIcon, ShoppingCart, Wallet, BarChart3, Target, Gift, X, Activity, Smartphone } from "lucide-react"
+import { HomeIcon, LayoutListIcon, SquarePenIcon, SquarePlusIcon, StarIcon, FolderIcon, TicketIcon, TruckIcon, RefreshCw, User as UserIcon, Users as UsersIcon, MessageSquare, Sparkles, BellIcon, MailIcon, Image as ImageIcon, ShoppingCart, Wallet, BarChart3, Target, Gift, X, Activity, Smartphone, LockIcon } from "lucide-react"
 import Link from "next/link"
 
 const StoreSidebar = ({ storeInfo, isOpen = false, onClose }) => {
     const pathname = usePathname()
-    // Backward compatible: if isPrimary is not set on legacy stores, keep storefront access enabled.
-    const hasStorefrontAccess = storeInfo?.isPrimary !== false
+    const rawPermissions = storeInfo?.accessPermissions || {}
+    const menuPermissions = storeInfo?.menuPermissions && typeof storeInfo.menuPermissions === 'object'
+        ? storeInfo.menuPermissions
+        : {}
+    const hasExplicitMenuPermissions = storeInfo?.permissionsConfigured === true || Object.keys(menuPermissions).length > 0
+    const accessPermissions = {
+        overview: rawPermissions.overview !== false,
+        catalog: rawPermissions.catalog !== false,
+        orders: rawPermissions.orders !== false,
+        customers: rawPermissions.customers !== false,
+        marketing: rawPermissions.marketing !== false,
+        storefront: rawPermissions.storefront !== false,
+    }
+
+    const linkPermissionMap = {
+        '/store': 'overview',
+        '/store#contact-messages': 'overview',
+        '/store/categories': 'catalog',
+        '/store/add-product': 'catalog',
+        '/store/manage-product': 'catalog',
+        '/store/orders': 'orders',
+        '/store/abandoned-checkout': 'orders',
+        '/store/customer-tracking': 'orders',
+        '/store/shipping': 'orders',
+        '/store/return-requests': 'orders',
+        '/store/balance': 'orders',
+        '/store/sales-report': 'orders',
+        '/store/most-selling-products': 'orders',
+        '/store/customers': 'customers',
+        '/store/settings/users': 'customers',
+        '/store/reviews': 'customers',
+        '/store/tickets': 'customers',
+        '/store/product-notifications': 'customers',
+        '/store/personalized-offers': 'marketing',
+        '/store/coupons': 'marketing',
+        '/store/promotional-emails': 'marketing',
+        '/store/ads-tracking': 'marketing',
+        '/store/marketing-expenses': 'marketing',
+        '/store/home-preferences': 'storefront',
+        '/store/category-slider': 'storefront',
+        '/store/navbar-menu': 'storefront',
+        '/store/storefront/home-menu-categories': 'storefront',
+        '/store/storefront/hero-slider': 'storefront',
+        '/store/storefront/carousel-slider': 'storefront',
+        '/store/storefront/deals': 'storefront',
+        '/store/media': 'storefront',
+        '/store/mobile-features': 'storefront',
+    }
+
+    const isLinkAllowed = (href) => {
+        if (hasExplicitMenuPermissions) {
+            return menuPermissions[href] === true
+        }
+        const permissionKey = linkPermissionMap[href]
+        if (!permissionKey) return true
+        return accessPermissions[permissionKey] !== false
+    }
 
     const sidebarLinks = [
         { name: 'Most Selling Products', href: '/store/most-selling-products', icon: BarChart3 },
@@ -222,10 +277,7 @@ const StoreSidebar = ({ storeInfo, isOpen = false, onClose }) => {
         }
     }
 
-    const visibleSections = sidebarSections.filter((section) => {
-        if (section.name === 'Storefront' && !hasStorefrontAccess) return false
-        return true
-    })
+    const visibleSections = sidebarSections
 
     return (
         <>
@@ -280,7 +332,24 @@ const StoreSidebar = ({ storeInfo, isOpen = false, onClose }) => {
                                         const link = linkByHref[href];
                                         if (!link) return null;
                                         const Icon = link.icon;
+                                        const allowed = isLinkAllowed(link.href);
                                         const isActive = resolveActive(link.href);
+                                        if (!allowed) {
+                                            return (
+                                                <div
+                                                    key={`${section.name}-${link.href}`}
+                                                    className="group flex items-center gap-3 px-4 py-3 text-sm rounded-xl text-slate-400 bg-slate-100/60 border border-slate-200 cursor-not-allowed"
+                                                    aria-disabled="true"
+                                                    title="No access"
+                                                >
+                                                    <div className="p-1.5 rounded-lg bg-slate-200">
+                                                        <Icon size={18} className="text-slate-400" />
+                                                    </div>
+                                                    <span className="truncate flex-1">{link.name}</span>
+                                                    <LockIcon size={14} className="text-slate-500" />
+                                                </div>
+                                            );
+                                        }
                                         return (
                                             <Link
                                                 key={`${section.name}-${link.href}`}
@@ -310,17 +379,28 @@ const StoreSidebar = ({ storeInfo, isOpen = false, onClose }) => {
                 </div>
                 {/* Settings Button */}
                 <div className="border-t border-slate-200 px-3 py-4 bg-slate-50/90 shrink-0 lg:bg-slate-50/50">
-                    <Link
-                        href="/store/settings"
-                        onClick={() => onClose?.()}
-                        className="group flex items-center justify-center gap-2 w-full px-4 py-3 bg-gradient-to-r from-slate-700 to-slate-600 text-white rounded-xl hover:from-slate-600 hover:to-slate-500 shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-[1.02] font-medium"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 group-hover:rotate-90 transition-transform duration-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        </svg>
-                        <span>Settings</span>
-                    </Link>
+                    {isLinkAllowed('/store/settings') ? (
+                        <Link
+                            href="/store/settings"
+                            onClick={() => onClose?.()}
+                            className="group flex items-center justify-center gap-2 w-full px-4 py-3 bg-gradient-to-r from-slate-700 to-slate-600 text-white rounded-xl hover:from-slate-600 hover:to-slate-500 shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-[1.02] font-medium"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 group-hover:rotate-90 transition-transform duration-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                            <span>Settings</span>
+                        </Link>
+                    ) : (
+                        <div className="group flex items-center justify-center gap-2 w-full px-4 py-3 rounded-xl bg-slate-300 text-slate-500 border border-slate-300 cursor-not-allowed font-medium">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                            <span>Settings</span>
+                            <LockIcon size={14} />
+                        </div>
+                    )}
                 </div>
             </aside>
         </>

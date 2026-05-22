@@ -2,12 +2,15 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { ChevronRight, Menu } from 'lucide-react';
 
 const MAX_ITEMS = 12;
 const SKELETON_ITEMS = Array.from({ length: 8 });
 
 export default function NavbarMenuBar() {
+  const pathname = usePathname();
+  const menuContainerClass = 'max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4 py-2.5';
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showScrollHint, setShowScrollHint] = useState(false);
@@ -75,7 +78,7 @@ export default function NavbarMenuBar() {
 
   return (
     <div className="w-full bg-white text-gray-800 border-b border-gray-200">
-      <div className="max-w-[1240px] mx-auto px-4 py-2.5">
+      <div className={menuContainerClass}>
         <div className="relative">
         <div
           ref={scrollContainerRef}

@@ -51,15 +51,15 @@ const MobileDesktopBannerWrapper = () => {
 };
 
 const BannerSliderSkeleton = () => (
-    <div className="max-w-[1280px] mx-auto w-full px-4 py-4">
+    <div className="max-w-[1700px] mx-auto w-full px-2 sm:px-3 lg:px-4 py-4">
         <div className="w-full h-[120px] sm:h-[150px] md:h-[180px] rounded-lg bg-gray-200 animate-pulse" />
     </div>
 );
 
 const CarouselSliderSkeleton = () => (
-    <div className="max-w-[1280px] mx-auto w-full px-4 py-6">
+    <div className="max-w-[1700px] mx-auto w-full px-2 sm:px-3 lg:px-4 py-6">
         <div className="mb-4 h-8 w-80 max-w-full rounded-md bg-gray-200 animate-pulse" />
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-6 gap-4">
             {[...Array(10)].map((_, index) => (
                 <div key={`carousel-skeleton-${index}`} className="rounded-2xl border border-gray-100 overflow-hidden bg-white animate-pulse">
                     <div className="w-full aspect-square bg-gray-200" />
@@ -136,7 +136,7 @@ export default function Home() {
    
             {/* Featured Sections - Display all created sliders from category-slider */}
             {section4Loading ? (
-                <div className="max-w-[1280px] mx-auto w-full px-4 py-8 space-y-10">
+                <div className="max-w-[1700px] mx-auto w-full px-2 sm:px-3 lg:px-4 py-8 space-y-10">
                     {[...Array(3)].map((_, sIdx) => (
                         <div key={`section4-skeleton-section-${sIdx}`}>
                             {/* Section title skeleton */}
@@ -164,7 +164,7 @@ export default function Home() {
                     ))}
                 </div>
             ) : section4Data.length > 0 ? (
-                <div className="max-w-[1280px] mx-auto w-full">
+                <div className="max-w-[1700px] mx-auto w-full px-2 sm:px-3 lg:px-4">
                     <Section4 sections={section4Data} />
                 </div>
             ) : null}

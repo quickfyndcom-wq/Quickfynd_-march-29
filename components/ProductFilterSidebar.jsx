@@ -146,7 +146,7 @@ export default function ProductFilterSidebar({
   }, [categorySearch]);
 
   return (
-    <div className="w-full lg:w-72 bg-white border border-gray-200 rounded-lg p-4 h-fit sticky top-20 overflow-y-auto max-h-[calc(100vh-100px)]">
+    <div className="w-full lg:w-72 lg:self-start bg-white border border-gray-200 rounded-lg p-4 h-fit lg:sticky lg:top-24 lg:overflow-y-auto lg:max-h-[calc(100vh-6rem)]">
       {/* Sort By */}
       <div className="mb-6">
         <label className="text-sm font-semibold text-gray-800 mb-3 block">

@@ -4,6 +4,12 @@ import Image from "next/image";
 import Logo from "../assets/logo/logo2.png";
 import PlayStoreBadge from "../assets/play/gpalaystore.png";
 import AppStoreBadge from "../assets/play/appstore.png";
+import PaymentIcon2 from "../assets/payments/2.webp";
+import PaymentIcon11 from "../assets/payments/11.webp";
+import PaymentIcon12 from "../assets/payments/12.webp";
+import PaymentIcon13 from "../assets/payments/13.webp";
+import PaymentIcon16 from "../assets/payments/16.webp";
+import PaymentIcon19 from "../assets/payments/19.webp";
 import toast from "react-hot-toast";
 
 const Footer = () => {
@@ -76,6 +82,15 @@ const Footer = () => {
         { icon: InstagramIcon, link: "https://www.instagram.com/quickfynd/" },
     ];
 
+    const paymentMethodIcons = [
+        { src: PaymentIcon2, alt: "Visa" },
+        { src: PaymentIcon11, alt: "Mastercard" },
+        { src: PaymentIcon12, alt: "RuPay" },
+        { src: PaymentIcon13, alt: "UPI" },
+        { src: PaymentIcon16, alt: "Netbanking" },
+        { src: PaymentIcon19, alt: "Wallet" },
+    ];
+
     const appDownloadSection = (wrapperClassName = "") => (
         <div className={wrapperClassName}>
             <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
@@ -116,7 +131,7 @@ const Footer = () => {
 
     return (
         <footer className="bg-black text-slate-200 border-t border-slate-800 pt-0 lg:pt-12">
-            <div className="max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4">
                 {/* Main Footer Content */}
                 <div className="py-2 grid grid-cols-2 gap-2 md:grid-cols-2 lg:grid-cols-6 md:gap-4 lg:gap-6">
                     {/* Brand Section - Takes 2 columns on large screens */}
@@ -174,8 +189,8 @@ const Footer = () => {
 
                 {/* Bottom Bar - Normal flow, always at bottom of footer */}
                 <div className="border-t border-slate-800 py-8 mt-4 w-full flex flex-col items-center justify-end">
-                    <div className="flex flex-col sm:flex-row justify-between items-center gap-2 w-full max-w-[1340px] px-4">
-                        <div className="flex items-center gap-3 mb-2 sm:mb-0">
+                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 w-full px-2 sm:px-3 lg:px-4">
+                        <div className="flex items-center gap-3 mb-2 sm:mb-0 sm:mr-8">
                             {socialIcons.map((item, i) => (
                                 <Link 
                                     href={item.link} 
@@ -188,9 +203,26 @@ const Footer = () => {
                                 </Link>
                             ))}
                         </div>
-                    <p className="text-sm text-slate-500 text-center w-full">
-  © {new Date().getFullYear()} QuickFynd — Powered by Nilaas. All rights reserved.
-</p>
+                        <p className="text-sm text-slate-500 text-center sm:text-left w-full sm:w-auto">
+                            © {new Date().getFullYear()} QuickFynd - Powered by Nilaas. All rights reserved.
+                        </p>
+
+                        <div className="flex flex-wrap items-center justify-center sm:justify-end gap-1 w-full sm:w-auto">
+                            {paymentMethodIcons.map((icon, index) => (
+                                <div
+                                    key={`payment-icon-${index}`}
+                                    className="h-8 w-14 flex items-center justify-center"
+                                >
+                                    <Image
+                                        src={icon.src}
+                                        alt={icon.alt}
+                                        width={48}
+                                        height={20}
+                                        className="h-6 w-auto object-contain"
+                                    />
+                                </div>
+                            ))}
+                        </div>
 
                     </div>
                 </div>

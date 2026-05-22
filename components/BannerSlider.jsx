@@ -28,7 +28,7 @@ const BannerSlider = () => {
   const handleClick = (link) => link && router.push(link);
 
   return (
-  <div className="relative w-full overflow-hidden max-w-[1250px] mx-auto flex justify-center bg-transparent rounded-none m-0 p-0 mt-8 mb-10">
+  <div className="relative w-full overflow-hidden max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4 flex justify-center bg-transparent rounded-none m-0 mt-8 mb-10">
       {/* Slider wrapper */}
       <div
         className="flex transition-transform duration-700 ease-out"

@@ -91,7 +91,7 @@ export default function AppInstallPrompt() {
 
   return (
     <div className="w-full bg-white border-b border-gray-200 shadow-md">
-      <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between gap-3">
+      <div className="max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4 py-2.5 sm:py-3 flex items-center justify-between gap-3">
         {/* Left: Colored Sidebar with Logo */}
         <div className="flex items-center gap-2.5 sm:gap-3 flex-1 min-w-0">
           {/* Vibrant Pink Icon Box with Logo */}

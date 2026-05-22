@@ -3,7 +3,7 @@
 export default function TermsOfSalePage() {
   return (
     <div className="bg-gray-50">
-      <div className="max-w-[1250px] mx-auto px-4 py-10 min-h-[60vh]">
+      <div className="max-w-[1450px] mx-auto px-4 py-10 min-h-[60vh]">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">Terms of Sale</h1>
         <p className="text-gray-600 mb-8">
           These Terms of Sale outline the terms and conditions governing the sale of products on QuickFynd.com.

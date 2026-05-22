@@ -7,13 +7,60 @@ import PageTitle from '@/components/PageTitle';
 import Loading from '@/components/Loading';
 import { TruckIcon, ZapIcon } from 'lucide-react';
 
+const HERO_THEMES = [
+  {
+    shell: 'bg-gradient-to-r from-emerald-700 via-teal-700 to-cyan-700',
+    leftGlow: 'bg-white/10',
+    rightGlow: 'bg-cyan-200/20',
+    card: 'border-white/20 bg-white/10',
+    badge: 'border-white/30 bg-white/10',
+    subtitle: 'text-teal-50/95',
+    accentIcon: 'text-amber-300',
+    badgeLabel: 'FAST LANE',
+  },
+  {
+    shell: 'bg-gradient-to-r from-rose-700 via-fuchsia-700 to-indigo-700',
+    leftGlow: 'bg-pink-200/20',
+    rightGlow: 'bg-indigo-200/20',
+    card: 'border-white/20 bg-black/20',
+    badge: 'border-rose-100/30 bg-rose-100/15',
+    subtitle: 'text-rose-50/95',
+    accentIcon: 'text-yellow-300',
+    badgeLabel: 'RAPID SHIP',
+  },
+  {
+    shell: 'bg-gradient-to-r from-slate-900 via-blue-900 to-sky-800',
+    leftGlow: 'bg-sky-200/15',
+    rightGlow: 'bg-blue-200/20',
+    card: 'border-sky-100/20 bg-slate-950/30',
+    badge: 'border-sky-100/30 bg-sky-100/10',
+    subtitle: 'text-sky-100/95',
+    accentIcon: 'text-lime-300',
+    badgeLabel: 'SPEED MODE',
+  },
+];
+
+const HERO_ROTATE_MS = 5 * 60 * 1000;
+
 export default function FastDeliveryPage() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [heroThemeIndex, setHeroThemeIndex] = useState(0);
 
   useEffect(() => {
     fetchFastDeliveryProducts();
+  }, []);
+
+  useEffect(() => {
+    const initialTheme = Math.floor(Date.now() / HERO_ROTATE_MS) % HERO_THEMES.length;
+    setHeroThemeIndex(initialTheme);
+
+    const rotateTimer = setInterval(() => {
+      setHeroThemeIndex((prev) => (prev + 1) % HERO_THEMES.length);
+    }, HERO_ROTATE_MS);
+
+    return () => clearInterval(rotateTimer);
   }, []);
 
   const fetchFastDeliveryProducts = async () => {
@@ -33,28 +80,40 @@ export default function FastDeliveryPage() {
     return <Loading />;
   }
 
+  const activeTheme = HERO_THEMES[heroThemeIndex];
+
   return (
     <>
       <PageTitle title="Fast Delivery Products" />
       <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white -mt-12">
         {/* Header Section */}
-        <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white py-12 px-4">
-          <div className="max-w-7xl mx-auto">
-            <div className="flex items-center justify-center gap-3 mb-4">
-              <TruckIcon size={40} className="animate-bounce" />
-              <ZapIcon size={32} className="text-yellow-300" />
+        <div className={`relative overflow-hidden py-12 sm:py-14 text-white transition-colors duration-700 ${activeTheme.shell}`}>
+          <div className={`pointer-events-none absolute -left-16 top-0 h-44 w-44 rounded-full blur-2xl transition-colors duration-700 ${activeTheme.leftGlow}`} />
+          <div className={`pointer-events-none absolute -right-10 bottom-0 h-52 w-52 rounded-full blur-3xl transition-colors duration-700 ${activeTheme.rightGlow}`} />
+
+          <div className="max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4 relative">
+            <div className={`mx-auto max-w-3xl rounded-2xl border px-5 py-6 sm:px-8 sm:py-8 backdrop-blur-sm shadow-[0_20px_60px_rgba(0,0,0,0.22)] transition-colors duration-700 ${activeTheme.card}`}>
+              <div className="mb-4 flex items-center justify-center gap-3">
+                <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition-colors duration-700 ${activeTheme.badge}`}>
+                  <TruckIcon size={14} />
+                  {activeTheme.badgeLabel}
+                </span>
+                <ZapIcon size={20} className={activeTheme.accentIcon} />
+              </div>
+
+              <h1 className="text-center text-3xl sm:text-4xl md:text-5xl font-extrabold tracking-tight mb-3">
+                Fast Delivery Products
+              </h1>
+
+              <p className={`text-center text-sm sm:text-base md:text-lg max-w-2xl mx-auto transition-colors duration-700 ${activeTheme.subtitle}`}>
+                Get these products delivered quickly. Priority shipping is available on all items below.
+              </p>
             </div>
-            <h1 className="text-3xl md:text-5xl font-bold text-center mb-4">
-              Fast Delivery Products
-            </h1>
-            <p className="text-center text-blue-100 text-lg max-w-2xl mx-auto">
-              Get these products delivered quickly! Lightning-fast shipping on all items below.
-            </p>
           </div>
         </div>
 
         {/* Products Grid */}
-        <div className="max-w-7xl mx-auto px-4 py-12">
+        <div className="max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4 py-12">
           {error ? (
             <div className="text-center py-16">
               <div className="text-red-500 text-lg mb-4">{error}</div>
@@ -100,7 +159,7 @@ export default function FastDeliveryPage() {
               </div>
 
               {/* Products Grid */}
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-6 gap-4">
                 {products.map((product) => (
                   <ProductCard key={product._id} product={product} />
                 ))}

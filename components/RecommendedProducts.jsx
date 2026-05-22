@@ -14,6 +14,7 @@ export default function RecommendedProducts() {
   const [viewedProducts, setViewedProducts] = useState([]);
   const [recommendedProducts, setRecommendedProducts] = useState([]);
   const [isNewCustomer, setIsNewCustomer] = useState(true);
+  const [loading, setLoading] = useState(true);
   const sliderRef = useRef(null);
   const isDraggingRef = useRef(false);
   const startXRef = useRef(0);
@@ -48,6 +49,7 @@ export default function RecommendedProducts() {
 
   useEffect(() => {
     const fetchRecentlyViewed = async () => {
+      setLoading(true);
       let viewed = [];
 
       // If logged in, fetch from database
@@ -137,10 +139,38 @@ export default function RecommendedProducts() {
 
         setRecommendedProducts(recommended);
       }
+
+      setLoading(false);
     };
 
     fetchRecentlyViewed();
   }, [products, user, getToken]);
+
+  if (loading) {
+    return (
+      <section className="w-full bg-white py-8 mb-6">
+        <div className="max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4">
+          <div className="flex items-center justify-between mb-6 px-4">
+            <div>
+              <div className="h-4 w-28 bg-gray-200 rounded animate-pulse mb-2" />
+              <div className="h-6 w-52 bg-gray-200 rounded animate-pulse mb-2" />
+              <div className="h-4 w-64 bg-gray-200 rounded animate-pulse" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 px-4">
+            {[...Array(5)].map((_, i) => (
+              <div key={`recommended-skeleton-${i}`} className="bg-white border border-gray-200 rounded-lg p-3 animate-pulse">
+                <div className="w-full aspect-square bg-gray-200 rounded mb-3" />
+                <div className="h-4 bg-gray-200 rounded mb-2" />
+                <div className="h-4 bg-gray-200 rounded w-3/4 mb-2" />
+                <div className="h-5 bg-gray-200 rounded w-1/2" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   
   if (isNewCustomer || recommendedProducts.length === 0) {
@@ -149,7 +179,7 @@ export default function RecommendedProducts() {
 
   return (
     <section className="w-full bg-white py-8 mb-6">
-      <div className="max-w-[1280px] mx-auto">
+      <div className="max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4">
         {/* Header */}
         <div className="flex items-center justify-between mb-6 px-4">
           <div>

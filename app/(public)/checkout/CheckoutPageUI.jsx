@@ -2189,7 +2189,7 @@ export default function CheckoutPage() {
   return (
     <>
       <div className="py-10 bg-white md:pb-0 pb-24 min-h-[35dvh]">
-      <div className="max-w-[1250px] mx-auto grid grid-cols-1 md:grid-cols-3 gap-8">
+      <div className="max-w-[1450px] mx-auto grid grid-cols-1 md:grid-cols-3 gap-8">
         {/* Left column: address, form, payment */}
         <div className="md:col-span-2">
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-8">

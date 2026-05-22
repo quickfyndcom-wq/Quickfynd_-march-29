@@ -78,8 +78,13 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
         const [variants, setVariants] = useState([]);
         const [images, setImages] = useState({ "1": null, "2": null, "3": null, "4": null, "5": null, "6": null, "7": null, "8": null });
         const [productInfo, setProductInfo] = useState({
-            name: '', slug: '', brand: '', shortDescription: '', description: '', metaTitle: '', metaDescription: '', seoKeywords: [], mrp: '', price: '', category: '', sku: '', stockQuantity: 100, colors: [], sizes: [], fastDelivery: false, allowReturn: true, allowReplacement: true, reviews: [], badges: [], imageAspectRatio: '1:1', tags: [], deliveredBy: 'Quickfynd', soldBy: '', paymentInfo: '', mobileSpecsEnabled: false, mobileSpecs: []
+            name: '', slug: '', brand: '', shortDescription: '', description: '', metaTitle: '', metaDescription: '', seoKeywords: [], mrp: '', price: '', category: '', sku: '', stockQuantity: 100, colors: [], sizes: [], sizeEnabled: false, sizeChartEnabled: false, sizeChartMode: 'upload', sizeChartName: '', sizeChartUrl: '', sizeChartTable: null, fashionLayoutEnabled: false, fastDelivery: false, allowReturn: true, allowReplacement: true, reviews: [], badges: [], imageAspectRatio: '1:1', tags: [], deliveredBy: 'Quickfynd', soldBy: '', paymentInfo: '', mobileSpecsEnabled: false, mobileSpecs: []
         });
+        const [sizeChartUploading, setSizeChartUploading] = useState(false);
+        const [sizeChartRowsInput, setSizeChartRowsInput] = useState(4);
+        const [sizeChartColsInput, setSizeChartColsInput] = useState(3);
+        const [savedSizeCharts, setSavedSizeCharts] = useState([]);
+        const [selectedSavedSizeChart, setSelectedSavedSizeChart] = useState('');
         const [tagInput, setTagInput] = useState('');
         const [seoKeywordInput, setSeoKeywordInput] = useState('');
         const [loading, setLoading] = useState(false);
@@ -293,6 +298,13 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                 stockQuantity: product.stockQuantity ?? 100,
                 colors: product.colors || [],
                 sizes: product.sizes || [],
+                sizeEnabled: Boolean(product.sizeEnabled) || (Array.isArray(product.sizes) && product.sizes.length > 0),
+                sizeChartEnabled: Boolean(product.sizeChartEnabled),
+                sizeChartMode: product.sizeChartMode || 'upload',
+                sizeChartName: product.sizeChartName || '',
+                sizeChartUrl: product.sizeChartUrl || '',
+                sizeChartTable: product.sizeChartTable || null,
+                fashionLayoutEnabled: Boolean(product.fashionLayoutEnabled),
                 fastDelivery: product.fastDelivery || false,
                 allowReturn: product.allowReturn !== undefined ? product.allowReturn : true,
                 allowReplacement: product.allowReplacement !== undefined ? product.allowReplacement : true,
@@ -377,6 +389,26 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
             setIsFormInitialized(false)
         }
     }, [product?._id])
+
+    useEffect(() => {
+        if (!product || !isFormInitialized) return;
+
+        const currentChartName = String(product.sizeChartName || '').trim();
+        const currentTable = product.sizeChartTable || null;
+        const currentUrl = String(product.sizeChartUrl || '').trim();
+        if (!currentChartName && !currentTable && !currentUrl) return;
+
+        const seededChart = {
+            name: currentChartName || 'Saved size chart',
+            mode: product.sizeChartMode || (currentTable ? 'table' : 'upload'),
+            sizeChartEnabled: Boolean(product.sizeChartEnabled),
+            sizeChartUrl: currentUrl,
+            sizeChartTable: currentTable,
+        };
+
+        setSavedSizeCharts([seededChart]);
+        setSelectedSavedSizeChart(seededChart.name);
+    }, [product, isFormInitialized]);
 
     const onChangeHandler = (e) => {
         const { name, value } = e.target
@@ -604,6 +636,144 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
         setTagInput('');
     }
 
+    const addSize = () => {
+        const nextSize = sizeInput.trim().toUpperCase();
+        if (!nextSize) return;
+
+        setProductInfo((prev) => {
+            const existing = Array.isArray(prev.sizes) ? prev.sizes : [];
+            if (existing.includes(nextSize)) return prev;
+            return {
+                ...prev,
+                sizeEnabled: true,
+                sizes: [...existing, nextSize],
+            };
+        });
+        setSizeInput('');
+    };
+
+    const removeSize = (sizeToRemove) => {
+        setProductInfo((prev) => {
+            const existing = Array.isArray(prev.sizes) ? prev.sizes : [];
+            return {
+                ...prev,
+                sizes: existing.filter((size) => size !== sizeToRemove),
+            };
+        });
+    };
+
+    const uploadSizeChart = async (file) => {
+        if (!file) return;
+        try {
+            setSizeChartUploading(true);
+            const token = await getToken();
+            const mediaForm = new FormData();
+            mediaForm.append('file', file);
+            mediaForm.append('folder', 'products/size-charts');
+
+            const { data } = await axios.post('/api/imagekit-auth/upload', mediaForm, {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'multipart/form-data'
+                }
+            });
+
+            setProductInfo((prev) => ({
+                ...prev,
+                sizeChartEnabled: true,
+                sizeChartUrl: data?.url || prev.sizeChartUrl,
+                sizeChartName: prev.sizeChartName || file.name.replace(/\.[^/.]+$/, ''),
+            }));
+            toast.success('Size chart uploaded');
+        } catch (error) {
+            toast.error('Failed to upload size chart');
+        } finally {
+            setSizeChartUploading(false);
+        }
+    };
+
+    const createSizeChartTable = () => {
+        const rows = Math.max(1, Number(sizeChartRowsInput) || 1);
+        const cols = Math.max(1, Number(sizeChartColsInput) || 1);
+
+        setProductInfo((prev) => ({
+            ...prev,
+            sizeChartEnabled: true,
+            sizeChartMode: 'table',
+            sizeChartTable: {
+                headers: Array.from({ length: cols }, (_, index) => prev.sizeChartTable?.headers?.[index] || `Column ${index + 1}`),
+                rows: Array.from({ length: rows }, (_, rowIndex) => Array.from({ length: cols }, (_, colIndex) => prev.sizeChartTable?.rows?.[rowIndex]?.[colIndex] || '')),
+            },
+        }));
+    };
+
+    const saveCurrentSizeChart = () => {
+        const chartName = String(productInfo.sizeChartName || '').trim() || 'Size Chart';
+        const currentTable = productInfo.sizeChartTable || null;
+        if (!currentTable && !String(productInfo.sizeChartUrl || '').trim()) {
+            toast.error('Create or upload a size chart first');
+            return;
+        }
+
+        const nextChart = {
+            name: chartName,
+            mode: productInfo.sizeChartMode || 'table',
+            sizeChartEnabled: true,
+            sizeChartUrl: String(productInfo.sizeChartUrl || '').trim(),
+            sizeChartTable: currentTable,
+        };
+
+        setProductInfo((prev) => ({
+            ...prev,
+            sizeEnabled: true,
+            sizeChartEnabled: true,
+            sizeChartMode: prev.sizeChartMode === 'upload' ? 'upload' : 'table',
+            sizeChartName: chartName,
+        }));
+
+        setSavedSizeCharts((prev) => {
+            const withoutCurrent = prev.filter((chart) => chart.name !== chartName);
+            return [nextChart, ...withoutCurrent];
+        });
+        setSelectedSavedSizeChart(chartName);
+        toast.success(`Saved "${chartName}"`);
+    };
+
+    const loadSavedSizeChart = (chartName) => {
+        const chart = savedSizeCharts.find((item) => item.name === chartName);
+        if (!chart) return;
+
+        setSelectedSavedSizeChart(chartName);
+        setProductInfo((prev) => ({
+            ...prev,
+            sizeEnabled: true,
+            sizeChartEnabled: Boolean(chart.sizeChartEnabled),
+            sizeChartMode: chart.mode || 'upload',
+            sizeChartName: chart.name,
+            sizeChartUrl: chart.sizeChartUrl || '',
+            sizeChartTable: chart.sizeChartTable || null,
+        }));
+    };
+
+    const updateSizeChartHeader = (index, value) => {
+        setProductInfo((prev) => {
+            const table = prev.sizeChartTable || { headers: [], rows: [] };
+            const headers = [...(table.headers || [])];
+            headers[index] = value;
+            return { ...prev, sizeChartTable: { ...table, headers } };
+        });
+    };
+
+    const updateSizeChartCell = (rowIndex, colIndex, value) => {
+        setProductInfo((prev) => {
+            const table = prev.sizeChartTable || { headers: [], rows: [] };
+            const rows = Array.isArray(table.rows) ? table.rows.map((row) => [...row]) : [];
+            rows[rowIndex] = Array.isArray(rows[rowIndex]) ? rows[rowIndex] : [];
+            rows[rowIndex][colIndex] = value;
+            return { ...prev, sizeChartTable: { ...table, rows } };
+        });
+    };
+
     const removeTag = (index) => {
         setProductInfo((prev) => {
             const currentTags = Array.isArray(prev.tags) ? prev.tags : [];
@@ -715,6 +885,8 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
 
             Object.entries(productInfo).forEach(([key, value]) => {
                 if (["colors", "sizes", "seoKeywords", "mobileSpecs"].includes(key)) {
+                    formData.append(key, JSON.stringify(value))
+                } else if (key === 'sizeChartTable') {
                     formData.append(key, JSON.stringify(value))
                 } else if (key === 'reviews') {
                     const cleanReviews = value.map(({ name, rating, comment }) => ({ name, rating, comment }))
@@ -1210,7 +1382,284 @@ export default function ProductForm({ product = null, onClose, onSubmitSuccess }
                     <p className="text-xs text-gray-500">Select badges to display on the product page</p>
                 </div>
 
+                <div>
+                    <label className="block text-sm font-medium mb-2">Product Layout</label>
+                    <button
+                        type="button"
+                        onClick={() => setProductInfo(prev => ({ ...prev, fashionLayoutEnabled: !prev.fashionLayoutEnabled }))}
+                        className={`px-4 py-2 rounded-full text-sm font-semibold border transition ${
+                            productInfo.fashionLayoutEnabled
+                                ? 'bg-pink-600 text-white border-pink-600'
+                                : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                        }`}
+                    >
+                        Fashion
+                    </button>
+                    <p className="text-xs text-gray-500 mt-1">Turn this on for a fashion-specific product page design.</p>
+                </div>
+
                 <div className="border rounded-lg p-4 bg-slate-50 space-y-3">
+                    <div className="space-y-3 border-b border-slate-200 pb-4">
+                        <label className="inline-flex items-center gap-2">
+                            <input
+                                type="checkbox"
+                                checked={Boolean(productInfo.sizeEnabled)}
+                                onChange={(e) => setProductInfo((prev) => ({ ...prev, sizeEnabled: e.target.checked }))}
+                                className="accent-orange-600"
+                            />
+                            <span className="font-medium text-slate-800">Enable Size Selection</span>
+                        </label>
+
+                        {productInfo.sizeEnabled && (
+                            <div className="space-y-3">
+                                <div className="rounded border border-orange-200 bg-orange-50/50 p-3 space-y-2">
+                                    <p className="text-xs text-slate-600">Sizes will be taken from the chart table headers. No separate size entry is needed here.</p>
+
+                                    <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-center">
+                                        <select
+                                            value={selectedSavedSizeChart}
+                                            onChange={(e) => loadSavedSizeChart(e.target.value)}
+                                            className="w-full border rounded px-3 py-2 bg-white"
+                                        >
+                                            <option value="">Select saved chart</option>
+                                            {savedSizeCharts.map((chart) => (
+                                                <option key={chart.name} value={chart.name}>
+                                                    {chart.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <button
+                                            type="button"
+                                            onClick={saveCurrentSizeChart}
+                                            className="px-4 py-2 rounded bg-orange-600 text-white hover:bg-orange-700"
+                                        >
+                                            Save Table
+                                        </button>
+                                    </div>
+
+                                    {savedSizeCharts.length > 0 && (
+                                        <div className="flex flex-wrap gap-2 pt-1">
+                                            {savedSizeCharts.map((chart) => (
+                                                <button
+                                                    key={chart.name}
+                                                    type="button"
+                                                    onClick={() => loadSavedSizeChart(chart.name)}
+                                                    className={`px-3 py-1.5 rounded-full text-xs font-medium border ${selectedSavedSizeChart === chart.name ? 'bg-orange-600 text-white border-orange-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+                                                >
+                                                    {chart.name}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="space-y-2 rounded border border-orange-200 bg-orange-50/50 p-3">
+                                    <label className="inline-flex items-center gap-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={Boolean(productInfo.sizeChartEnabled)}
+                                            onChange={(e) => setProductInfo((prev) => ({ ...prev, sizeChartEnabled: e.target.checked }))}
+                                            className="accent-orange-600"
+                                        />
+                                        <span className="text-sm font-medium text-slate-800">Attach Size Chart</span>
+                                    </label>
+
+                                    {productInfo.sizeChartEnabled && (
+                                        <div className="space-y-3">
+                                            <input
+                                                type="text"
+                                                value={productInfo.sizeChartName || ''}
+                                                onChange={(e) => setProductInfo((prev) => ({ ...prev, sizeChartName: e.target.value }))}
+                                                className="w-full border rounded px-3 py-2"
+                                                placeholder="Size chart name (e.g., Dresses Size Chart)"
+                                            />
+
+                                            <div className="flex gap-2 flex-wrap">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setProductInfo((prev) => ({ ...prev, sizeChartMode: 'upload' }))}
+                                                    className={`px-3 py-2 rounded text-sm font-medium border ${productInfo.sizeChartMode === 'upload' ? 'bg-orange-600 text-white border-orange-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+                                                >
+                                                    Upload Chart
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setProductInfo((prev) => ({ ...prev, sizeChartMode: 'table', sizeChartEnabled: true }));
+                                                        if (!productInfo.sizeChartTable) {
+                                                            createSizeChartTable();
+                                                        }
+                                                    }}
+                                                    className={`px-3 py-2 rounded text-sm font-medium border ${productInfo.sizeChartMode === 'table' ? 'bg-orange-600 text-white border-orange-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+                                                >
+                                                    Manual Table
+                                                </button>
+                                            </div>
+
+                                            {productInfo.sizeChartMode === 'upload' ? (
+                                                <div className="space-y-2">
+                                                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                                        <label className="inline-flex items-center justify-center px-4 py-2 rounded bg-orange-600 text-white hover:bg-orange-700 cursor-pointer">
+                                                            {sizeChartUploading ? 'Uploading...' : 'Upload Size Chart File'}
+                                                            <input
+                                                                type="file"
+                                                                accept="image/*,.pdf,.csv,.xlsx,.xls"
+                                                                className="hidden"
+                                                                onChange={(e) => {
+                                                                    const file = e.target.files?.[0];
+                                                                    if (file) uploadSizeChart(file);
+                                                                    e.target.value = '';
+                                                                }}
+                                                            />
+                                                        </label>
+                                                        <input
+                                                            type="url"
+                                                            value={productInfo.sizeChartUrl || ''}
+                                                            onChange={(e) => setProductInfo((prev) => ({ ...prev, sizeChartUrl: e.target.value }))}
+                                                            className="flex-1 border rounded px-3 py-2"
+                                                            placeholder="Or paste size chart URL"
+                                                        />
+                                                    </div>
+                                                    {productInfo.sizeChartUrl && (
+                                                        <a
+                                                            href={productInfo.sizeChartUrl}
+                                                            target="_blank"
+                                                            rel="noreferrer"
+                                                            className="inline-block text-sm text-orange-700 hover:text-orange-900 underline"
+                                                        >
+                                                            Preview current size chart
+                                                        </a>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <div className="space-y-3 rounded border border-orange-200 bg-white p-3">
+                                                    <p className="text-xs text-slate-600">Create a size chart table, then fill each cell manually.</p>
+                                                    <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2">
+                                                        <input
+                                                            type="number"
+                                                            min="1"
+                                                            value={sizeChartRowsInput}
+                                                            onChange={(e) => setSizeChartRowsInput(Number(e.target.value) || 1)}
+                                                            className="border rounded px-3 py-2"
+                                                            placeholder="Rows"
+                                                        />
+                                                        <input
+                                                            type="number"
+                                                            min="1"
+                                                            value={sizeChartColsInput}
+                                                            onChange={(e) => setSizeChartColsInput(Number(e.target.value) || 1)}
+                                                            className="border rounded px-3 py-2"
+                                                            placeholder="Columns"
+                                                        />
+                                                        <button
+                                                            type="button"
+                                                            onClick={createSizeChartTable}
+                                                            className="px-4 py-2 rounded bg-orange-600 text-white hover:bg-orange-700"
+                                                        >
+                                                            Create Table
+                                                        </button>
+                                                    </div>
+
+                                                    <div className="text-xs text-slate-600">Rename the column names below before filling the table.</div>
+
+                                                    {productInfo.sizeChartTable && Array.isArray(productInfo.sizeChartTable.headers) && Array.isArray(productInfo.sizeChartTable.rows) && (
+                                                        <div className="overflow-x-auto border border-orange-100 rounded">
+                                                            <table className="min-w-full text-sm border-collapse">
+                                                                <thead className="bg-orange-50">
+                                                                    <tr>
+                                                                        {productInfo.sizeChartTable.headers.map((header, index) => (
+                                                                            <th key={index} className="border border-orange-100 p-2">
+                                                                                <input
+                                                                                    type="text"
+                                                                                    value={header}
+                                                                                    onChange={(e) => updateSizeChartHeader(index, e.target.value)}
+                                                                                    className="w-full bg-white border border-orange-200 rounded px-2 py-1 text-center font-semibold focus:outline-none focus:ring-1 focus:ring-orange-400"
+                                                                                    placeholder={`Name ${index + 1}`}
+                                                                                />
+                                                                            </th>
+                                                                        ))}
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody>
+                                                                    {productInfo.sizeChartTable.rows.map((row, rowIndex) => (
+                                                                        <tr key={rowIndex}>
+                                                                            {row.map((cell, colIndex) => (
+                                                                                <td key={colIndex} className="border border-orange-100 p-1">
+                                                                                    <input
+                                                                                        type="text"
+                                                                                        value={cell}
+                                                                                        onChange={(e) => updateSizeChartCell(rowIndex, colIndex, e.target.value)}
+                                                                                        className="w-full border-0 outline-none px-2 py-1 text-center bg-white"
+                                                                                        placeholder={`R${rowIndex + 1} C${colIndex + 1}`}
+                                                                                    />
+                                                                                </td>
+                                                                            ))}
+                                                                        </tr>
+                                                                    ))}
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {productInfo.sizeChartTable && (
+                                        <div className="space-y-2 rounded border border-orange-200 bg-white p-3">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <p className="text-xs font-medium text-slate-700">Saved table {productInfo.sizeChartMode === 'upload' ? '(editable preview)' : '(editable)'}</p>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setProductInfo((prev) => ({ ...prev, sizeChartEnabled: true, sizeChartMode: 'table' }))}
+                                                    className="text-xs font-semibold text-orange-700 hover:text-orange-900 underline"
+                                                >
+                                                    Edit as table
+                                                </button>
+                                            </div>
+                                            <div className="overflow-x-auto border border-orange-100 rounded">
+                                                <table className="min-w-full text-xs border-collapse">
+                                                    <thead className="bg-orange-50">
+                                                        <tr>
+                                                            {(productInfo.sizeChartTable.headers || []).map((header, index) => (
+                                                                <th key={index} className="border border-orange-100 p-1">
+                                                                    <input
+                                                                        type="text"
+                                                                        value={header}
+                                                                        onChange={(e) => updateSizeChartHeader(index, e.target.value)}
+                                                                        className="w-full bg-white border border-orange-200 rounded px-2 py-1 text-center font-semibold focus:outline-none focus:ring-1 focus:ring-orange-400"
+                                                                        placeholder={`Name ${index + 1}`}
+                                                                    />
+                                                                </th>
+                                                            ))}
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {(productInfo.sizeChartTable.rows || []).map((row, rowIndex) => (
+                                                            <tr key={rowIndex}>
+                                                                {(row || []).map((cell, colIndex) => (
+                                                                    <td key={colIndex} className="border border-orange-100 p-1">
+                                                                        <input
+                                                                            type="text"
+                                                                            value={cell}
+                                                                            onChange={(e) => updateSizeChartCell(rowIndex, colIndex, e.target.value)}
+                                                                            className="w-full border-0 outline-none px-2 py-1 text-center bg-white"
+                                                                            placeholder={`R${rowIndex + 1} C${colIndex + 1}`}
+                                                                        />
+                                                                    </td>
+                                                                ))}
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
                     <label className="inline-flex items-center gap-2">
                         <input
                             type="checkbox"

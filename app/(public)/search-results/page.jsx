@@ -147,7 +147,7 @@ function SearchResultsInner() {
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4">
         {/* Header */}
         <div className="mb-8">
           <button
@@ -193,7 +193,7 @@ function SearchResultsInner() {
             <div className="bg-white rounded-lg shadow-sm p-4 mb-6">
               <p className="text-gray-700 font-semibold">Recommended products</p>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-6">
               {recommendedProducts.map((product) => (
                 <Link
                   key={product._id}
@@ -251,7 +251,7 @@ function SearchResultsInner() {
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-6">
               {products.map((product) => (
                 <Link
                   key={product._id}
@@ -317,7 +317,7 @@ function SearchResultsInner() {
                     Recommended similar products
                   </p>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-6">
                   {similarProducts.map((product) => (
                     <Link
                       key={product._id}

@@ -207,6 +207,10 @@ const Navbar = () => {
   const router = useRouter();
   const pathname = usePathname();
   const isHomePage = pathname === '/';
+  const isProductDetailPage = pathname?.startsWith('/product/') || pathname?.startsWith('/offer/');
+  const desktopNavbarContainerClass = isProductDetailPage
+    ? 'max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4'
+    : 'max-w-[1700px] mx-auto px-2 sm:px-3 lg:px-4';
 
   const openSignOutConfirm = (context = 'desktop') => {
     setSignOutContext(context);
@@ -769,8 +773,8 @@ const Navbar = () => {
 
       {/* Original Full Navbar (Hidden on mobile for non-home pages) */}
       <nav className={`relative z-50 shadow-sm ${!isHomePage ? 'hidden lg:block' : ''}`} style={{ backgroundColor: '#ffffff', borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
-      <div className="max-w-[1250px] mx-auto px-4 sm:px-6">
-        <div className="flex items-center justify-between py-3 transition-all">
+      <div className={desktopNavbarContainerClass}>
+        <div className="flex items-center justify-between gap-2 xl:gap-3 py-3 transition-all">
 
           {/* Left Side - Hamburger (Mobile) + Logo */}
           <div className="flex items-center gap-2">
@@ -791,9 +795,9 @@ const Navbar = () => {
           </div>
 
           {/* Center - Links and Search */}
-          <div className="hidden lg:flex items-center flex-1 justify-between gap-3 px-4">
+          <div className="hidden lg:flex items-center flex-1 min-w-0 justify-center gap-3 xl:gap-6 px-2 xl:px-4">
             {/* Left Links */}
-            <div className="flex items-center gap-4 flex-shrink-0">
+            <div className="flex items-center gap-2 xl:gap-4 flex-shrink-0">
               <Link href="/5-star-rated" className="text-sm font-medium text-gray-800 hover:text-gray-600 transition whitespace-nowrap flex items-center gap-1.5">
                 <StarIcon size={16} className="text-[#E6003E]" fill="#E6003E" />
                 5 Star Rated
@@ -887,7 +891,7 @@ const Navbar = () => {
             </div>
 
             {/* Search Bar - Flexible and expanded */}
-            <form onSubmit={handleSearch} className="relative flex items-center flex-1 text-sm gap-2 bg-gray-100 px-4 py-2.5 rounded-full border border-gray-200 focus-within:border-orange-300 focus-within:ring-1 focus-within:ring-orange-200 transition min-w-0">
+            <form onSubmit={handleSearch} className="relative flex items-center w-full max-w-[340px] xl:max-w-[500px] 2xl:max-w-[560px] text-sm gap-2 bg-gray-100 px-3 xl:px-4 py-2.5 rounded-full border border-gray-200 focus-within:border-orange-300 focus-within:ring-1 focus-within:ring-orange-200 transition min-w-0">
               <Search size={18} className="text-gray-500 flex-shrink-0" />
               <input
                 type="text"
@@ -1040,7 +1044,7 @@ const Navbar = () => {
           </div>
 
           {/* Right Side - Actions */}
-          <div className="hidden lg:flex items-center gap-3 flex-shrink-0">
+          <div className="hidden lg:flex items-center gap-2 xl:gap-3 flex-shrink-0">
             {/* Login/User Button */}
             {firebaseUser ? (
               <div

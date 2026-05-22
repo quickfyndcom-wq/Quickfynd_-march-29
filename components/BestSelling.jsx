@@ -252,7 +252,7 @@ const BestSelling = () => {
   const shown = (curated.length ? curated : baseSorted).slice(0, displayQuantity)
 
   return (
-    <div className="px-4 my-16 max-w-[1250px] w-full mx-auto">
+    <div className="px-4 my-16 max-w-[1450px] w-full mx-auto">
       <Title
         title="Fast Selling Products"
         description="Grab the best deals before they're gone!"
