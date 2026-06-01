@@ -59,6 +59,23 @@ const getNetSoldQuantity = (order, item) => {
     return Math.max(0, orderedQty - Math.max(0, cancelledQty))
 }
 
+const COUNTABLE_SALES_STATUSES = new Set([
+    'SHIPPED',
+    'OUT_FOR_DELIVERY',
+    'IN_TRANSIT',
+    'DELIVERED',
+])
+
+const shouldIncludeOrderInProductSales = (order) => {
+    const status = String(order?.status || '').toUpperCase()
+
+    // Deleted/voided-like records should never contribute to sold counts.
+    if (order?.deletedAt || order?.isDeleted || status === 'DELETED') return false
+
+    // Only count units once orders are at least shipped.
+    return COUNTABLE_SALES_STATUSES.has(status)
+}
+
 const getProductImageSrc = (item) => {
     const isInvalidStringImage = (value) => {
         const normalized = String(value || '').trim().toLowerCase()
@@ -279,7 +296,9 @@ export default function Dashboard() {
         })
         : []
 
-    const productCountMap = rangeOrders.reduce((accumulator, order) => {
+    const rangeCountableOrders = rangeOrders.filter(shouldIncludeOrderInProductSales)
+
+    const productCountMap = rangeCountableOrders.reduce((accumulator, order) => {
         for (const item of order?.orderItems || []) {
             const rawName = item?.productId?.name || item?.name || item?.productId?.title || 'Product'
             const productName = String(rawName).trim() || 'Product'
@@ -615,7 +634,7 @@ export default function Dashboard() {
                         />
                     </label>
 
-                    <SummaryCard label="Orders In Range" value={hasValidRange ? rangeOrders.length : 0} />
+                    <SummaryCard label="Orders In Range" value={hasValidRange ? rangeCountableOrders.length : 0} />
                     <SummaryCard label="Units Sold In Range" value={hasValidRange ? totalUnitsInRange : 0} />
                 </div>
 
