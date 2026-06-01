@@ -6,6 +6,22 @@ import AbandonedCart from "@/models/AbandonedCart";
 import authSeller from "@/middlewares/authSeller";
 import { NextResponse } from "next/server";
 
+const IST_TIMEZONE = 'Asia/Kolkata';
+
+const getISTDateKey = (value) => {
+   const date = new Date(value);
+   if (Number.isNaN(date.getTime())) return '';
+
+   const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: IST_TIMEZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+   });
+
+   return formatter.format(date);
+};
+
 // Next.js API route handler for GET
 export async function GET(request) {
    try {
@@ -36,19 +52,14 @@ export async function GET(request) {
          // Get all orders for seller
          const orders = await Order.find({ storeId }).lean();
 
-         // Calculate today's orders (all orders created today, regardless of status/payment)
-         // Use IST (UTC+5:30) for 12am-12am window
-         const now = new Date();
-         // Get current IST date
-         const istOffset = 5.5 * 60 * 60 * 1000;
-         const nowIST = new Date(now.getTime() + istOffset);
-         const startOfTodayIST = new Date(Date.UTC(nowIST.getUTCFullYear(), nowIST.getUTCMonth(), nowIST.getUTCDate(), 0, 0, 0));
-         const endOfTodayIST = new Date(Date.UTC(nowIST.getUTCFullYear(), nowIST.getUTCMonth(), nowIST.getUTCDate() + 1, 0, 0, 0));
-         const todaysOrders = orders.filter(order => {
-            const created = new Date(order.createdAt);
-            // Convert createdAt to IST
-            const createdIST = new Date(created.getTime() + istOffset);
-            return createdIST >= startOfTodayIST && createdIST < endOfTodayIST;
+         // Calculate today's orders using IST date key (stable and timezone-safe).
+         // For converted orders, count by convertedAt; otherwise count by createdAt.
+         const todayISTKey = getISTDateKey(new Date());
+         const todaysOrders = orders.filter((order) => {
+            const effectiveDate = order?.convertedFromAbandonedCheckout && order?.convertedAt
+               ? order.convertedAt
+               : order?.createdAt;
+            return getISTDateKey(effectiveDate) === todayISTKey;
          });
 
       // Get all products with ratings for seller
