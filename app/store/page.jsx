@@ -59,12 +59,21 @@ const getNetSoldQuantity = (order, item) => {
     return Math.max(0, orderedQty - Math.max(0, cancelledQty))
 }
 
-const COUNTABLE_SALES_STATUSES = new Set([
-    'SHIPPED',
-    'OUT_FOR_DELIVERY',
-    'IN_TRANSIT',
-    'DELIVERED',
+const EXCLUDED_PRODUCT_COUNT_STATUSES = new Set([
+    'CANCELLED',
+    'PAYMENT_FAILED',
+    'FAILED_ORDER',
+    'DELETED',
 ])
+
+const getEffectiveOrderDate = (order) => {
+    const value = order?.convertedFromAbandonedCheckout && order?.convertedAt
+        ? order?.convertedAt
+        : order?.createdAt
+
+    const parsed = new Date(value)
+    return Number.isNaN(parsed.getTime()) ? null : parsed
+}
 
 const shouldIncludeOrderInProductSales = (order) => {
     const status = String(order?.status || '').toUpperCase()
@@ -72,8 +81,8 @@ const shouldIncludeOrderInProductSales = (order) => {
     // Deleted/voided-like records should never contribute to sold counts.
     if (order?.deletedAt || order?.isDeleted || status === 'DELETED') return false
 
-    // Only count units once orders are at least shipped.
-    return COUNTABLE_SALES_STATUSES.has(status)
+    // Keep date-range product report aligned with UI copy: only exclude cancelled/failed/deleted.
+    return !EXCLUDED_PRODUCT_COUNT_STATUSES.has(status)
 }
 
 const getProductImageSrc = (item) => {
@@ -269,14 +278,20 @@ export default function Dashboard() {
     // --- Detailed order/earnings summary ---
     const today = new Date();
     const todayStr = today.toISOString().slice(0, 10);
-    const isToday = (date) => date && date.startsWith(todayStr);
+    const isTodayDate = (date) => {
+        if (!(date instanceof Date) || Number.isNaN(date.getTime())) return false;
+        return date.toISOString().slice(0, 10) === todayStr;
+    };
     const deliveredOrders = orders.filter(o => o.status === 'DELIVERED');
     const codOrders = orders.filter(o => (o.paymentMethod || '').toLowerCase() === 'cod');
     const cardOrders = orders.filter(o => (o.paymentMethod || '').toLowerCase() !== 'cod');
     const inTransitOrders = orders.filter(o => ['SHIPPED', 'OUT_FOR_DELIVERY', 'IN_TRANSIT'].includes(o.status));
     const pendingPaymentOrders = orders.filter(o => !o.isPaid && o.status !== 'CANCELLED');
     const canceledOrders = orders.filter(o => o.status === 'CANCELLED');
-    const todayOrders = orders.filter(o => isToday(o.createdAt));
+    const todayOrders = orders.filter((o) => {
+        if (EXCLUDED_PRODUCT_COUNT_STATUSES.has(String(o?.status || '').toUpperCase())) return false;
+        return isTodayDate(getEffectiveOrderDate(o));
+    });
     const deliveredEarnings = deliveredOrders.reduce((sum, o) => sum + (o.total || 0), 0);
     const fromDate = rangeFrom ? new Date(rangeFrom) : null
     const toDate = rangeTo ? new Date(rangeTo) : null
@@ -290,9 +305,9 @@ export default function Dashboard() {
 
     const rangeOrders = hasValidRange
         ? orders.filter((order) => {
-            const createdAt = new Date(order?.createdAt)
-            if (Number.isNaN(createdAt.getTime())) return false
-            return createdAt >= fromDate && createdAt <= toDate
+            const effectiveDate = getEffectiveOrderDate(order)
+            if (!effectiveDate) return false
+            return effectiveDate >= fromDate && effectiveDate <= toDate
         })
         : []
 

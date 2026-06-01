@@ -22,6 +22,19 @@ const getISTDateKey = (value) => {
    return formatter.format(date);
 };
 
+const EXCLUDED_TODAY_STATUSES = new Set([
+   'CANCELLED',
+   'PAYMENT_FAILED',
+   'FAILED_ORDER',
+   'DELETED',
+]);
+
+const shouldCountOrderInToday = (order = {}) => {
+   const status = String(order?.status || '').toUpperCase();
+   if (order?.deletedAt || order?.isDeleted) return false;
+   return !EXCLUDED_TODAY_STATUSES.has(status);
+};
+
 // Next.js API route handler for GET
 export async function GET(request) {
    try {
@@ -56,6 +69,7 @@ export async function GET(request) {
          // For converted orders, count by convertedAt; otherwise count by createdAt.
          const todayISTKey = getISTDateKey(new Date());
          const todaysOrders = orders.filter((order) => {
+            if (!shouldCountOrderInToday(order)) return false;
             const effectiveDate = order?.convertedFromAbandonedCheckout && order?.convertedAt
                ? order.convertedAt
                : order?.createdAt;
