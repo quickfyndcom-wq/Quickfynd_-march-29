@@ -1,0 +1,11 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="coinGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FFD54F"/>
+      <stop offset="100%" stop-color="#FFB300"/>
+    </linearGradient>
+  </defs>
+  <circle cx="32" cy="32" r="28" fill="url(#coinGrad)" stroke="#F59E0B" stroke-width="4"/>
+  <circle cx="32" cy="32" r="18" fill="#FFE082" stroke="#F59E0B" stroke-width="3"/>
+  <path d="M32 20L35.2 26.8L42.7 27.6L37 32.5L38.7 40L32 36.2L25.3 40L27 32.5L21.3 27.6L28.8 26.8L32 20Z" fill="#F59E0B"/>
+</svg>

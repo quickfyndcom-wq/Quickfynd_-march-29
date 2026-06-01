@@ -1,0 +1,271 @@
+'use client'
+
+import { useDispatch, useSelector } from 'react-redux'
+import { useEffect, useRef, useState } from 'react'
+import axios from 'axios'
+import Image from 'next/image'
+import Link from 'next/link'
+import { FaStar } from 'react-icons/fa'
+import { ShoppingCartIcon } from 'lucide-react'
+import { addToCart, uploadCart } from '@/lib/features/cart/cartSlice'
+import { useAuth } from '@/lib/useAuth'
+
+import toast from 'react-hot-toast'
+import Title from './Title'
+
+// Helper to get product image
+const getImageSrc = (product, index = 0) => {
+  if (product.images && Array.isArray(product.images) && product.images.length > index) {
+    if (product.images[index]?.url) return product.images[index].url
+    if (product.images[index]?.src) return product.images[index].src
+    if (typeof product.images[index] === 'string') return product.images[index]
+  }
+  return 'https://ik.imagekit.io/jrstupuke/placeholder.png'
+}
+
+const isVideoUrl = (url) => {
+  if (!url || typeof url !== 'string') return false
+  return /\.(mp4|webm|ogg|mov|m4v)(\?|#|$)/i.test(url)
+}
+
+// Product Card Component
+const ProductCard = ({ product }) => {
+  const [hovered, setHovered] = useState(false)
+  const videoRef = useRef(null)
+  const dispatch = useDispatch()
+  const { getToken } = useAuth()
+  const cartItems = useSelector(state => state.cart.cartItems)
+  const itemQuantity = cartItems[product._id] || 0
+
+  const primaryImage = getImageSrc(product, 0)
+  const secondaryImage = getImageSrc(product, 1)
+  const primaryIsVideo = isVideoUrl(primaryImage)
+  
+  // Only has secondary if it exists, is not placeholder, and is different from primary
+  const hasSecondary = secondaryImage !== 'https://ik.imagekit.io/jrstupuke/placeholder.png' && 
+                       secondaryImage !== primaryImage &&
+                       product.images?.length > 1
+  const enableHoverMedia = hasSecondary || primaryIsVideo
+
+  useEffect(() => {
+    if (!primaryIsVideo || !videoRef.current) return
+    if (hovered) {
+      videoRef.current.play().catch(() => {})
+    } else {
+      videoRef.current.pause()
+      videoRef.current.currentTime = 0
+    }
+  }, [hovered, primaryIsVideo])
+  
+  const discount =
+    product.mrp && product.mrp > product.price
+      ? Math.round(((product.mrp - product.price) / product.mrp) * 100)
+      : 0
+  const isOutOfStock = product.inStock === false || (typeof product.stockQuantity === 'number' && product.stockQuantity <= 0)
+  // Support both array and number for rating
+  // Use backend response fields
+  const ratingValue = Math.round(product.averageRating || 0);
+  const reviewCount = product.ratingCount || 0;
+
+  // Split price into integer and decimal
+  const [intPrice, decPrice] = (product.price?.toFixed(2) || '0.00').split('.')
+  const [intOrig, decOrig] = product.mrp?.toFixed(2).split('.') || ['0', '00']
+
+  const productName = product.name || product.title || 'Untitled Product'
+
+  const handleAddToCart = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (isOutOfStock) {
+      toast.error('Out of stock')
+      return
+    }
+    dispatch(addToCart({ productId: product._id }))
+    dispatch(uploadCart({ getToken }))
+    toast.success('Added to cart')
+  }
+
+  return (
+    <Link
+      href={`/product/${product.slug || product.id || ''}`}
+      className={`group bg-white rounded-2xl border border-gray-200 shadow-sm ${hasSecondary ? 'hover:shadow-lg' : ''} transition-all duration-300 flex flex-col w-full h-full relative`}
+      onMouseEnter={enableHoverMedia ? () => setHovered(true) : null}
+      onMouseLeave={enableHoverMedia ? () => setHovered(false) : null}
+    >
+      {/* Image Container */}
+      <div className="relative w-full h-56 overflow-hidden bg-gray-50" style={{ borderRadius: '10px 10px 0 0' }}>
+        {product.fastDelivery && (
+          <span className="absolute top-2 left-2 text-white text-xs font-bold px-2 py-1 rounded-full shadow-md z-10" style={{ backgroundColor: '#006644' }}>
+            Fast Delivery
+          </span>
+        )}
+        {primaryIsVideo ? (
+          <video
+            ref={videoRef}
+            src={primaryImage}
+            className="w-full h-full object-cover"
+            muted
+            loop
+            playsInline
+            preload="metadata"
+            disablePictureInPicture
+            controlsList="nodownload noplaybackrate noremoteplayback"
+            onContextMenu={(e) => e.preventDefault()}
+            onVolumeChange={(e) => {
+              if (!e.currentTarget.muted || e.currentTarget.volume !== 0) {
+                e.currentTarget.muted = true
+                e.currentTarget.volume = 0
+              }
+            }}
+          />
+        ) : (
+          <Image
+            src={primaryImage}
+            alt={productName}
+            fill
+            unoptimized
+            style={{ objectFit: 'cover' }}
+            className={`w-full h-full object-cover ${hasSecondary ? 'transition-opacity duration-500' : ''} ${
+              hasSecondary && hovered ? 'opacity-0' : 'opacity-100'
+            }`}
+            sizes="(max-width: 768px) 100vw, (max-width: 1300px) 50vw, 25vw"
+            priority
+            onError={(e) => { e.currentTarget.src = 'https://ik.imagekit.io/jrstupuke/placeholder.png' }}
+          />
+        )}
+
+        {hasSecondary && (
+          <Image
+            src={secondaryImage}
+            alt={productName}
+            fill
+            unoptimized
+            style={{ objectFit: 'cover' }}
+            className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-500 ${
+              hovered ? 'opacity-100' : 'opacity-0'
+            }`}
+            sizes="(max-width: 768px) 100vw, (max-width: 1300px) 50vw, 25vw"
+            priority
+            onError={(e) => { e.currentTarget.src = 'https://ik.imagekit.io/jrstupuke/placeholder.png' }}
+          />
+        )}
+      </div>
+
+      {/* Product Info */}
+      <div className="mt-2 flex flex-col flex-grow justify-between p-3">
+        {/* Title + Rating */}
+        <div>
+          <h3 className="text-sm font-medium text-gray-800 line-clamp-2 leading-snug">
+            {productName}
+          </h3>
+          <div className="flex items-center mt-1">
+            <div className="flex items-center min-w-0">
+              {[...Array(5)].map((_, i) => (
+                <FaStar
+                  key={i}
+                  size={12}
+                  className={i < ratingValue ? 'text-yellow-400' : 'text-gray-300'}
+                />
+              ))}
+              <span className="text-gray-500 text-xs ml-1 truncate">({reviewCount > 0 ? reviewCount : 0})</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Price + Discount Badge */}
+        <div className="mt-2 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            {/* Current Price */}
+            <p className="text-black font-bold text-base flex items-baseline">
+              <span className="mr-1">₹</span>
+              <span>{intPrice}</span>
+              <span className="text-xs align-top ml-0.5">.{decPrice}</span>
+            </p>
+
+            {/* Original Price */}
+            {product.mrp && product.mrp > product.price && (
+              <div className="flex items-center gap-1.5">
+                <p className="text-gray-400 text-xs line-through flex items-baseline">
+                  <span className="mr-0.5">₹</span>
+                  <span>{intOrig}</span>
+                  <span className="text-[10px] align-top ml-0.5">.{decOrig}</span>
+                </p>
+                {discount > 0 && (
+                  <span className="text-[10px] sm:text-xs font-semibold text-green-600">
+                    {discount}% off
+                  </span>
+                )}
+              </div>
+            )}
+
+          </div>
+        </div>
+      </div>
+
+      {/* Cart / Out of stock indicator - Bottom Right */}
+      {isOutOfStock ? (
+        <div className="absolute bottom-4 right-4 px-3 py-1.5 rounded-full bg-gray-200 text-gray-600 text-xs font-semibold z-10">
+          Out of Stock
+        </div>
+      ) : (
+        <button 
+          onClick={handleAddToCart}
+          className='absolute bottom-4 right-4 w-10 h-10 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 cursor-pointer z-10'
+          style={{ backgroundColor: itemQuantity > 0 ? '#262626' : '#DC013C' }}
+          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = itemQuantity > 0 ? '#1a1a1a' : '#b8012f'}
+          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = itemQuantity > 0 ? '#262626' : '#DC013C'}
+        >
+          <ShoppingCartIcon className='text-white' size={18} />
+          {itemQuantity > 0 && (
+            <span className='absolute -top-1 -right-1 text-white text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center shadow-md' style={{ backgroundColor: '#DC013C' }}>
+              {itemQuantity}
+            </span>
+          )}
+        </button>
+      )}
+    </Link>
+  )
+}
+
+// BestSelling Component
+const BestSelling = () => {
+  const displayQuantity = 16
+  const products = useSelector((state) => state.product.list || [])
+  const [curated, setCurated] = useState([])
+
+  // useEffect(() => {
+  //   const load = async () => {
+  //     try {
+  //       const { data } = await axios.get('/api/home-selection?section=limited_offers')
+  //       if (Array.isArray(data.products)) setCurated(data.products)
+  //     } catch (e) {
+  //     }
+  //   }
+  //   load()
+  // }, [])
+
+  const baseSorted = products
+    .slice()
+    .sort((a, b) => (b.rating?.length || b.ratingCount || 0) - (a.rating?.length || a.ratingCount || 0))
+    .slice(0, displayQuantity)
+
+  const shown = (curated.length ? curated : baseSorted).slice(0, displayQuantity)
+
+  return (
+    <div className="px-4 my-16 max-w-[1450px] w-full mx-auto">
+      <Title
+        title="Fast Selling Products"
+        description="Grab the best deals before they're gone!"
+        visibleButton={false}
+      />
+
+      <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-3 md:gap-6">
+        {shown.map((product) => (
+          <ProductCard key={product._id} product={product} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export default BestSelling

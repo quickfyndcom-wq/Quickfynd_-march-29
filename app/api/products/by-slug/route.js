@@ -1,0 +1,28 @@
+import dbConnect from "@/lib/mongodb";
+import Product from "@/models/Product";
+import { NextResponse } from "next/server";
+
+export async function GET(request) {
+    await dbConnect();
+    const { searchParams } = new URL(request.url);
+    const slug = searchParams.get("slug");
+    if (!slug) {
+        return NextResponse.json({ error: "Missing slug" }, { status: 400 });
+    }
+    // Only select needed fields for performance
+    const selectFields = 'name slug description shortDescription metaTitle metaDescription seoKeywords mrp price images category categories tags sku inStock stockQuantity hasVariants variants attributes hasBulkPricing bulkPricing fastDelivery fashionLayoutEnabled allowReturn allowReplacement sizeEnabled sizes sizeChartMode sizeChartEnabled sizeChartName sizeChartUrl sizeChartTable mobileSpecsEnabled mobileSpecs storeId imageAspectRatio createdAt updatedAt';
+    let product = await Product.findOne({ slug })
+        .select(selectFields)
+        .lean();
+
+    // Fallback: support product id in slug param for old links/data
+    if (!product && /^[a-fA-F0-9]{24}$/.test(slug)) {
+        product = await Product.findById(slug)
+            .select(selectFields)
+            .lean();
+    }
+    if (!product) {
+        return NextResponse.json({ error: "Product not found" }, { status: 404 });
+    }
+    return NextResponse.json({ product });
+}

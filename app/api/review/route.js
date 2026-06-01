@@ -1,0 +1,203 @@
+import imagekit from "@/configs/imageKit";
+import connectDB from '@/lib/mongodb';
+import Rating from '@/models/Rating';
+import Order from '@/models/Order';
+import User from '@/models/User';
+
+const IMAGEKIT_ENDPOINT = (process.env.IMAGEKIT_URL_ENDPOINT || process.env.NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT || 'https://ik.imagekit.io/jrstupuke').replace(/\/+$/, '');
+
+const normalizeImageUrl = (value) => {
+    if (typeof value !== 'string') return '';
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+
+    if (trimmed.startsWith('//')) return `https:${trimmed}`;
+    if (trimmed.startsWith('http://')) return `https://${trimmed.slice(7)}`;
+    if (trimmed.startsWith('https://')) return trimmed;
+
+    if (trimmed.startsWith('/')) {
+        return `${IMAGEKIT_ENDPOINT}${trimmed}`;
+    }
+
+    if (/^[a-zA-Z0-9._/-]+$/.test(trimmed) && (trimmed.includes('reviews/') || trimmed.includes('products/') || trimmed.includes('profile-images/'))) {
+        const safePath = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+        return `${IMAGEKIT_ENDPOINT}${safePath}`;
+    }
+
+    return trimmed;
+};
+
+const resolveImageUrl = (image) => {
+    if (typeof image === 'string') {
+        const normalized = normalizeImageUrl(image);
+        if (normalized) return normalized;
+    }
+
+    if (image && typeof image === 'object') {
+        const candidates = [image.url, image.src, image.thumbnailUrl, image.filePath, image.path];
+        for (const candidate of candidates) {
+            const normalized = normalizeImageUrl(candidate);
+            if (normalized) return normalized;
+        }
+    }
+
+    return 'https://ik.imagekit.io/jrstupuke/placeholder.png';
+};
+
+
+// POST: Customer adds a review with images
+export async function POST(request) {
+    try {
+        await connectDB();
+        
+        // Firebase Auth
+        const authHeader = request.headers.get('authorization');
+        let userId = null;
+        if (authHeader && authHeader.startsWith('Bearer ')) {
+            const idToken = authHeader.split('Bearer ')[1];
+            const { getAuth } = await import('firebase-admin/auth');
+            const { initializeApp, applicationDefault, getApps } = await import('firebase-admin/app');
+            if (getApps().length === 0) {
+                initializeApp({ credential: applicationDefault() });
+            }
+            try {
+                const decodedToken = await getAuth().verifyIdToken(idToken);
+                userId = decodedToken.uid;
+            } catch (e) {
+                userId = null;
+            }
+        }
+
+        if (!userId) {
+            return Response.json({ error: "Unauthorized" }, { status: 401 });
+        }
+
+        const formData = await request.formData();
+        const productId = formData.get('productId');
+        const rating = Number(formData.get('rating'));
+        const review = formData.get('review');
+        const images = formData.getAll('images');
+        const videos = formData.getAll('videos');
+
+        if (!productId || !rating || !review) {
+            return Response.json({ error: "Missing required fields" }, { status: 400 });
+        }
+
+        // Check if customer has purchased this product
+        const purchasedOrder = await Order.findOne({
+            userId,
+            'orderItems.productId': productId,
+            status: { $in: ['DELIVERED', 'SHIPPED', 'ORDER_PLACED'] }
+        }).select('_id').lean();
+
+        if (!purchasedOrder) {
+            return Response.json({ 
+                error: "You can only review products you have purchased" 
+            }, { status: 403 });
+        }
+
+        // Upload images to ImageKit
+        let imageUrls = [];
+        if (images.length > 0) {
+            imageUrls = await Promise.all(
+                images.map(async (image) => {
+                    const buffer = Buffer.from(await image.arrayBuffer());
+                    const response = await imagekit.upload({
+                        file: buffer,
+                        fileName: `review_${Date.now()}_${image.name}`,
+                        folder: "reviews"
+                    });
+                    return imagekit.url({
+                        path: response.filePath,
+                        transformation: [
+                            { quality: "auto" },
+                            { format: "webp" },
+                            { width: "600" }
+                        ]
+                    });
+                })
+            );
+        }
+
+        // Create or update review and publish it immediately.
+        const newReview = await Rating.findOneAndUpdate(
+            { userId, productId },
+            {
+                rating,
+                review,
+                images: imageUrls,
+                orderId: purchasedOrder._id.toString(),
+                approved: true
+            },
+            { upsert: true, new: true }
+        );
+
+        // Populate user
+        const user = await User.findById(userId).select('_id name image').lean();
+
+        return Response.json({
+            success: true,
+            message: "Review submitted successfully",
+            review: { ...newReview.toObject(), user }
+        });
+
+    } catch (error) {
+        console.error('Review submission error:', error);
+        return Response.json({
+            error: error.message || "Failed to submit review"
+        }, { status: 500 });
+    }
+}
+
+// GET: Fetch reviews for a product
+export async function GET(request) {
+    try {
+        await connectDB();
+        
+        const { searchParams } = new URL(request.url);
+        const productId = searchParams.get('productId');
+
+        if (!productId) {
+            return Response.json({ error: "Product ID required" }, { status: 400 });
+        }
+
+        // Only show approved reviews to customers
+        const reviews = await Rating.find({ 
+            productId,
+            approved: true 
+        })
+        .sort({ createdAt: -1 })
+        .lean();
+
+        // Enrich reviews with user data
+        const enrichedReviews = await Promise.all(
+            reviews.map(async (review) => {
+                let userData = null;
+                // Try to populate if userId is a valid ObjectId
+                if (typeof review.userId === 'string' && review.userId.match(/^[a-fA-F0-9]{24}$/)) {
+                    userData = await User.findById(review.userId).select('_id name image email').lean();
+                }
+                // If no userData found, use customerName from review
+                return {
+                    ...review,
+                    images: Array.isArray(review.images)
+                        ? review.images.map(resolveImageUrl).filter(Boolean)
+                        : [],
+                    user: userData || { 
+                        name: review.customerName || 'Guest', 
+                        email: review.customerEmail,
+                        image: '/placeholder-avatar.png'
+                    }
+                };
+            })
+        );
+
+        return Response.json({ reviews: enrichedReviews });
+
+    } catch (error) {
+        console.error('Fetch reviews error:', error);
+        return Response.json({
+            error: error.message || "Failed to fetch reviews"
+        }, { status: 500 });
+    }
+}

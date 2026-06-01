@@ -1,0 +1,840 @@
+{
+  "baseUrl": "https://quickfynd.com",
+  "notes": "All endpoints are under /api and return JSON.",
+  "auth": {
+    "type": "Firebase ID token",
+    "header": "Authorization: Bearer <token>"
+  },
+  "lastUpdated": "2026-02-02",
+  "endpoints": [
+    {
+      "path": "/api/categories",
+      "methods": [
+        {
+          "method": "GET",
+          "description": "List all product categories with optional parent filtering.",
+          "auth": "None",
+          "queryParams": {
+            "parentId": "string (optional, filter by parent category)",
+            "limit": "number (optional, default 50)",
+            "offset": "number (optional, default 0)"
+          },
+          "response": {
+            "categories": "array",
+            "total": "number"
+          }
+        },
+        {
+          "method": "POST",
+          "description": "Create a new category (admin/store use).",
+          "auth": "Required",
+          "body": {
+            "name": "string (required)",
+            "slug": "string (optional, auto-generated if missing)",
+            "description": "string (optional)",
+            "image": "string (optional, image URL)",
+            "parentId": "string (optional, parent category ID for subcategories)"
+          },
+          "response": {
+            "category": "object"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/categories/{id}",
+      "methods": [
+        {
+          "method": "GET",
+          "description": "Get a single category by ID with details and subcategories.",
+          "auth": "None",
+          "pathParams": {
+            "id": "string (category ID)"
+          },
+          "response": {
+            "category": "object",
+            "subcategories": "array"
+          }
+        },
+        {
+          "method": "PATCH",
+          "description": "Update category details (admin/store use).",
+          "auth": "Required",
+          "pathParams": {
+            "id": "string (category ID)"
+          },
+          "body": {
+            "name": "string (optional)",
+            "slug": "string (optional)",
+            "description": "string (optional)",
+            "image": "string (optional)",
+            "parentId": "string (optional)"
+          },
+          "response": {
+            "success": "boolean",
+            "category": "object"
+          }
+        },
+        {
+          "method": "DELETE",
+          "description": "Delete a category (admin/store use).",
+          "auth": "Required",
+          "pathParams": {
+            "id": "string (category ID)"
+          },
+          "response": {
+            "success": "boolean",
+            "message": "string"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/categories/by-slug/{slug}",
+      "methods": [
+        {
+          "method": "GET",
+          "description": "Get a category by slug.",
+          "auth": "None",
+          "pathParams": {
+            "slug": "string (category slug)"
+          },
+          "response": {
+            "category": "object"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/products",
+      "methods": [
+        {
+          "method": "GET",
+          "description": "List in-stock products with optional filters.",
+          "queryParams": {
+            "sortBy": "string (optional)",
+            "limit": "number (optional, default 50)",
+            "offset": "number (optional, default 0)",
+            "fastDelivery": "boolean string (optional: 'true'|'false')"
+          },
+          "response": {
+            "products": "array"
+          }
+        },
+        {
+          "method": "POST",
+          "description": "Create a product (admin/store use).",
+          "body": {
+            "name": "string",
+            "description": "string",
+            "shortDescription": "string",
+            "mrp": "number",
+            "price": "number",
+            "images": "array",
+            "category": "string",
+            "sku": "string",
+            "inStock": "boolean",
+            "hasVariants": "boolean",
+            "variants": "array",
+            "attributes": "array",
+            "hasBulkPricing": "boolean",
+            "bulkPricing": "array",
+            "fastDelivery": "boolean",
+            "allowReturn": "boolean",
+            "allowReplacement": "boolean",
+            "storeId": "string",
+            "slug": "string (optional, auto-generated if missing)",
+            "imageAspectRatio": "string (optional, default '1:1')"
+          },
+          "response": {
+            "product": "object"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/products/by-slug",
+      "methods": [
+        {
+          "method": "GET",
+          "description": "Get a product by slug.",
+          "queryParams": {
+            "slug": "string (required)"
+          },
+          "response": {
+            "product": "object"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/products/top-rated",
+      "methods": [
+        {
+          "method": "GET",
+          "description": "Get top-rated products based on approved reviews.",
+          "queryParams": {
+            "threshold": "number (optional, default 4)",
+            "minReviews": "number (optional, default 1)",
+            "limit": "number (optional, default 50)",
+            "storeId": "string (optional)"
+          },
+          "response": {
+            "products": "array"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/products/batch",
+      "methods": [
+        {
+          "method": "POST",
+          "description": "Fetch multiple products by IDs.",
+          "body": {
+            "productIds": "array of product ID strings"
+          },
+          "response": {
+            "products": "array"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/products/{id}/fbt",
+      "methods": [
+        {
+          "method": "GET",
+          "description": "Get frequently bought together products for a product ID.",
+          "pathParams": {
+            "id": "string (product ID)"
+          },
+          "response": {
+            "enableFBT": "boolean",
+            "products": "array",
+            "bundlePrice": "number",
+            "bundleDiscount": "number"
+          }
+        },
+        {
+          "method": "PATCH",
+          "description": "Update FBT configuration for a product ID.",
+          "pathParams": {
+            "id": "string (product ID)"
+          },
+          "body": {
+            "enableFBT": "boolean",
+            "fbtProductIds": "array",
+            "fbtBundlePrice": "number",
+            "fbtBundleDiscount": "number"
+          },
+          "response": {
+            "success": "boolean",
+            "product": "object"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/orders",
+      "methods": [
+        {
+          "method": "POST",
+          "description": "Create an order (guest or logged-in).",
+          "auth": "Optional (required for non-guest orders)",
+          "body": {
+            "addressId": "string (optional)",
+            "addressData": "object (optional)",
+            "items": "array",
+            "couponCode": "string (optional)",
+            "paymentMethod": "COD|STRIPE",
+            "isGuest": "boolean",
+            "guestInfo": "object (required if isGuest)",
+            "coinsToRedeem": "number (optional)",
+            "shippingFee": "number (optional)"
+          },
+          "response": {
+            "order": "object (or orders array for guest)",
+            "orderId": "string"
+          }
+        },
+        {
+          "method": "GET",
+          "description": "Get order list for logged-in user or a single order by orderId.",
+          "auth": "Required for list; optional if orderId is provided",
+          "queryParams": {
+            "orderId": "string (optional)",
+            "limit": "number (optional, default 20)",
+            "offset": "number (optional, default 0)"
+          },
+          "response": {
+            "orders": "array (list)",
+            "order": "object (when orderId is provided)"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/orders/return-request",
+      "methods": [
+        {
+          "method": "POST",
+          "description": "Create a return/replacement request for a delivered order.",
+          "auth": "Required",
+          "body": {
+            "orderId": "string",
+            "itemIndex": "number",
+            "reason": "string",
+            "type": "RETURN|REPLACEMENT",
+            "description": "string (optional)",
+            "images": "array (optional)"
+          },
+          "response": {
+            "success": "boolean",
+            "returns": "array"
+          }
+        },
+        {
+          "method": "GET",
+          "description": "Get all return requests for the logged-in user.",
+          "auth": "Required",
+          "response": {
+            "success": "boolean",
+            "returns": "array"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/store/orders",
+      "methods": [
+        {
+          "method": "GET",
+          "description": "Get all orders for a seller store.",
+          "auth": "Required",
+          "queryParams": {
+            "withDelhivery": "boolean string (optional, default true)"
+          },
+          "response": {
+            "orders": "array"
+          }
+        },
+        {
+          "method": "POST",
+          "description": "Update order status (seller).",
+          "auth": "Required",
+          "body": {
+            "orderId": "string",
+            "status": "string"
+          },
+          "response": {
+            "message": "string"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/store/orders/{orderId}",
+      "methods": [
+        {
+          "method": "PUT",
+          "description": "Update order status/tracking for a store order.",
+          "auth": "Required",
+          "pathParams": {
+            "orderId": "string"
+          },
+          "body": {
+            "status": "string (optional)",
+            "trackingId": "string (optional)",
+            "trackingUrl": "string (optional)",
+            "courier": "string (optional)"
+          },
+          "response": {
+            "success": "boolean",
+            "order": "object"
+          }
+        },
+        {
+          "method": "DELETE",
+          "description": "Delete an order (seller).",
+          "auth": "Required",
+          "pathParams": {
+            "orderId": "string"
+          },
+          "response": {
+            "success": "boolean"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/store/orders/update-status",
+      "methods": [
+        {
+          "method": "POST",
+          "description": "Update order status and send notifications.",
+          "auth": "Required",
+          "body": {
+            "orderId": "string",
+            "status": "string"
+          },
+          "response": {
+            "success": "boolean",
+            "message": "string"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/store/featured-products",
+      "methods": [
+        {
+          "method": "GET",
+          "description": "Get featured product IDs (optionally include full product data).",
+          "auth": "None",
+          "queryParams": {
+            "includeProducts": "boolean string (optional: 'true'|'false')",
+            "limit": "number (optional, default 0 = no limit)"
+          },
+          "response": {
+            "productIds": "array",
+            "products": "array (only when includeProducts=true)"
+          }
+        },
+        {
+          "method": "POST",
+          "description": "Save featured product IDs for a store (seller/admin).",
+          "auth": "Required",
+          "body": {
+            "productIds": "array"
+          },
+          "response": {
+            "message": "string",
+            "productIds": "array"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/store/deals",
+      "methods": [
+        {
+          "method": "GET",
+          "description": "Get all time-based deals for the seller's store.",
+          "auth": "Required",
+          "queryParams": {
+            "includeProducts": "boolean string (optional: 'true'|'false')"
+          },
+          "response": {
+            "deals": "array"
+          }
+        },
+        {
+          "method": "POST",
+          "description": "Create a new time-based deal.",
+          "auth": "Required",
+          "body": {
+            "title": "string (required)",
+            "productIds": "array (required)",
+            "startTime": "ISO datetime string (required)",
+            "endTime": "ISO datetime string (required)",
+            "priority": "number (optional, default 0)"
+          },
+          "response": {
+            "success": "boolean",
+            "deal": "object"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/store/deals/{dealId}",
+      "methods": [
+        {
+          "method": "GET",
+          "description": "Get a single deal by ID.",
+          "auth": "Required",
+          "pathParams": {
+            "dealId": "string"
+          },
+          "response": {
+            "deal": "object"
+          }
+        },
+        {
+          "method": "PATCH",
+          "description": "Update a deal.",
+          "auth": "Required",
+          "pathParams": {
+            "dealId": "string"
+          },
+          "body": {
+            "title": "string (optional)",
+            "productIds": "array (optional)",
+            "startTime": "ISO datetime string (optional)",
+            "endTime": "ISO datetime string (optional)",
+            "isActive": "boolean (optional)",
+            "priority": "number (optional)"
+          },
+          "response": {
+            "success": "boolean",
+            "deal": "object"
+          }
+        },
+        {
+          "method": "DELETE",
+          "description": "Delete a deal.",
+          "auth": "Required",
+          "pathParams": {
+            "dealId": "string"
+          },
+          "response": {
+            "success": "boolean",
+            "message": "string"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/deals",
+      "methods": [
+        {
+          "method": "GET",
+          "description": "Get active deals (public API for customers/mobile app).",
+          "auth": "None",
+          "queryParams": {
+            "storeId": "string (optional)",
+            "includeProducts": "boolean string (optional: 'true'|'false')",
+            "limit": "number (optional, default 10)"
+          },
+          "response": {
+            "deals": "array (with products and timeRemaining if includeProducts=true)",
+            "count": "number"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/store/customers",
+      "methods": [
+        {
+          "method": "GET",
+          "description": "Get all customers for a store with order stats.",
+          "auth": "Required",
+          "response": {
+            "customers": "array"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/store/customers/{customerId}",
+      "methods": [
+        {
+          "method": "GET",
+          "description": "Get a single customer details and order history.",
+          "auth": "Required",
+          "pathParams": {
+            "customerId": "string"
+          },
+          "response": {
+            "customer": "object"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/store/registered-customers",
+      "methods": [
+        {
+          "method": "GET",
+          "description": "Get registered customers with stats and filter.",
+          "auth": "Required",
+          "queryParams": {
+            "filter": "all|today|week|month (optional)"
+          },
+          "response": {
+            "customers": "array",
+            "stats": "object"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/store/customers/wallet",
+      "methods": [
+        {
+          "method": "POST",
+          "description": "Add wallet coins for a customer (seller/admin).",
+          "auth": "Required",
+          "body": {
+            "userId": "string",
+            "amount": "number"
+          },
+          "response": {
+            "message": "string",
+            "walletBalance": "number"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/store/customers/wallet/deduct",
+      "methods": [
+        {
+          "method": "POST",
+          "description": "Deduct wallet coins for a customer (seller/admin).",
+          "auth": "Required",
+          "body": {
+            "userId": "string",
+            "amount": "number"
+          },
+          "response": {
+            "message": "string",
+            "walletBalance": "number"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/store/dashboard",
+      "methods": [
+        {
+          "method": "GET",
+          "description": "Get seller dashboard summary (orders, earnings, customers, products).",
+          "auth": "Required",
+          "response": {
+            "dashboardData": "object"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/store/data",
+      "methods": [
+        {
+          "method": "GET",
+          "description": "Get store info and products by username.",
+          "auth": "None",
+          "queryParams": {
+            "username": "string (required)"
+          },
+          "response": {
+            "store": "object"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/store/return-requests",
+      "methods": [
+        {
+          "method": "GET",
+          "description": "Get store return/replacement requests.",
+          "auth": "Required",
+          "response": {
+            "requests": "array"
+          }
+        },
+        {
+          "method": "POST",
+          "description": "Approve or reject a return request.",
+          "auth": "Required",
+          "body": {
+            "orderId": "string",
+            "returnIndex": "number",
+            "action": "APPROVE|REJECT",
+            "rejectionReason": "string (required if REJECT)"
+          },
+          "response": {
+            "success": "boolean",
+            "message": "string"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/store/return-requests/{id}",
+      "methods": [
+        {
+          "method": "PUT",
+          "description": "Update return/replacement request status.",
+          "auth": "Required",
+          "pathParams": {
+            "id": "string"
+          },
+          "body": {
+            "status": "string"
+          },
+          "response": {
+            "message": "string",
+            "request": "object"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/tickets",
+      "methods": [
+        {
+          "method": "GET",
+          "description": "Get tickets for the logged-in user.",
+          "auth": "Required",
+          "response": {
+            "success": "boolean",
+            "tickets": "array"
+          }
+        },
+        {
+          "method": "POST",
+          "description": "Create a new support ticket.",
+          "auth": "Required",
+          "body": {
+            "subject": "string",
+            "category": "string",
+            "description": "string",
+            "priority": "string (optional)"
+          },
+          "response": {
+            "success": "boolean",
+            "ticket": "object"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/tickets/{ticketId}",
+      "methods": [
+        {
+          "method": "GET",
+          "description": "Get a single ticket for the logged-in user.",
+          "auth": "Required",
+          "pathParams": {
+            "ticketId": "string"
+          },
+          "response": {
+            "ticket": "object"
+          }
+        },
+        {
+          "method": "POST",
+          "description": "Add a reply to a user ticket.",
+          "auth": "Required",
+          "pathParams": {
+            "ticketId": "string"
+          },
+          "body": {
+            "message": "string"
+          },
+          "response": {
+            "success": "boolean",
+            "ticket": "object"
+          }
+        },
+        {
+          "method": "PATCH",
+          "description": "Update user ticket status.",
+          "auth": "Required",
+          "pathParams": {
+            "ticketId": "string"
+          },
+          "body": {
+            "status": "string"
+          },
+          "response": {
+            "success": "boolean",
+            "ticket": "object"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/store/tickets",
+      "methods": [
+        {
+          "method": "GET",
+          "description": "Get all tickets (admin/seller view).",
+          "auth": "Required",
+          "response": {
+            "success": "boolean",
+            "tickets": "array"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/store/tickets/{ticketId}",
+      "methods": [
+        {
+          "method": "GET",
+          "description": "Get a single ticket (admin view).",
+          "auth": "Required",
+          "pathParams": {
+            "ticketId": "string"
+          },
+          "response": {
+            "ticket": "object"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/store/tickets/{ticketId}/reply",
+      "methods": [
+        {
+          "method": "POST",
+          "description": "Reply to a ticket as admin/support.",
+          "auth": "Required",
+          "pathParams": {
+            "ticketId": "string"
+          },
+          "body": {
+            "message": "string"
+          },
+          "response": {
+            "success": "boolean",
+            "ticket": "object"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/store/tickets/{ticketId}/status",
+      "methods": [
+        {
+          "method": "PATCH",
+          "description": "Update ticket status as admin/support.",
+          "auth": "Required",
+          "pathParams": {
+            "ticketId": "string"
+          },
+          "body": {
+            "status": "open|in-progress|resolved|closed"
+          },
+          "response": {
+            "success": "boolean",
+            "ticket": "object"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/api/chatbot",
+      "methods": [
+        {
+          "method": "POST",
+          "description": "Chatbot assistant for shopping/support queries.",
+          "auth": "None",
+          "body": {
+            "message": "string",
+            "conversationHistory": "array (optional)"
+          },
+          "response": {
+            "message": "string",
+            "timestamp": "string"
+          }
+        }
+      ]
+    }
+  ]
+}

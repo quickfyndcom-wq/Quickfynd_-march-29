@@ -1,0 +1,152 @@
+import mongoose from "mongoose";
+
+const OrderItemSchema = new mongoose.Schema({
+  productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+  name: String,
+  image: String,
+  productImage: String,
+  price: Number,
+  quantity: Number,
+  variantOptions: { type: Object, default: null },
+  // Add more fields as needed
+}, { _id: false });
+
+const RazorpaySettlementSchema = new mongoose.Schema({
+  paymentId: String,                    // Razorpay payment ID
+  status: String,                       // TRANSFERRED, PENDING, FAILED
+  captured_at: Date,                    // When payment was captured
+  amount: Number,                       // Amount paid
+  fee: { type: Number, default: 0 },   // Razorpay processing fee
+  is_transferred: { type: Boolean, default: false }, // Is amount transferred to bank?
+  transferred_at: Date,                 // When transferred to bank account
+  transfer_id: String,                  // Razorpay transfer ID
+  amount_transferred: Number,           // Amount that reached bank
+  recipient_id: String                  // Bank account identifier
+}, { _id: false, timestamps: false });
+
+const OrderSchema = new mongoose.Schema({
+  storeId: { type: String, required: true },
+  userId: String,
+  addressId: String,
+  total: { type: Number, default: 0 },
+  shippingFee: { type: Number, default: 0 },
+  status: { type: String, default: "ORDER_PLACED", index: true },
+  paymentMethod: String,
+  orderSource: { type: String, enum: ['WEB', 'APP'], default: 'WEB', index: true },
+  paymentStatus: String,
+  isPaid: { type: Boolean, default: false },
+  createdByUserId: String,
+  createdByName: String,
+  createdByEmail: String,
+  createdByType: { type: String, default: 'CUSTOMER' },
+  convertedFromAbandonedCheckout: { type: Boolean, default: false },
+  convertedByEmployeeName: String,
+  convertedAt: Date,
+  isCouponUsed: { type: Boolean, default: false },
+  coupon: Object,
+  isGuest: { type: Boolean, default: false },
+  guestName: String,
+  guestEmail: String,
+  guestPhone: String,
+  alternatePhone: String,
+  alternatePhoneCode: String,
+  shippingAddress: Object,
+  trackingId: { type: String, index: true },
+  courier: String,
+  trackingUrl: String,
+  shortOrderNumber: { type: Number, index: true },
+  orderItems: [OrderItemSchema],
+  items: Array,
+  cancelReason: String,
+  cancelledBy: { type: String, enum: ['CUSTOMER', 'SELLER', 'SYSTEM', 'UNDELIVERABLE_PINCODE', 'OTHER'], default: null },
+  returnReason: String,
+  notes: String,
+  inventoryRestock: {
+    cancelled: { type: Boolean, default: false },
+    returned: { type: Boolean, default: false }
+  },
+  coinsRedeemed: { type: Number, default: 0 },
+  walletDiscount: { type: Number, default: 0 },
+  coinsEarned: { type: Number, default: 0 },
+  rewardsCredited: { type: Boolean, default: false },
+  
+  // Razorpay Payment Fields
+  razorpayPaymentId: { type: String, index: true },        // Razorpay payment ID (if card payment)
+  razorpayOrderId: String,                                  // Razorpay order ID
+  razorpaySignature: String,                                // Webhook signature for verification
+  razorpaySettlement: RazorpaySettlementSchema,            // Settlement details
+  paymentLinkId: { type: String, index: true },
+  paymentLinkUrl: String,
+  paymentLinkAmount: Number,
+  paymentLinkCreatedAt: Date,
+  
+  // Return & Replacement
+  returns: [{
+    itemIndex: Number,
+    reason: String,
+    type: { type: String, enum: ['RETURN', 'REPLACEMENT'], default: 'RETURN' },
+    status: { type: String, enum: ['REQUESTED', 'APPROVED', 'REJECTED', 'COMPLETED'], default: 'REQUESTED' },
+    description: String,
+    images: [String],
+    requestedAt: { type: Date, default: Date.now },
+    approvedAt: Date,
+    rejectionReason: String,
+    sellerNotes: String,
+    // Return Shipment Tracking (Customer to Seller)
+    returnTrackingId: String,
+    returnCourier: String,
+    returnTrackingUrl: String,
+    returnShippingLabel: String,
+    returnAddress: {
+      name: String,
+      street: String,
+      city: String,
+      state: String,
+      zip: String,
+      country: String,
+      phone: String
+    },
+    returnShipmentStatus: String,
+    returnDeliveredAt: Date,
+    // Replacement Shipment Tracking (Seller to Customer)
+    replacementTrackingId: String,
+    replacementCourier: String,
+    replacementTrackingUrl: String,
+    replacementShippingLabel: String,
+    replacementShipmentStatus: String,
+    replacementDeliveredAt: Date,
+    replacementEta: String,
+    sellerInspectionNotes: String
+  }],
+  
+  // Top-level tracking fields for easier access
+  returnTrackingId: String,
+  returnTrackingUrl: String,
+  returnCourier: String,
+  replacementTrackingId: String,
+  replacementTrackingUrl: String,
+  replacementCourier: String,
+  
+  // Delivery Review & Feedback
+  deliveryReview: {
+    rating: { type: Number, min: 1, max: 5 },
+    feedback: { type: String, default: '' },
+    agentBehavior: {
+      type: String,
+      enum: ['VERY_POLITE', 'POLITE', 'AVERAGE', 'RUDE'],
+      default: null
+    },
+    packageCondition: {
+      type: String,
+      enum: ['INTACT', 'MINOR_DAMAGE', 'DAMAGED'],
+      default: null
+    },
+    damagePhotoUrl: { type: String, default: '' },
+    submittedAt: Date,
+    reviewed: { type: Boolean, default: false }
+  },
+  
+  // Add more fields as needed
+}, { timestamps: true });
+
+export default mongoose.models.Order || mongoose.model("Order", OrderSchema);

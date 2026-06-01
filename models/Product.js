@@ -1,0 +1,56 @@
+import mongoose from "mongoose";
+
+const ProductSchema = new mongoose.Schema({
+  name: String,
+  slug: { type: String, unique: true },
+  description: String,
+  shortDescription: String,
+  metaTitle: { type: String, default: '' },
+  metaDescription: { type: String, default: '' },
+  seoKeywords: { type: [String], default: [] },
+  mrp: Number,
+  price: Number,
+  costPrice: { type: Number, default: 0 }, // Actual cost/purchase price for profit calculation
+  images: [String],
+  category: { type: String, ref: 'Category' },
+  categories: { type: [String], default: [] }, // Multiple categories support
+  sku: String,
+  inStock: { type: Boolean, default: true },
+  stockQuantity: { type: Number, default: 0 },
+  hasVariants: { type: Boolean, default: false },
+  variants: { type: Array, default: [] },
+  attributes: { type: Object, default: {} },
+  hasBulkPricing: { type: Boolean, default: false },
+  bulkPricing: { type: Array, default: [] },
+  fastDelivery: { type: Boolean, default: false },
+  allowReturn: { type: Boolean, default: true },
+  allowReplacement: { type: Boolean, default: true },
+  fashionLayoutEnabled: { type: Boolean, default: false },
+  sizeEnabled: { type: Boolean, default: false },
+  sizes: { type: [String], default: [] },
+  sizeChartMode: { type: String, default: 'upload' },
+  sizeChartEnabled: { type: Boolean, default: false },
+  sizeChartName: { type: String, default: '' },
+  sizeChartUrl: { type: String, default: '' },
+  sizeChartTable: { type: Object, default: null },
+  mobileSpecsEnabled: { type: Boolean, default: false },
+  mobileSpecs: { type: [{ label: String, value: String }], default: [] },
+  imageAspectRatio: { type: String, default: '1:1' },
+  storeId: String,
+  tags: { type: [String], default: [] },
+  // Frequently Bought Together fields
+  enableFBT: { type: Boolean, default: false },
+  fbtProductIds: { type: [String], default: [] },
+  fbtBundlePrice: { type: Number, default: null },
+  fbtBundleDiscount: { type: Number, default: null },
+}, { timestamps: true });
+
+// Add indexes for better query performance
+ProductSchema.index({ inStock: 1, createdAt: -1 });
+ProductSchema.index({ storeId: 1, inStock: 1 });
+ProductSchema.index({ category: 1, inStock: 1 }); // For category filtering
+ProductSchema.index({ price: 1, mrp: 1 }); // For discount calculations and price sorting
+ProductSchema.index({ tags: 1, inStock: 1 }); // For tag-based filtering
+ProductSchema.index({ fastDelivery: 1, inStock: 1 }); // For fast delivery filter
+
+export default mongoose.models.Product || mongoose.model("Product", ProductSchema);

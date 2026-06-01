@@ -1,0 +1,1475 @@
+
+import { NextResponse } from "next/server";
+import Stripe from "stripe";
+import crypto from 'crypto';
+import connectDB from '@/lib/mongodb';
+import AbandonedCart from '@/models/AbandonedCart';
+import Product from '@/models/Product';
+import User from '@/models/User';
+import Address from '@/models/Address';
+import Store from '@/models/Store';
+import Coupon from '@/models/Coupon';
+import GuestUser from '@/models/GuestUser';
+import Wallet from '@/models/Wallet';
+import PersonalizedOffer from '@/models/PersonalizedOffer';
+import OrderCounter from '@/models/OrderCounter';
+import Order from '@/models/Order';
+import { sendOrderConfirmationEmail, sendGuestAccountCreationEmail } from '@/lib/email';
+import { fetchNormalizedDelhiveryTracking } from '@/lib/delhivery';
+import { fetchSeventeenTrackInfo } from '@/lib/seventeentrack';
+import { fetchNormalizedIndiaPostTracking } from '@/lib/indiaPost';
+import { getDisplayOrderNumber } from '@/lib/orderNumber';
+import { getAuth } from '@/lib/firebase-admin';
+
+const ORDER_NUMBER_SEQUENCE_KEY = 'short_order_number';
+const ORDER_NUMBER_START = 52300;
+
+function getAdminNotificationEmails() {
+    const raw = String(process.env.ADMIN_EMAIL || process.env.NEXT_PUBLIC_ADMIN_EMAIL || '').trim();
+    if (!raw) return [];
+
+    return [...new Set(
+        raw
+            .replace(/["']/g, '')
+            .split(',')
+            .map((email) => email.trim())
+            .filter(Boolean)
+    )];
+}
+
+function hasValidShortOrderNumber(value) {
+    if (value === null || value === undefined) return false;
+    const normalized = String(value).trim();
+    return /^\d{5,6}$/.test(normalized) && Number(normalized) >= ORDER_NUMBER_START;
+}
+
+const PaymentMethod = {
+    COD: 'COD',
+    STRIPE: 'STRIPE',
+    CARD: 'CARD',
+    RAZORPAY: 'RAZORPAY',
+    WALLET: 'WALLET'
+};
+
+async function getNextShortOrderNumber() {
+    // 1) Auto-reset counter if it's on the old range (pre-523xx migration)
+    await OrderCounter.updateOne(
+        { key: ORDER_NUMBER_SEQUENCE_KEY, value: { $gte: 55000 } },
+        { $set: { value: ORDER_NUMBER_START } }
+    );
+
+    // 2) Fast path: increment existing counter atomically.
+    const incremented = await OrderCounter.findOneAndUpdate(
+        { key: ORDER_NUMBER_SEQUENCE_KEY },
+        { $inc: { value: 1 } },
+        { new: true }
+    );
+
+    if (incremented) {
+        return Number(incremented.value);
+    }
+
+    // 2) Initialize sequence only once. If another request initializes first,
+    // fall back to incrementing the newly created document.
+    try {
+        const created = await OrderCounter.create({
+            key: ORDER_NUMBER_SEQUENCE_KEY,
+            value: ORDER_NUMBER_START,
+        });
+        return Number(created.value);
+    } catch (error) {
+        if (error?.code === 11000) {
+            const retried = await OrderCounter.findOneAndUpdate(
+                { key: ORDER_NUMBER_SEQUENCE_KEY },
+                { $inc: { value: 1 } },
+                { new: true }
+            );
+            if (retried) return Number(retried.value);
+        }
+        throw error;
+    }
+}
+
+function normalizeOrderSource(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (!normalized) return null;
+    if (
+        ['app', 'mobile', 'android', 'ios', 'react-native', 'reactnative', 'flutter', 'dart', 'expo'].includes(normalized) ||
+        normalized.includes('app') ||
+        normalized.includes('android') ||
+        normalized.includes('ios') ||
+        normalized.includes('reactnative') ||
+        normalized.includes('react-native') ||
+        normalized.includes('flutter') ||
+        normalized.includes('dart')
+    ) {
+        return 'APP';
+    }
+    if (['web', 'website', 'browser'].includes(normalized) || normalized.includes('web')) return 'WEB';
+    return null;
+}
+
+function isTruthyFlag(value) {
+    if (value === true) return true;
+    if (typeof value === 'number') return value === 1;
+    const normalized = String(value || '').trim().toLowerCase();
+    return ['true', '1', 'yes', 'y'].includes(normalized);
+}
+
+function inferOrderSource(request, body = {}) {
+    const nested = body?.meta && typeof body.meta === 'object' ? body.meta : {};
+
+    const appHint =
+        normalizeOrderSource(body?.appId) ||
+        normalizeOrderSource(body?.clientApp) ||
+        normalizeOrderSource(body?.client) ||
+        normalizeOrderSource(body?.channel) ||
+        normalizeOrderSource(body?.deviceType) ||
+        normalizeOrderSource(body?.device) ||
+        normalizeOrderSource(body?.appName) ||
+        normalizeOrderSource(nested?.appId) ||
+        normalizeOrderSource(nested?.clientApp) ||
+        normalizeOrderSource(nested?.platform);
+
+    if (isTruthyFlag(body?.isApp) || isTruthyFlag(body?.isMobileApp) || isTruthyFlag(nested?.isApp)) return 'APP';
+    if (appHint) return 'APP';
+
+    const explicitSource =
+        normalizeOrderSource(body?.orderSource) ||
+        normalizeOrderSource(body?.source) ||
+        normalizeOrderSource(body?.platform) ||
+        normalizeOrderSource(nested?.orderSource) ||
+        normalizeOrderSource(nested?.source) ||
+        normalizeOrderSource(nested?.platform) ||
+        normalizeOrderSource(request.headers.get('x-order-source')) ||
+        normalizeOrderSource(request.headers.get('x-client-platform')) ||
+        normalizeOrderSource(request.headers.get('x-app-platform')) ||
+        normalizeOrderSource(request.headers.get('x-mobile-platform')) ||
+        normalizeOrderSource(request.headers.get('x-platform')) ||
+        normalizeOrderSource(request.headers.get('x-app-source')) ||
+        normalizeOrderSource(request.headers.get('x-app-id')) ||
+        normalizeOrderSource(request.headers.get('x-device-type')) ||
+        normalizeOrderSource(request.headers.get('x-mobile-app')) ||
+        normalizeOrderSource(request.headers.get('x-client'));
+
+    if (explicitSource) return explicitSource;
+
+    const userAgent = String(request.headers.get('user-agent') || '').toLowerCase();
+    const appSignatures = ['okhttp', 'cfnetwork', 'dalvik', 'reactnative', 'react-native', 'expo', 'flutter', 'dart'];
+    if (appSignatures.some((signature) => userAgent.includes(signature))) {
+        return 'APP';
+    }
+
+    return 'WEB';
+}
+
+function findMatchingVariantIndex(variants = [], variantOptions = {}) {
+    if (!Array.isArray(variants) || variants.length === 0 || !variantOptions) return -1;
+
+    return variants.findIndex((variant) => {
+        const options = variant?.options || {};
+        const colorMatch = variantOptions?.color ? options?.color === variantOptions.color : true;
+        const sizeMatch = variantOptions?.size ? options?.size === variantOptions.size : true;
+
+        if (variantOptions?.bundleQty === null || variantOptions?.bundleQty === undefined) {
+            const optionBundleQty = Number(options?.bundleQty);
+            const isBundleVariant = Number.isFinite(optionBundleQty) && optionBundleQty > 1;
+            return colorMatch && sizeMatch && !isBundleVariant;
+        }
+
+        const bundleMatch = Number(options?.bundleQty || 0) === Number(variantOptions?.bundleQty || 0);
+        return colorMatch && sizeMatch && bundleMatch;
+    });
+}
+
+function buildVariantElemMatch(variantOptions = {}, requiredQty = null) {
+    const elemMatch = {};
+
+    if (variantOptions?.color) {
+        elemMatch['options.color'] = variantOptions.color;
+    }
+
+    if (variantOptions?.size) {
+        elemMatch['options.size'] = variantOptions.size;
+    }
+
+    if (variantOptions?.bundleQty === null || variantOptions?.bundleQty === undefined) {
+        elemMatch.$or = [
+            { 'options.bundleQty': { $exists: false } },
+            { 'options.bundleQty': null },
+            { 'options.bundleQty': { $lte: 1 } },
+        ];
+    } else {
+        elemMatch['options.bundleQty'] = Number(variantOptions.bundleQty);
+    }
+
+    if (Number.isFinite(requiredQty) && requiredQty > 0) {
+        elemMatch.stock = { $gte: requiredQty };
+    }
+
+    return elemMatch;
+}
+
+function hasMeaningfulVariantOptions(variantOptions) {
+    if (!variantOptions || typeof variantOptions !== 'object') return false;
+
+    const hasColor = typeof variantOptions.color === 'string' && variantOptions.color.trim().length > 0;
+    const hasSize = typeof variantOptions.size === 'string' && variantOptions.size.trim().length > 0;
+    const hasBundleQty = variantOptions.bundleQty !== null && variantOptions.bundleQty !== undefined && variantOptions.bundleQty !== '';
+
+    return hasColor || hasSize || hasBundleQty;
+}
+
+function normalizeVariantText(value) {
+    return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function normalizePhoneDigits(value) {
+    return String(value || '').replace(/\D/g, '');
+}
+
+function toCanonicalVariantOptions(options = {}) {
+    if (!options || typeof options !== 'object') return null;
+
+    const canonical = {};
+    if (typeof options?.color === 'string' && options.color.trim()) canonical.color = options.color.trim();
+    if (typeof options?.size === 'string' && options.size.trim()) canonical.size = options.size.trim();
+    if (options?.bundleQty !== null && options?.bundleQty !== undefined && options?.bundleQty !== '') {
+        canonical.bundleQty = Number(options.bundleQty);
+    }
+
+    return hasMeaningfulVariantOptions(canonical) ? canonical : null;
+}
+
+function variantMatchesSelection(variant = {}, selection = {}) {
+    const options = variant?.options || {};
+    const selectedColor = normalizeVariantText(selection?.color);
+    const selectedSize = normalizeVariantText(selection?.size);
+    const variantColor = normalizeVariantText(options?.color);
+    const variantSize = normalizeVariantText(options?.size);
+
+    const colorMatch = selectedColor ? variantColor === selectedColor : true;
+    const sizeMatch = selectedSize ? variantSize === selectedSize : true;
+
+    if (selection?.bundleQty === null || selection?.bundleQty === undefined || selection?.bundleQty === '') {
+        const optionBundleQty = Number(options?.bundleQty);
+        const isBundleVariant = Number.isFinite(optionBundleQty) && optionBundleQty > 1;
+        return colorMatch && sizeMatch && !isBundleVariant;
+    }
+
+    const bundleMatch = Number(options?.bundleQty || 0) === Number(selection?.bundleQty || 0);
+    return colorMatch && sizeMatch && bundleMatch;
+}
+
+async function syncProductStockAggregate(productId) {
+    const latest = await Product.findById(productId).select('variants stockQuantity inStock').lean();
+    if (!latest) return;
+
+    if (Array.isArray(latest.variants) && latest.variants.length > 0) {
+        const totalVariantStock = latest.variants.reduce((sum, variant) => sum + Math.max(0, Number(variant?.stock ?? 0)), 0);
+        const hasStock = totalVariantStock > 0;
+        await Product.findByIdAndUpdate(productId, {
+            $set: {
+                stockQuantity: totalVariantStock,
+                inStock: hasStock,
+            },
+        });
+        return;
+    }
+
+    const hasStock = Number(latest.stockQuantity || 0) > 0;
+    if (latest.inStock !== hasStock) {
+        await Product.findByIdAndUpdate(productId, { $set: { inStock: hasStock } });
+    }
+}
+
+async function rollbackReservedInventory(reservations = []) {
+    for (const reservation of [...reservations].reverse()) {
+        const productId = reservation?.productId;
+        const quantity = Number(reservation?.quantity) || 0;
+        if (!productId || quantity <= 0) continue;
+
+        if (reservation?.variantId) {
+            const updatedById = await Product.findOneAndUpdate(
+                {
+                    _id: productId,
+                    variants: {
+                        $elemMatch: {
+                            _id: reservation.variantId,
+                        },
+                    },
+                },
+                { $inc: { 'variants.$.stock': quantity } },
+                { new: true }
+            );
+
+            if (updatedById) {
+                await syncProductStockAggregate(productId);
+                continue;
+            }
+        }
+
+        if (hasMeaningfulVariantOptions(reservation?.variantOptions)) {
+            const variantElemMatch = buildVariantElemMatch(reservation.variantOptions);
+            await Product.findOneAndUpdate(
+                {
+                    _id: productId,
+                    variants: { $elemMatch: variantElemMatch },
+                },
+                { $inc: { 'variants.$.stock': quantity } },
+                { new: true }
+            );
+            await syncProductStockAggregate(productId);
+            continue;
+        }
+
+        await Product.findByIdAndUpdate(productId, { $inc: { stockQuantity: quantity } });
+        await syncProductStockAggregate(productId);
+    }
+}
+
+async function reserveInventoryForOrderItems(orderItems = []) {
+    const reservations = [];
+
+    for (const item of orderItems) {
+        const productId = item?.productId;
+        const quantity = Number(item?.quantity) || 0;
+        if (!productId || quantity <= 0) continue;
+
+        if (item?.variantId) {
+            const updatedById = await Product.findOneAndUpdate(
+                {
+                    _id: productId,
+                    variants: {
+                        $elemMatch: {
+                            _id: item.variantId,
+                            stock: { $gte: quantity },
+                        },
+                    },
+                },
+                { $inc: { 'variants.$.stock': -quantity } },
+                { new: true }
+            );
+
+            if (updatedById) {
+                reservations.push({ productId, quantity, variantId: item.variantId, variantOptions: item.variantOptions || null });
+                await syncProductStockAggregate(productId);
+                continue;
+            }
+        }
+
+        if (hasMeaningfulVariantOptions(item?.variantOptions)) {
+            const variantElemMatch = buildVariantElemMatch(item.variantOptions, quantity);
+            const updated = await Product.findOneAndUpdate(
+                {
+                    _id: productId,
+                    variants: { $elemMatch: variantElemMatch },
+                },
+                { $inc: { 'variants.$.stock': -quantity } },
+                { new: true }
+            );
+
+            if (!updated) {
+                await rollbackReservedInventory(reservations);
+                throw new Error('Insufficient stock while reserving selected variant');
+            }
+
+            reservations.push({ productId, quantity, variantId: item.variantId || null, variantOptions: item.variantOptions });
+            await syncProductStockAggregate(productId);
+            continue;
+        }
+
+        const updated = await Product.findOneAndUpdate(
+            {
+                _id: productId,
+                stockQuantity: { $gte: quantity },
+            },
+            {
+                $inc: { stockQuantity: -quantity },
+            },
+            { new: true }
+        );
+
+        if (!updated) {
+            await rollbackReservedInventory(reservations);
+            throw new Error('Insufficient stock while reserving product quantity');
+        }
+
+        reservations.push({ productId, quantity, variantOptions: null });
+        await syncProductStockAggregate(productId);
+    }
+
+    return reservations;
+}
+
+
+
+export async function POST(request) {
+    try {
+        await connectDB();
+        
+        // Parse and log request
+        const headersObj = Object.fromEntries(request.headers.entries());
+        let bodyText = '';
+        try { bodyText = await request.text(); } catch (err) { bodyText = '[unreadable]'; }
+        let body = {};
+        try { body = JSON.parse(bodyText); } catch (err) { body = { raw: bodyText }; }
+        console.log('ORDER API: Incoming request', { method: request.method, headers: headersObj, body });
+
+        // Extract fields
+        const {
+            addressId,
+            addressData,
+            items,
+            couponCode,
+            paymentMethod,
+            isGuest,
+            guestInfo,
+            coinsToRedeem,
+            paymentStatus,
+            razorpayPaymentId,
+            razorpayOrderId,
+            razorpaySignature
+        } = body;
+        let userId = null;
+        const inferredOrderSource = inferOrderSource(request, body);
+        let isPlusMember = false;
+
+        console.log('ORDER API: Full body:', JSON.stringify(body, null, 2));
+        console.log('ORDER API: isGuest value:', isGuest, 'type:', typeof isGuest);
+        console.log('ORDER API: guestInfo exists:', !!guestInfo);
+
+        // Auth for logged-in user - ONLY if explicitly NOT a guest
+        if (isGuest !== true) {
+            console.log('ORDER API: Not a guest order (isGuest !== true), checking auth header...');
+            const authHeader = request.headers.get('authorization');
+            if (!authHeader || !authHeader.startsWith('Bearer ')) {
+                console.log('ORDER API: No valid auth header found. isGuest:', isGuest);
+                return NextResponse.json({ 
+                    error: 'Authentication required for non-guest orders',
+                    isGuest: isGuest,
+                    hasAuthHeader: !!authHeader
+                }, { status: 401 });
+            }
+            const idToken = authHeader.split('Bearer ')[1];
+            try {
+                const decodedToken = await getAuth().verifyIdToken(idToken);
+                userId = decodedToken.uid;
+                isPlusMember = decodedToken.plan === 'plus';
+            } catch (err) {
+                console.error('Token verification error:', err);
+                return NextResponse.json({ error: 'Token verification failed', details: err?.message || err }, { status: 401 });
+            }
+        }
+
+        const validateShippingAddress = (address, sourceLabel) => {
+            const missing = [];
+            if (!address?.street) missing.push('street');
+            if (!address?.city) missing.push('city');
+            if (!address?.state) missing.push('state');
+            if (!address?.country) missing.push('country');
+            if (missing.length > 0) {
+                return NextResponse.json(
+                    { error: 'shipping address required', missingFields: missing, source: sourceLabel },
+                    { status: 400 }
+                );
+            }
+            return null;
+        };
+
+        const normalizeZip = (...candidates) => {
+            for (const candidate of candidates) {
+                if (candidate === undefined || candidate === null) continue;
+                const normalized = String(candidate).trim();
+                if (normalized) return normalized;
+            }
+            return '';
+        };
+
+        const isInvalidPincode = (zip) => {
+            const normalized = normalizeZip(zip);
+            if (!normalized) return true;
+            return /^0+$/.test(normalized);
+        };
+
+        // Validation
+        if (isGuest === true) {
+            console.log('ORDER API: Validating guest order...');
+            const missingFields = [];
+            if (!guestInfo) missingFields.push('guestInfo');
+            else {
+                if (!guestInfo.name) missingFields.push('name');
+                if (!guestInfo.email) missingFields.push('email');
+                if (!guestInfo.phone) missingFields.push('phone');
+                if (!guestInfo.address && !guestInfo.street) missingFields.push('address');
+                if (!guestInfo.city) missingFields.push('city');
+                if (!guestInfo.state) missingFields.push('state');
+                if (!guestInfo.country) missingFields.push('country');
+                const guestZip = normalizeZip(guestInfo.pincode, guestInfo.zip);
+                if (!guestZip || isInvalidPincode(guestZip)) missingFields.push('pincode');
+            }
+            console.log('ORDER API DEBUG: guestInfo received:', guestInfo);
+            console.log('ORDER API DEBUG: missingFields:', missingFields);
+            if (missingFields.length > 0) {
+                return NextResponse.json({ error: 'missing guest information', missingFields, guestInfo }, { status: 400 });
+            }
+            const guestAddressCheck = validateShippingAddress(
+                {
+                    street: guestInfo.address || guestInfo.street,
+                    city: guestInfo.city,
+                    state: guestInfo.state,
+                    country: guestInfo.country
+                },
+                'guestInfo'
+            );
+            if (guestAddressCheck) return guestAddressCheck;
+            if (!paymentMethod || !items || !Array.isArray(items) || items.length === 0) {
+                return NextResponse.json({ error: 'missing order details.', details: { paymentMethod, items }, guestInfo }, { status: 400 });
+            }
+        } else {
+            if (!userId || !paymentMethod || !items || !Array.isArray(items) || items.length === 0) {
+                return NextResponse.json({ error: 'missing order details.' }, { status: 400 });
+            }
+            if (!addressId && !(addressData && addressData.street)) {
+                return NextResponse.json({ error: 'shipping address required' }, { status: 400 });
+            }
+            if (addressData && addressData.street) {
+                const addressDataCheck = validateShippingAddress(addressData, 'addressData');
+                if (addressDataCheck) return addressDataCheck;
+                const inlineZip = normalizeZip(addressData.pincode, addressData.zip);
+                if (!inlineZip || isInvalidPincode(inlineZip)) {
+                    return NextResponse.json({ error: 'shipping address required', missingFields: ['pincode'], source: 'addressData' }, { status: 400 });
+                }
+            }
+        }
+
+        const hasPersonalizedOfferItem = Array.isArray(items)
+            ? items.some((item) => typeof item?.offerToken === 'string' && item.offerToken.trim().length > 0)
+            : false;
+
+        if (hasPersonalizedOfferItem && String(paymentMethod || '').toUpperCase() === 'COD') {
+            return NextResponse.json(
+                { error: 'Cash on Delivery is not available for personalized offer products. Please use online payment.' },
+                { status: 400 }
+            );
+        }
+
+        // Coupon logic
+        let coupon = null;
+        if (couponCode) {
+            coupon = await Coupon.findOne({ code: couponCode }).lean();
+            if (!coupon) return NextResponse.json({ error: 'Coupon not found' }, { status: 400 });
+            if (coupon.forNewUser) {
+                const userorders = await Order.find({ userId }).lean();
+                if (userorders.length > 0) return NextResponse.json({ error: 'Coupon valid for new users' }, { status: 400 });
+            }
+            if (coupon.forMember && !isPlusMember) {
+                return NextResponse.json({ error: 'Coupon valid for members only' }, { status: 400 });
+            }
+        }
+
+        // Group items by store
+        const ordersByStore = new Map();
+        let grandSubtotal = 0;
+        for (const item of items) {
+            if (!item.id || typeof item.id !== 'string' || !item.id.match(/^[a-fA-F0-9]{24}$/)) {
+                console.error('Invalid or missing productId in order item:', item.id);
+                return NextResponse.json({ 
+                    error: `Invalid product ID format: "${item.id}". Product IDs must be 24-character unique identifiers.`, 
+                    id: item.id 
+                }, { status: 400 });
+            }
+            let product;
+            try {
+                product = await Product.findById(item.id).lean();
+            } catch (err) {
+                console.error('Product.findById error:', err, 'productId:', item.id);
+                return NextResponse.json({ 
+                    error: `Invalid product ID or database error: "${item.id}". Please clear your cart and try again.`, 
+                    id: item.id 
+                }, { status: 400 });
+            }
+            if (!product) {
+                console.error('Product not found in database. ProductId:', item.id);
+                console.error('Trying to find any product with this ID...');
+                // Try alternative lookups
+                const altProduct = await Product.findOne({$or: [{_id: item.id}, {id: item.id}, {slug: item.id}]}).lean();
+                if (!altProduct) {
+                    return NextResponse.json({ 
+                        error: `Product not found (ID: ${item.id}). This product may have been deleted. Please clear your cart and add items again.`, 
+                        id: item.id,
+                        productId: item.id 
+                    }, { status: 400 });
+                }
+                product = altProduct;
+            }
+
+            // Stock validation - enforce available stock and max per order (20)
+            const requestedQty = Math.min(Number(item.quantity) || 0, 20);
+            if (requestedQty <= 0) {
+                return NextResponse.json({ error: 'Quantity must be at least 1', id: item.id }, { status: 400 });
+            }
+            // If variantOptions provided, validate against matching variant stock; else product stockQuantity
+            let availableQty = typeof product.stockQuantity === 'number' ? product.stockQuantity : 0;
+            if (hasMeaningfulVariantOptions(item.variantOptions) && Array.isArray(product.variants) && product.variants.length > 0) {
+                const requestedOptions = toCanonicalVariantOptions(item.variantOptions);
+                let match = null;
+
+                if (item?.variantId) {
+                    match = product.variants.find((variant) => String(variant?._id || '') === String(item.variantId));
+                }
+
+                if (!match) {
+                    match = product.variants.find((variant) => variantMatchesSelection(variant, requestedOptions || item.variantOptions || {}));
+                }
+
+                if (!match) {
+                    return NextResponse.json({ error: 'Selected variant not found', id: item.id, variantOptions: item.variantOptions }, { status: 400 });
+                }
+
+                item.variantOptions = toCanonicalVariantOptions(match?.options || {}) || requestedOptions || item.variantOptions;
+                item.variantId = match?._id ? String(match._id) : item.variantId;
+                availableQty = typeof match.stock === 'number' ? match.stock : availableQty;
+            } else {
+                item.variantOptions = null;
+                delete item.variantId;
+            }
+            if (availableQty < requestedQty) {
+                return NextResponse.json({ error: 'Insufficient stock', id: item.id, availableQty, requestedQty }, { status: 400 });
+            }
+            
+            // Check for personalized offer token and validate
+            let finalPrice = product.price;
+            let appliedOffer = null;
+            
+            if (item.offerToken) {
+                try {
+                    const offer = await PersonalizedOffer.findOne({ 
+                        offerToken: item.offerToken,
+                        productId: item.id 
+                    }).lean();
+                    
+                    if (offer) {
+                        // Validate offer
+                        const now = new Date();
+                        const isValid = offer.isActive && 
+                                       !offer.isUsed && 
+                                       new Date(offer.expiresAt) > now;
+                        
+                        if (isValid) {
+                            // Apply discount
+                            const discountAmount = (product.price * offer.discountPercent) / 100;
+                            finalPrice = Math.round(product.price - discountAmount);
+                            appliedOffer = {
+                                offerId: offer._id,
+                                offerToken: offer.offerToken,
+                                discountPercent: offer.discountPercent,
+                                originalPrice: product.price,
+                                discountedPrice: finalPrice
+                            };
+                            console.log(`Applied personalized offer: ${offer.discountPercent}% off. Price: ${product.price} -> ${finalPrice}`);
+                        } else {
+                            console.warn(`Offer token ${item.offerToken} is invalid or expired`);
+                            // Continue with regular price
+                        }
+                    } else {
+                        console.warn(`Offer token ${item.offerToken} not found`);
+                    }
+                } catch (err) {
+                    console.error('Error validating offer token:', err);
+                    // Continue with regular price
+                }
+            }
+            
+            const storeId = String(product.storeId || '').trim();
+            if (!storeId) {
+                return NextResponse.json({ error: `Product store not found for product: ${item.id}` }, { status: 400 });
+            }
+            if (!ordersByStore.has(storeId)) ordersByStore.set(storeId, []);
+            ordersByStore.get(storeId).push({ 
+                ...item, 
+                quantity: requestedQty, 
+                price: finalPrice,
+                appliedOffer: appliedOffer 
+            });
+            grandSubtotal += Number(finalPrice) * Number(requestedQty);
+        }
+
+        // Shipping: use from payload, fallback to 0
+        let shippingFee = typeof body.shippingFee === 'number' ? body.shippingFee : 0;
+        let isShippingFeeAdded = false;
+
+        // Wallet redemption (logged-in users only)
+        let redeemableCoins = 0;
+        let totalCoinsRedeemed = 0;
+        let totalWalletDiscount = 0;
+        let walletRedeemApplied = false;
+        let wallet = null;
+        if (userId && Number(coinsToRedeem) > 0) {
+            wallet = await Wallet.findOne({ userId });
+            if (!wallet) {
+                wallet = await Wallet.create({ userId, coins: 0 });
+            }
+            const availableCoins = Number(wallet.coins || 0);
+            redeemableCoins = Math.max(0, Math.min(Math.floor(Number(coinsToRedeem)), availableCoins));
+        }
+
+        // Order creation
+        let orderIds = [];
+        let fullAmount = 0;
+        for (const [storeId, sellerItems] of ordersByStore.entries()) {
+            // Ensure user exists in DB (upsert)
+            if (userId) {
+                await User.findOneAndUpdate(
+                    { _id: userId },
+                    { $setOnInsert: { _id: userId, name: '', email: '', image: '', cart: {} } },
+                    { upsert: true, new: true }
+                );
+            }
+            
+            // Existence checks
+            if (userId) {
+                const userExists = await User.findById(userId);
+                if (!userExists) {
+                    return NextResponse.json({ error: 'User not found' }, { status: 400 });
+                }
+            }
+            if (addressId) {
+                const addressExists = await Address.findById(addressId);
+                if (!addressExists) {
+                    return NextResponse.json({ error: 'Address not found' }, { status: 400 });
+                }
+                const addressCheck = validateShippingAddress(addressExists, 'addressId');
+                if (addressCheck) return addressCheck;
+                const savedZip = normalizeZip(addressExists.pincode, addressExists.zip);
+                if (!savedZip || isInvalidPincode(savedZip)) {
+                    return NextResponse.json({ error: 'invalid pincode in selected address. Please update address.' }, { status: 400 });
+                }
+            }
+            if (storeId) {
+                const storeExists = await Store.findById(storeId);
+                if (!storeExists) {
+                    return NextResponse.json({ error: 'Store not found' }, { status: 400 });
+                }
+            }
+            
+            let total = sellerItems.reduce((acc, item) => acc + (item.price * item.quantity), 0);
+            if (couponCode && coupon) {
+                if (coupon.discountType === 'percentage') {
+                    total -= (total * coupon.discount) / 100;
+                } else {
+                    total -= Math.min(coupon.discount, total);
+                }
+            }
+            if (!isPlusMember && !isShippingFeeAdded) {
+                total += shippingFee;
+                isShippingFeeAdded = true;
+            }
+
+            // Apply wallet discount once across the entire checkout
+            let coinsRedeemed = 0;
+            let walletDiscount = 0;
+            if (!walletRedeemApplied && redeemableCoins > 0) {
+                const maxCoinsByTotal = Math.floor(total / 1);
+                coinsRedeemed = Math.min(redeemableCoins, maxCoinsByTotal);
+                walletDiscount = Number((coinsRedeemed * 1).toFixed(2));
+                total = Math.max(0, Number((total - walletDiscount).toFixed(2)));
+                totalCoinsRedeemed = coinsRedeemed;
+                totalWalletDiscount = walletDiscount;
+                walletRedeemApplied = true;
+            }
+
+            fullAmount += parseFloat(total.toFixed(2));
+
+            // Prepare order data
+            const orderData = {
+                storeId: storeId,
+                total: parseFloat(total.toFixed(2)),
+                shippingFee: shippingFee,
+                paymentMethod,
+                orderSource: inferredOrderSource,
+                paymentStatus: paymentStatus || 'PENDING',
+                isCouponUsed: !!coupon,
+                coupon: coupon || {},
+                coinsRedeemed,
+                walletDiscount,
+                orderItems: sellerItems.map(item => ({
+                    productId: item.id,
+                    name: item.name || '',
+                    quantity: item.quantity,
+                    price: item.price,
+                    variantOptions: hasMeaningfulVariantOptions(item.variantOptions) ? item.variantOptions : null
+                }))
+            };
+
+            const normalizedPaymentMethod = String(paymentMethod || '').toUpperCase();
+            const paidOnlineMethods = new Set(['CARD', 'RAZORPAY', 'UPI', 'NETBANKING', 'ONLINE', 'PREPAID', 'WALLET']);
+
+            if (normalizedPaymentMethod === 'COD') {
+                orderData.isPaid = false;
+                orderData.paymentStatus = paymentStatus || 'PENDING';
+            } else if (paidOnlineMethods.has(normalizedPaymentMethod)) {
+                orderData.isPaid = true;
+                orderData.paymentStatus = paymentStatus || 'PAID';
+            }
+
+            if (razorpayPaymentId) orderData.razorpayPaymentId = razorpayPaymentId;
+            if (razorpayOrderId) orderData.razorpayOrderId = razorpayOrderId;
+            if (razorpaySignature) orderData.razorpaySignature = razorpaySignature;
+
+            if (isGuest) {
+                // Robust upsert for guest user
+                await User.findOneAndUpdate(
+                    { _id: 'guest' },
+                    { $setOnInsert: { _id: 'guest', name: 'Guest User', email: 'guest@system.local', image: '', cart: [] } },
+                    { upsert: true, new: true }
+                );
+                
+                // Only create and assign guest address if address fields are present
+                if (guestInfo.address || guestInfo.street) {
+                    const guestZip = normalizeZip(guestInfo.pincode, guestInfo.zip);
+                    const guestAddress = await Address.create({
+                        userId: 'guest',
+                        name: guestInfo.name,
+                        email: guestInfo.email,
+                        phone: guestInfo.phone,
+                        phoneCode: guestInfo.phoneCode || '+91',
+                        alternatePhone: guestInfo.alternatePhone || '',
+                        alternatePhoneCode: guestInfo.alternatePhoneCode || guestInfo.phoneCode || '+91',
+                        street: guestInfo.address || guestInfo.street,
+                        city: guestInfo.city || 'Guest',
+                        state: guestInfo.state || 'Guest',
+                        zip: guestZip,
+                        country: guestInfo.country || 'UAE'
+                    });
+                    orderData.addressId = guestAddress._id.toString();
+                    orderData.shippingAddress = {
+                        name: guestInfo.name,
+                        email: guestInfo.email,
+                        phone: guestInfo.phone,
+                        phoneCode: guestInfo.phoneCode || '+91',
+                        alternatePhone: guestInfo.alternatePhone || '',
+                        alternatePhoneCode: guestInfo.alternatePhoneCode || guestInfo.phoneCode || '+91',
+                        street: guestInfo.address || guestInfo.street,
+                        city: guestInfo.city || 'Guest',
+                        state: guestInfo.state || 'Guest',
+                        zip: guestZip,
+                        country: guestInfo.country || 'UAE',
+                        district: guestInfo.district || ''
+                    };
+                }
+                orderData.isGuest = true;
+                orderData.guestName = guestInfo.name;
+                orderData.guestEmail = guestInfo.email;
+                orderData.guestPhone = guestInfo.phone;
+                orderData.alternatePhone = guestInfo.alternatePhone || '';
+                orderData.alternatePhoneCode = guestInfo.alternatePhoneCode || guestInfo.phoneCode || '';
+
+                // Upsert guestUser record
+                const convertToken = crypto.randomBytes(32).toString('hex');
+                const tokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+                await GuestUser.findOneAndUpdate(
+                    { email: guestInfo.email },
+                    {
+                        name: guestInfo.name,
+                        phone: guestInfo.phone,
+                        convertToken,
+                        tokenExpiry
+                    },
+                    { upsert: true, new: true }
+                );
+            } else {
+                if (typeof userId === 'string' && userId.trim() !== '') {
+                    orderData.userId = userId;
+                }
+                // Handle address - either from addressId or addressData
+                if (typeof addressId === 'string' && addressId.trim() !== '') {
+                    orderData.addressId = addressId;
+                    // Fetch and store address data as embedded document
+                    const address = await Address.findById(addressId).lean();
+                    if (address) {
+                        orderData.shippingAddress = {
+                            name: address.name,
+                            email: address.email,
+                            phone: address.phone,
+                            phoneCode: address.phoneCode || '+91',
+                            alternatePhone: address.alternatePhone || '',
+                            alternatePhoneCode: address.alternatePhoneCode || address.phoneCode || '+91',
+                            street: address.street,
+                            city: address.city,
+                            state: address.state,
+                            zip: address.zip,
+                            country: address.country,
+                            district: address.district || ''
+                        };
+                        orderData.alternatePhone = address.alternatePhone || '';
+                        orderData.alternatePhoneCode = address.alternatePhoneCode || address.phoneCode || '';
+                    }
+                } else if (addressData && addressData.street) {
+                    // User provided address data inline - save it and use it
+                    const inlineZip = normalizeZip(addressData.pincode, addressData.zip);
+                    const newAddress = await Address.create({
+                        userId: userId,
+                        name: addressData.name,
+                        email: addressData.email,
+                        phone: addressData.phone,
+                        phoneCode: addressData.phoneCode || '+91',
+                        alternatePhone: addressData.alternatePhone || '',
+                        alternatePhoneCode: addressData.alternatePhoneCode || addressData.phoneCode || '+91',
+                        street: addressData.street,
+                        city: addressData.city,
+                        state: addressData.state,
+                        zip: inlineZip,
+                        country: addressData.country,
+                        district: addressData.district || ''
+                    });
+                    orderData.addressId = newAddress._id.toString();
+                    orderData.shippingAddress = {
+                        name: addressData.name,
+                        email: addressData.email,
+                        phone: addressData.phone,
+                        phoneCode: addressData.phoneCode || '+91',
+                        alternatePhone: addressData.alternatePhone || '',
+                        alternatePhoneCode: addressData.alternatePhoneCode || addressData.phoneCode || '+91',
+                        street: addressData.street,
+                        city: addressData.city,
+                        state: addressData.state,
+                        zip: inlineZip,
+                        country: addressData.country,
+                        district: addressData.district || ''
+                    };
+                    orderData.alternatePhone = addressData.alternatePhone || '';
+                    orderData.alternatePhoneCode = addressData.alternatePhoneCode || addressData.phoneCode || '';
+                }
+                console.log('FINAL orderData before Order.create:', JSON.stringify(orderData, null, 2));
+            }
+
+            // Create order
+            console.log('ORDER API DEBUG: orderData keys:', Object.keys(orderData));
+            console.log('ORDER API DEBUG: orderData before Order.create:', JSON.stringify(orderData, null, 2));
+            const reservedInventory = await reserveInventoryForOrderItems(orderData.orderItems || []);
+            let order;
+            try {
+                orderData.shortOrderNumber = await getNextShortOrderNumber();
+                order = await Order.create(orderData);
+            } catch (createOrderError) {
+                await rollbackReservedInventory(reservedInventory);
+                throw createOrderError;
+            }
+            orderIds.push(order._id);
+
+            // Mark abandoned cart as purchased
+            try {
+                const matchQuery = {};
+                if (userId) matchQuery.userId = userId;
+                if (guestInfo?.email || order.guestEmail) matchQuery.email = guestInfo?.email || order.guestEmail;
+                
+                if (Object.keys(matchQuery).length > 0) {
+                    await AbandonedCart.deleteMany(
+                        { storeId: order.storeId, ...matchQuery }
+                    );
+                    console.log(`[ORDER] Deleted abandoned carts on confirmed order for user: ${userId || guestInfo?.email}`);
+                }
+            } catch (cartErr) {
+                console.error('[ORDER] Failed to update abandoned cart:', cartErr?.message);
+            }
+
+            // --- AUTOMATIC DELHIVERY SHIPMENT CREATION ---
+            try {
+                // 1. Generate waybill
+                const waybillRes = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || ''}/api/delhivery/waybill?count=1`);
+                const waybillData = await waybillRes.json();
+                const waybill = waybillData.success && Array.isArray(waybillData.waybills) ? waybillData.waybills[0] : null;
+                if (waybill) {
+                    // 2. Prepare shipment payload
+                    const shipping = order.shippingAddress || {};
+                    const shipmentPayload = {
+                        shipments: [
+                            {
+                                waybill,
+                                order: order.shortOrderNumber || order._id.toString(),
+                                products_desc: order.orderItems.map(i => i.productId.name || 'Product').join(', '),
+                                total_amount: order.total,
+                                cod_amount: order.paymentMethod === 'COD' ? order.total : 0,
+                                consignee: shipping.name,
+                                consignee_address1: shipping.street,
+                                consignee_address2: shipping.city,
+                                consignee_pincode: shipping.zip,
+                                consignee_city: shipping.city,
+                                consignee_state: shipping.state,
+                                consignee_country: shipping.country,
+                                consignee_phone: shipping.phone,
+                                consignee_email: shipping.email,
+                                pickup_location: shipping.city || 'Warehouse',
+                                payment_mode: order.paymentMethod === 'COD' ? 'COD' : 'Prepaid',
+                                weight: 1,
+                                length: 30,
+                                breadth: 20,
+                                height: 10
+                            }
+                        ]
+                    };
+                    // 3. Create shipment
+                    const shipmentRes = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || ''}/api/delhivery/create-shipment`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(shipmentPayload)
+                    });
+                    const shipmentData = await shipmentRes.json();
+                    // 4. Save Delhivery info to order
+                    order.delhivery = {
+                        waybill,
+                        shipment: shipmentData,
+                        status: shipmentData.status || 'created',
+                        createdAt: new Date()
+                    };
+                    await order.save();
+                }
+            } catch (delhiveryErr) {
+                console.error('Delhivery automation error:', delhiveryErr);
+            }
+            // --- END AUTOMATION ---
+
+            // ...existing code...
+        }
+
+        // Coupon usage count
+        if (couponCode && coupon) {
+            await Coupon.findOneAndUpdate(
+                { code: couponCode },
+                { $inc: { usedCount: 1 } }
+            );
+        }
+
+        if (wallet && totalCoinsRedeemed > 0) {
+            wallet.coins = Math.max(0, Number(wallet.coins || 0) - totalCoinsRedeemed);
+            wallet.transactions.push({
+                type: 'REDEEM',
+                coins: totalCoinsRedeemed,
+                rupees: totalWalletDiscount,
+                orderId: orderIds.map((id) => id.toString()).join(','),
+                description: 'Redeemed at checkout'
+            });
+            await wallet.save();
+        }
+
+        // Stripe payment
+        if (paymentMethod === 'STRIPE') {
+            const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+            const origin = await request.headers.get('origin');
+            const session = await stripe.checkout.sessions.create({
+                payment_method_types: ['card'],
+                line_items: [{
+                    price_data: {
+                        currency: '₹',
+                        product_data: { name: 'Order' },
+                        unit_amount: Math.round(fullAmount * 100)
+                    },
+                    quantity: 1
+                }],
+                expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
+                mode: 'payment',
+                success_url: `${origin}/loading?nextUrl=orders`,
+                cancel_url: `${origin}/cart`,
+                metadata: {
+                    orderIds: orderIds.join(','),
+                    userId,
+                    appId: 'Qui'
+                }
+            });
+            return NextResponse.json({ session });
+        }
+
+        // Send order confirmation emails for successfully created orders (non-blocking)
+        try {
+            if (orderIds.length > 0) {
+                const adminNotificationEmails = getAdminNotificationEmails();
+                const createdOrders = await Order.find({ _id: { $in: orderIds } })
+                    .populate('orderItems.productId')
+                    .populate('userId')
+                    .lean();
+
+                for (const created of createdOrders) {
+                    const recipientEmail =
+                        created?.guestEmail ||
+                        created?.shippingAddress?.email ||
+                        created?.userId?.email ||
+                        null;
+
+                    if (!recipientEmail) {
+                        console.warn('[orders/create] Skipping confirmation email: missing recipient', created?._id?.toString?.());
+                        continue;
+                    }
+
+                    const recipientName =
+                        created?.guestName ||
+                        created?.shippingAddress?.name ||
+                        created?.userId?.name ||
+                        'there';
+
+                    await sendOrderConfirmationEmail({
+                        email: recipientEmail,
+                        name: recipientName,
+                        orderId: created._id,
+                        shortOrderNumber: created.shortOrderNumber,
+                        total: created.total,
+                        orderItems: created.orderItems || [],
+                        shippingAddress: created.shippingAddress,
+                        createdAt: created.createdAt,
+                        paymentMethod: created.paymentMethod,
+                    });
+
+                    console.log('[orders/create] Confirmation email sent for order', created?._id?.toString?.());
+
+                    if (adminNotificationEmails.length > 0) {
+                        for (const adminEmail of adminNotificationEmails) {
+                            try {
+                                await sendOrderConfirmationEmail({
+                                    email: adminEmail,
+                                    name: 'Admin',
+                                    orderId: created._id,
+                                    shortOrderNumber: created.shortOrderNumber,
+                                    total: created.total,
+                                    orderItems: created.orderItems || [],
+                                    shippingAddress: created.shippingAddress,
+                                    createdAt: created.createdAt,
+                                    paymentMethod: created.paymentMethod,
+                                });
+
+                                console.log('[orders/create] Admin confirmation copy sent for order', created?._id?.toString?.(), 'to', adminEmail);
+                            } catch (adminEmailError) {
+                                console.error('[orders/create] Admin confirmation copy failed for order', created?._id?.toString?.(), adminEmailError);
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (emailError) {
+            console.error('[orders/create] Confirmation email failed:', emailError);
+        }
+
+        // Clear cart for logged-in users
+        if (userId) {
+            await User.findByIdAndUpdate(userId, { cart: {} });
+        }
+
+        // Always return a single order object for both guest and logged-in users
+        // Use the result of Order.create directly for the response
+        let createdOrder = null;
+        if (orderIds && orderIds.length > 0) {
+            createdOrder = await Order.findById(orderIds[orderIds.length - 1])
+                .populate('userId')
+                .populate({
+                    path: 'orderItems.productId',
+                    model: 'Product'
+                })
+                .lean();
+        }
+        if (!createdOrder) {
+            return NextResponse.json({ error: 'Order creation failed. No order returned from database.' }, { status: 500 });
+        }
+        const createdOrderNumber = getDisplayOrderNumber(createdOrder);
+        createdOrder.displayOrderNumber = createdOrderNumber;
+        createdOrder.orderNumber = createdOrderNumber;
+        return NextResponse.json({
+            message: 'Orders Placed Successfully',
+            order: createdOrder,
+            id: createdOrder._id.toString(),
+            orderId: createdOrder._id.toString(),
+            orderNumber: createdOrderNumber,
+        });
+    } catch (error) {
+        console.error(error);
+        const message = typeof error?.message === 'string' && error.message.trim()
+            ? error.message
+            : 'Failed to place order. Please try again.';
+        return NextResponse.json(
+            { error: message, code: error?.code || null },
+            { status: 400 }
+        );
+    }
+}
+
+// Get all orders for a user
+export async function GET(request) {
+    try {
+        await connectDB();
+        const { searchParams } = new URL(request.url);
+        const orderId = searchParams.get('orderId');
+
+        // If orderId is provided, allow guest access to fetch that specific order
+        if (orderId) {
+            if (!orderId || typeof orderId !== 'string' || orderId.length < 8) {
+                console.error('GET /api/orders: Missing or invalid orderId:', orderId);
+                return NextResponse.json({ error: 'Missing or invalid orderId parameter.' }, { status: 400 });
+            }
+            console.log('GET /api/orders: Fetching order by orderId:', orderId);
+            try {
+                let order = await Order.findById(orderId)
+                    .populate({
+                        path: 'orderItems.productId',
+                        model: 'Product'
+                    })
+                    .populate('addressId');
+
+                if (!order) {
+                    console.log('GET /api/orders: Order not found for orderId:', orderId);
+                    return NextResponse.json({ error: 'Order not found for the provided orderId.' }, { status: 404 });
+                }
+
+                console.log('GET /api/orders: Order found, isGuest:', order.isGuest);
+                const orderObj = order.toObject();
+                const orderNumber = getDisplayOrderNumber(orderObj);
+                orderObj.displayOrderNumber = orderNumber;
+                orderObj.orderNumber = orderNumber;
+                return NextResponse.json({ order: orderObj, orderNumber });
+            } catch (err) {
+                console.error('GET /api/orders: Error fetching order:', err, 'orderId:', orderId);
+                return NextResponse.json({ error: 'Invalid orderId format or internal error.' }, { status: 400 });
+            }
+        }
+        
+        // For listing orders (no orderId), require authentication
+        const authHeader = request.headers.get('authorization');
+        let userId = null;
+        let tokenEmail = '';
+        let tokenPhone = '';
+        if (authHeader && authHeader.startsWith('Bearer ')) {
+            const idToken = authHeader.split('Bearer ')[1];
+            try {
+                const decodedToken = await getAuth().verifyIdToken(idToken);
+                userId = decodedToken.uid;
+                tokenEmail = String(decodedToken.email || '').trim().toLowerCase();
+                tokenPhone = normalizePhoneDigits(decodedToken.phone_number || '');
+            } catch (e) {
+                // Not signed in, userId remains null
+            }
+        }
+        if (!userId) {
+            return NextResponse.json({ error: "not authorized" }, { status: 401 });
+        }
+        
+        const limit = parseInt(searchParams.get('limit') || '20', 10);
+        const offset = parseInt(searchParams.get('offset') || '0', 10);
+        
+        const paidOnlineMethods = [
+            PaymentMethod.STRIPE,
+            PaymentMethod.CARD,
+            PaymentMethod.RAZORPAY,
+            PaymentMethod.WALLET,
+            'PREPAID',
+            'ONLINE',
+            'UPI',
+            'NETBANKING',
+            'CARD',
+            'card',
+            'razorpay',
+            'wallet',
+            'prepaid',
+            'online',
+            'upi',
+            'netbanking',
+        ];
+
+        const orderQuery = [{ userId }];
+        const guestIdentityQuery = [];
+
+        if (tokenEmail) {
+            guestIdentityQuery.push({ guestEmail: { $regex: `^${tokenEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' } });
+            guestIdentityQuery.push({ 'shippingAddress.email': { $regex: `^${tokenEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' } });
+        }
+        if (tokenPhone) {
+            guestIdentityQuery.push({ guestPhone: tokenPhone });
+            guestIdentityQuery.push({ guestPhone: `+${tokenPhone}` });
+            guestIdentityQuery.push({ 'shippingAddress.phone': tokenPhone });
+            guestIdentityQuery.push({ 'shippingAddress.phone': `+${tokenPhone}` });
+
+            // Fallback: match last 10 digits to handle +91/spaces/dashes formatting differences.
+            const last10 = tokenPhone.slice(-10);
+            if (last10 && last10.length >= 10) {
+                guestIdentityQuery.push({ guestPhone: { $regex: `${last10}$` } });
+                guestIdentityQuery.push({ 'shippingAddress.phone': { $regex: `${last10}$` } });
+            }
+        }
+
+        // Auto-link guest orders to this account so they appear in history after login.
+        if (guestIdentityQuery.length > 0) {
+            try {
+                await Order.updateMany(
+                    {
+                        isGuest: true,
+                        $and: [
+                            { $or: guestIdentityQuery },
+                            {
+                                $or: [
+                                    { userId: { $exists: false } },
+                                    { userId: null },
+                                    { userId: '' }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        $set: {
+                            userId,
+                            isGuest: false
+                        }
+                    }
+                );
+            } catch (linkError) {
+                console.error('Guest order auto-link failed:', linkError?.message || linkError);
+            }
+        }
+
+        if (guestIdentityQuery.length > 0) {
+            orderQuery.push({
+                isGuest: true,
+                $or: guestIdentityQuery,
+            });
+        }
+
+        const orders = await Order.find(orderQuery.length === 1 ? orderQuery[0] : { $or: orderQuery })
+        .populate({
+            path: 'orderItems.productId',
+            model: 'Product'
+        })
+        .populate('addressId')
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .skip(offset);
+
+        const seventeenTrackConfigCache = new Map();
+        const getSeventeenTrackConfigForStore = async (storeId) => {
+            const key = String(storeId || '').trim();
+            if (!key) return {};
+            if (seventeenTrackConfigCache.has(key)) {
+                return seventeenTrackConfigCache.get(key);
+            }
+
+            const storeOr = [{ userId: key }];
+            if (/^[a-fA-F0-9]{24}$/.test(key)) {
+                storeOr.unshift({ _id: key });
+            }
+
+            const store = await Store.findOne({ $or: storeOr })
+                .select('+integrations.seventeentrack.baseUrl +integrations.seventeentrack.apiKey +integrations.seventeentrack.publicKey +integrations.seventeentrack.secretKey')
+                .lean();
+            const cfg = store?.integrations?.seventeentrack || {};
+            const normalized = {
+                baseUrl: String(cfg.baseUrl || '').trim(),
+                apiKey: String(cfg.apiKey || '').trim(),
+                publicKey: String(cfg.publicKey || '').trim(),
+                secretKey: String(cfg.secretKey || '').trim(),
+            };
+
+            seventeenTrackConfigCache.set(key, normalized);
+            return normalized;
+        };
+
+        const hasIndiaPostCreds = !!(process.env.INDIAPOST_USERNAME?.trim() && process.env.INDIAPOST_PASSWORD?.trim());
+
+        // Ensure all orders have shortOrderNumber calculated
+        const enrichedOrders = [];
+        for (const orderDoc of orders) {
+            const order = orderDoc.toObject();
+
+            const paymentMethod = String(order?.paymentMethod || '').toUpperCase();
+            let status = String(order?.status || '').toUpperCase();
+            const paymentStatus = String(order?.paymentStatus || '').toUpperCase();
+
+            if (paymentMethod === 'COD') {
+                if (status === 'DELIVERED' || order?.delhivery?.payment?.is_cod_recovered) {
+                    order.isPaid = true;
+                }
+            } else if (paymentMethod) {
+                const failedStatuses = new Set(['FAILED', 'PAYMENT_FAILED', 'REFUNDED', 'UNPAID']);
+                if (!failedStatuses.has(paymentStatus) && status !== 'PAYMENT_FAILED') {
+                    order.isPaid = true;
+                }
+            }
+
+            // Fetch live India Post tracking for customer-visible orders
+            const isIndiaPost = (order.courier || '').toLowerCase().includes('india post');
+            const hasAwb = !!(order.trackingId || order.awb);
+            const isActive = !['CANCELLED', 'ORDER_PLACED'].includes(status);
+            if (isIndiaPost && hasAwb && isActive) {
+                try {
+                    const awb = (order.trackingId || order.awb).trim();
+                    let ipTracking = null;
+
+                    // 1) Prefer India Post direct API when credentials are configured
+                    if (hasIndiaPostCreds) {
+                        try {
+                            const ipDirect = await fetchNormalizedIndiaPostTracking(awb);
+                            if (ipDirect?.indiapost?.tracking_details?.length > 0) {
+                                const events = ipDirect.indiapost.tracking_details.map((e) => ({
+                                    time: `${e.date || ''} ${e.time || ''}`.trim(),
+                                    description: e.event || '',
+                                    location: e.office || '',
+                                    country: 'IN',
+                                }));
+                                const isDelivered = (ipDirect.indiapost.current_status || '').toLowerCase().includes('delivered');
+                                ipTracking = {
+                                    awb,
+                                    statusCode: isDelivered ? 40 : 10,
+                                    statusLabel: isDelivered ? 'Delivered' : 'In Transit',
+                                    isDelivered,
+                                    deliveredAt: isDelivered ? ipDirect.indiapost.current_status_time : null,
+                                    currentLocation: ipDirect.indiapost.current_status_location || null,
+                                    latestEvent: events[events.length - 1] || null,
+                                    events: events.slice().reverse(),
+                                    source: 'indiapost',
+                                };
+                            }
+                        } catch (directErr) {
+                            console.error('India Post direct tracking failed for order', order._id, ':', directErr?.message || directErr);
+                        }
+                    }
+
+                    // 2) Fallback to 17track
+                    if (!ipTracking) {
+                        const storeConfig = await getSeventeenTrackConfigForStore(order.storeId);
+                        ipTracking = await fetchSeventeenTrackInfo(awb, storeConfig);
+                    }
+
+                    if (ipTracking) {
+                        order.indiaPost = ipTracking;
+                        // Sync status if delivered/in-transit and persist to DB
+                        if (ipTracking.isDelivered && status !== 'DELIVERED') {
+                            order.status = 'DELIVERED';
+                            status = 'DELIVERED';
+                            await Order.updateOne(
+                                { _id: order._id, status: { $ne: 'DELIVERED' } },
+                                { $set: { status: 'DELIVERED' } }
+                            );
+                        } else if (ipTracking.statusCode === 10 && status === 'PROCESSING') {
+                            order.status = 'SHIPPED';
+                            status = 'SHIPPED';
+                            await Order.updateOne(
+                                { _id: order._id, status: 'PROCESSING' },
+                                { $set: { status: 'SHIPPED' } }
+                            );
+                        }
+
+                        if (paymentMethod === 'COD' && status === 'DELIVERED') {
+                            order.isPaid = true;
+                        }
+                    }
+                } catch (ipErr) {
+                    // Don't fail the whole list if tracking fetch fails
+                    console.error('India Post tracking fetch failed for order', order._id, ':', ipErr?.message);
+                }
+            }
+
+            const orderNumber = getDisplayOrderNumber(order);
+            order.displayOrderNumber = orderNumber;
+            order.orderNumber = orderNumber;
+            enrichedOrders.push(order);
+        }
+
+        return NextResponse.json({ orders: enrichedOrders });
+    } catch (error) {
+        console.error(error);
+        return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+}
