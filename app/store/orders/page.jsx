@@ -1272,6 +1272,61 @@ export default function StoreOrders() {
         }
     };
 
+    const clearPrimaryTrackingDetails = async () => {
+        if (!selectedOrder?._id) return;
+
+        const hasPrimaryTracking = Boolean(
+            String(selectedOrder?.trackingId || '').trim() ||
+            String(selectedOrder?.trackingUrl || '').trim() ||
+            String(selectedOrder?.courier || '').trim()
+        );
+
+        if (!hasPrimaryTracking) {
+            toast('Tracking is already empty for this order.');
+            return;
+        }
+
+        const confirmed = window.confirm('Delete tracking ID, courier and tracking URL for this order?');
+        if (!confirmed) return;
+
+        try {
+            const token = await getToken();
+            const { data } = await axios.put(
+                `/api/store/orders/${selectedOrder._id}`,
+                {
+                    trackingId: '',
+                    courier: '',
+                    trackingUrl: '',
+                },
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+
+            const updatedOrder = data?.order || {
+                ...selectedOrder,
+                trackingId: '',
+                courier: '',
+                trackingUrl: '',
+            };
+
+            setSelectedOrder(updatedOrder);
+            setOrders((prev) => prev.map((o) => (o._id === updatedOrder._id ? { ...o, ...updatedOrder } : o)));
+            setTrackingData((prev) => ({
+                ...prev,
+                trackingId: '',
+                courier: '',
+                trackingUrl: '',
+            }));
+            setIndiaPostAwb('');
+            setIndiaPostTracking(null);
+            setAutoRefreshEnabled(false);
+
+            toast.success('Tracking ID deleted successfully.');
+        } catch (error) {
+            console.error('Failed to clear tracking details:', error);
+            toast.error(error?.response?.data?.error || 'Failed to delete tracking ID');
+        }
+    };
+
     // Save India Post AWB and auto-fetch tracking
     const saveIndiaPostTracking = async () => {
         const awb = (indiaPostAwb || '').trim();
@@ -3026,7 +3081,7 @@ export default function StoreOrders() {
                                     </div>
 
                                     {/* Action Buttons */}
-                                    <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
                                         <button
                                             onClick={updateTrackingDetails}
                                             className="w-full bg-orange-500 hover:bg-orange-600 text-white font-medium py-2.5 rounded-lg transition-colors"
@@ -3039,6 +3094,13 @@ export default function StoreOrders() {
                                             className="w-full bg-slate-800 hover:bg-slate-900 text-white font-medium py-2.5 rounded-lg transition-colors text-sm"
                                         >
                                             Auto Status from Tracking
+                                        </button>
+
+                                        <button
+                                            onClick={clearPrimaryTrackingDetails}
+                                            className="w-full bg-red-600 hover:bg-red-700 text-white font-medium py-2.5 rounded-lg transition-colors text-sm"
+                                        >
+                                            Delete Tracking ID
                                         </button>
                                     </div>
 
