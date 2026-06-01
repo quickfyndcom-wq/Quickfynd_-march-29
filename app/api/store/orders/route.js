@@ -101,6 +101,29 @@ function mapDelhiveryStatusToOrderStatus(delhivery, currentStatus = '') {
     return null;
 }
 
+function mapAddressToShippingAddress(address = {}) {
+    if (!address || typeof address !== 'object') return null;
+
+    const zip = String(address.zip || address.pincode || '').trim();
+
+    return {
+        name: address.name || '',
+        email: address.email || '',
+        phone: address.phone || '',
+        phoneCode: address.phoneCode || '+91',
+        alternatePhone: address.alternatePhone || '',
+        alternatePhoneCode: address.alternatePhoneCode || address.phoneCode || '+91',
+        houseNumber: address.houseNumber || '',
+        street: address.street || address.address || '',
+        city: address.city || '',
+        state: address.state || '',
+        country: address.country || '',
+        district: address.district || '',
+        zip,
+        pincode: zip,
+    };
+}
+
 
 
 // Update seller order status
@@ -195,6 +218,19 @@ export async function GET(request){
         
         // Manually populate userId since it's a String-type _id
         for (let order of orders) {
+            if (!order.shippingAddress && order.addressId && typeof order.addressId === 'object') {
+                const hydratedShippingAddress = mapAddressToShippingAddress(order.addressId);
+                if (hydratedShippingAddress) {
+                    order.shippingAddress = hydratedShippingAddress;
+                    if (!order.alternatePhone && hydratedShippingAddress.alternatePhone) {
+                        order.alternatePhone = hydratedShippingAddress.alternatePhone;
+                    }
+                    if (!order.alternatePhoneCode && hydratedShippingAddress.alternatePhoneCode) {
+                        order.alternatePhoneCode = hydratedShippingAddress.alternatePhoneCode;
+                    }
+                }
+            }
+
             if (order.userId && !order.isGuest) {
                 const user = await User.findById(order.userId).lean();
                 if (user && (user.name || user.email)) {
