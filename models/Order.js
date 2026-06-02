@@ -59,6 +59,11 @@ const OrderSchema = new mongoose.Schema({
   items: Array,
   cancelReason: String,
   cancelledBy: { type: String, enum: ['CUSTOMER', 'SELLER', 'SYSTEM', 'UNDELIVERABLE_PINCODE', 'OTHER'], default: null },
+  supportConfirmation: {
+    confirmed: { type: Boolean, default: false },
+    confirmedAt: { type: Date, default: null },
+    confirmedBy: { type: String, default: '' },
+  },
   returnReason: String,
   notes: String,
   inventoryRestock: {

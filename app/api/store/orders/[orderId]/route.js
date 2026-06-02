@@ -56,7 +56,8 @@ export async function PUT(request, { params }) {
             guestEmail,
             guestPhone,
             alternatePhone,
-            alternatePhoneCode
+            alternatePhoneCode,
+            supportConfirmation
         } = await request.json();
 
         // Verify the order belongs to this store
@@ -201,6 +202,15 @@ export async function PUT(request, { params }) {
         if (guestPhone !== undefined) updateData.guestPhone = guestPhone;
         if (alternatePhone !== undefined) updateData.alternatePhone = alternatePhone;
         if (alternatePhoneCode !== undefined) updateData.alternatePhoneCode = alternatePhoneCode;
+
+        if (supportConfirmation !== undefined) {
+            const confirmed = Boolean(supportConfirmation?.confirmed);
+            updateData.supportConfirmation = {
+                confirmed,
+                confirmedAt: confirmed ? new Date() : null,
+                confirmedBy: confirmed ? userId : '',
+            };
+        }
 
         // Update the order and return populated document so UI keeps product/user details.
         const updatedOrder = await Order.findByIdAndUpdate(

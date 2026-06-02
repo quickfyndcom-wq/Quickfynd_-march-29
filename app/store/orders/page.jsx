@@ -268,6 +268,7 @@ export default function StoreOrders() {
     const [selectedAwbOrderIds, setSelectedAwbOrderIds] = useState([]);
     const [bulkDownloadingAwbs, setBulkDownloadingAwbs] = useState(false);
     const [bulkLabelsPerPage, setBulkLabelsPerPage] = useState(4);
+    const [confirmingSupportOrderId, setConfirmingSupportOrderId] = useState('');
     
     const storeSettingsCacheRef = useRef(undefined);
     const refreshIntervalRef = useRef(null);
@@ -1693,6 +1694,48 @@ export default function StoreOrders() {
         return isOrderPaid(order) ? 'PAID' : 'PENDING';
     };
 
+    const markSupportConfirmed = async (order) => {
+        if (!order?._id) return;
+        if (order?.supportConfirmation?.confirmed) {
+            toast.success('Support confirmation already marked for this order.');
+            return;
+        }
+
+        try {
+            setConfirmingSupportOrderId(order._id);
+            const token = await getToken(true);
+            if (!token) {
+                toast.error('Authentication failed. Please sign in again.');
+                return;
+            }
+
+            const { data } = await axios.put(
+                `/api/store/orders/${order._id}`,
+                {
+                    supportConfirmation: {
+                        confirmed: true,
+                    },
+                },
+                {
+                    headers: { Authorization: `Bearer ${token}` },
+                }
+            );
+
+            const updatedOrder = data?.order;
+            if (updatedOrder) {
+                setOrders((prev) => prev.map((o) => (o._id === order._id ? { ...o, ...updatedOrder } : o)));
+                setSelectedOrder((prev) => (prev && prev._id === order._id ? { ...prev, ...updatedOrder } : prev));
+            }
+
+            toast.success('Marked: support team contacted customer.');
+        } catch (error) {
+            console.error('Failed to mark support confirmation:', error);
+            toast.error(error?.response?.data?.error || 'Failed to mark support confirmation');
+        } finally {
+            setConfirmingSupportOrderId('');
+        }
+    };
+
     const fetchOrders = async () => {
         try {
             const token = await getToken();
@@ -2460,6 +2503,7 @@ export default function StoreOrders() {
                                 <th className="px-4 py-3">Payment</th>
                                 <th className="px-4 py-3">Status</th>
                                 <th className="px-4 py-3">Latest Update</th>
+                                <th className="px-4 py-3">Support</th>
                                 <th className="px-4 py-3">Tracking</th>
                                 <th className="px-4 py-3">Exp. Delivery</th>
                                 <th className="px-4 py-3">Order Date</th>
@@ -2470,6 +2514,16 @@ export default function StoreOrders() {
                                                                 const awbPendingDownload = hasAwbPendingDownload(order);
                                                                 const awbReferenceMissing = hasGeneratedAwbMissingReference(order);
                                                                 const awbQueuedWithoutReference = hasAwbQueuedWithoutReference(order);
+                                                                const supportConfirmed = Boolean(order?.supportConfirmation?.confirmed);
+                                                                const supportConfirmedAt = order?.supportConfirmation?.confirmedAt
+                                                                    ? new Date(order.supportConfirmation.confirmedAt).toLocaleString('en-IN', {
+                                                                        day: '2-digit',
+                                                                        month: 'short',
+                                                                        hour: '2-digit',
+                                                                        minute: '2-digit',
+                                                                        hour12: false,
+                                                                    })
+                                                                    : '';
                                                                 // Show 'Yes' in Need to Pick if pickup is scheduled (from Delhivery events) and not yet picked up or delivered/cancelled
                                                                 let needToPick = false;
                                                                 let latestTrackingStatus = '';
@@ -2678,16 +2732,48 @@ export default function StoreOrders() {
                                         })()}
                                     </td>
                                     <td className="px-4 py-3">
-                                        {latestTrackingStatus ? (
-                                            <div className="flex flex-col gap-0.5">
-                                                {latestTrackingTime && (
-                                                    <span className="text-[11px] text-slate-500">{latestTrackingTime}</span>
-                                                )}
-                                                <span className="text-xs font-semibold text-orange-600">{latestTrackingStatus}</span>
-                                            </div>
-                                        ) : needToPick ? (
-                                            <span className="text-xs font-bold text-orange-600">Yes</span>
-                                        ) : ''}
+                                        <div className="flex flex-col gap-1">
+                                            {latestTrackingStatus ? (
+                                                <>
+                                                    {latestTrackingTime && (
+                                                        <span className="text-[11px] text-slate-500">{latestTrackingTime}</span>
+                                                    )}
+                                                    <span className="text-xs font-semibold text-orange-600">{latestTrackingStatus}</span>
+                                                </>
+                                            ) : needToPick ? (
+                                                <span className="text-xs font-bold text-orange-600">Yes</span>
+                                            ) : (
+                                                <span className="text-xs text-slate-400">-</span>
+                                            )}
+                                            {supportConfirmed && (
+                                                <span className="text-[10px] px-2 py-1 rounded-full bg-emerald-100 text-emerald-700 font-semibold w-fit">
+                                                    Support Confirmed
+                                                </span>
+                                            )}
+                                            {supportConfirmed && supportConfirmedAt && (
+                                                <span className="text-[11px] text-emerald-700">{supportConfirmedAt}</span>
+                                            )}
+                                        </div>
+                                    </td>
+                                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                                        {supportConfirmed ? (
+                                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700">
+                                                Confirmed
+                                            </span>
+                                        ) : (
+                                            <button
+                                                type="button"
+                                                onClick={() => markSupportConfirmed(order)}
+                                                disabled={confirmingSupportOrderId === order._id}
+                                                className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition ${
+                                                    confirmingSupportOrderId === order._id
+                                                        ? 'bg-slate-200 text-slate-500 cursor-wait'
+                                                        : 'bg-sky-100 text-sky-700 hover:bg-sky-200'
+                                                }`}
+                                            >
+                                                {confirmingSupportOrderId === order._id ? 'Saving...' : 'Confirm Call'}
+                                            </button>
+                                        )}
                                     </td>
                                     <td className="px-4 py-3">
                                         {order.trackingId ? (
